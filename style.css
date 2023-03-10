@@ -1,0 +1,11 @@
+html, body {
+   margin: 0;
+   padding: 0;
+}
+body {
+   position:absolute;
+   touch-action: none;
+}
+canvas {
+   display: block;
+}
