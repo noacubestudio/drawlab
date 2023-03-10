@@ -38,6 +38,7 @@ let penY;
 let penStartX;
 let penStartY;
 let penDown = false;
+let penAngle = undefined;
 let fingersDown = 0;
 
 // touch control state
@@ -79,8 +80,8 @@ function handleTouchEnd(event) {
   updateInput(event);
   draw();
 }
-function copyTouch({identifier, clientX, clientY, force}) {
-  return {identifier, clientX, clientY, force};
+function copyTouch({identifier, clientX, clientY, force, touchType, azimuthAngle}) {
+  return {identifier, clientX, clientY, force, touchType, azimuthAngle};
 }
 
 function ongoingTouchIndexById(idToFind) {
@@ -124,15 +125,16 @@ function updateInput(event) {
     } 
   } else {
     // find pencil and count other touches
-    // assuming apple pencil, fingers have a force of 0.
+    // assuming apple pencil, using touchType property
     ongoingTouches.forEach((touch) => {
-      if (touch.force === 0) {
+      if (touch.touchType !== "stylus") {
         fingersDown++;
       } else {
         // must be Pencil
         penX = touch.clientX;
         penY = touch.clientY;
         penDown = true;
+        penAngle = touch.azimuthAngle;
       }
     })
   }
@@ -237,7 +239,7 @@ function setup() {
 
   // Create a graphics buffer for the painting
   bufferGraphics = createGraphics(width, height);
-  if (width > 3000) {
+  if ((width * displayDensity()) > 3000) {
     bufferGraphics.pixelDensity(1);
   }
   bufferGraphics.background(okhex(bgLuminance, bgChroma, bgHue));
@@ -295,7 +297,7 @@ function draw() {
     bufferGraphics.noStroke();
 
     //draw brushstroke
-    drawStamp(bufferGraphics, penX, penY);
+    drawStamp(bufferGraphics, penX, penY, penAngle);
      
   } else { // MENU OPENED
 
@@ -348,9 +350,22 @@ function draw() {
   image(uiGraphics, 0, 0);
 }
 
-function drawStamp(buffer, x, y) {
+function drawStamp(buffer, x, y, angle) {
   const easedSize = easeInCirc(brushSize, 4, 600);
-  buffer.square(x - easedSize / 2, y - easedSize / 2, easedSize, easedSize / 4);
+  buffer.push();
+  buffer.translate(x, y);
+  buffer.rotate(-HALF_PI);
+
+  let stampW = easedSize;
+  let stampH = easedSize;
+
+  // brush shape
+  if (angle !== undefined) {
+    buffer.rotate(angle);
+    stampW = easedSize * 0.7;
+  }
+  buffer.rect(- stampW/2, - stampH/2, stampW, stampH, easedSize / 4);
+  buffer.pop();
 }
 
 function updateUI() {
@@ -373,16 +388,17 @@ function updateUI() {
     // uiGraphics.text("Can decrease:" + fingerState.canDecreaseCount + " Peak:" + fingerState.peakCount, 20, 50);
     // uiGraphics.text("startX " + penStartX + " startY " + penStartY, 20, 70);
     // // wip logging text
-    // ongoingTouches.forEach((touch, index) => {
-    //   if (touch !== undefined) {
-    //     uiGraphics.text(
-    //       touch.clientX + " " + touch.clientY + 
-    //       " force:" + touch.force + 
-    //       " id:" + touch.identifier, 
-    //       20, 90 + index * 20
-    //     );
-    //   }
-    // });
+    ongoingTouches.forEach((touch, index) => {
+      if (touch !== undefined) {
+        // uiGraphics.text(
+        //   touch.clientX + " " + touch.clientY + 
+        //   " force:" + touch.force + 
+        //   " id:" + touch.identifier, 
+        //   20, 90 + index * 20
+        // );
+        uiGraphics.text(touch.touchType + " " + touch.azimuthAngle ,20, 90 + index * 20);
+      }
+    });
   }
 
   // bottom left text
