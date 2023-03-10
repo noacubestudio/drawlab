@@ -287,18 +287,10 @@ function draw() {
 
   // DRAWING
   if (inputMode() === "draw" && penDown) {
-    // one color variation for each stamp instance
-    const brushHex = okhex(
-      brushLuminance,
-      brushChroma,
-      brushHue + random(-easedHueVar(), easedHueVar())
-    );
-    bufferGraphics.fill(brushHex);
-    bufferGraphics.noStroke();
 
-    //draw brushstroke
-    drawStamp(bufferGraphics, penX, penY, penAngle);
-     
+    const easedSize = easeInCirc(brushSize, 4, 600);
+    drawBrushstroke(bufferGraphics, penX, penY, easedSize, penAngle);
+
   } else { // MENU OPENED
 
     const penMode = (penStartX !== undefined && penStartY !== undefined)
@@ -350,21 +342,33 @@ function draw() {
   image(uiGraphics, 0, 0);
 }
 
-function drawStamp(buffer, x, y, angle) {
-  const easedSize = easeInCirc(brushSize, 4, 600);
+function drawBrushstroke(buffer, x, y, size, angle) {
+  // one color variation for each stamp instance
+  const brushHex = okhex(
+    brushLuminance,
+    brushChroma,
+    brushHue + random(-easedHueVar(), easedHueVar())
+  );
+  buffer.fill(brushHex);
+  buffer.noStroke();
+
+  drawStamp(buffer, x, y, size, angle);
+}
+
+function drawStamp(buffer, x, y, size, angle) {
   buffer.push();
   buffer.translate(x, y);
   buffer.rotate(-HALF_PI);
 
-  let stampW = easedSize;
-  let stampH = easedSize;
+  let stampW = size;
+  let stampH = size;
 
   // brush shape
   if (angle !== undefined) {
     buffer.rotate(angle);
-    stampW = easedSize * 0.7;
+    stampW = size * 0.7;
   }
-  buffer.rect(- stampW/2, - stampH/2, stampW, stampH, easedSize / 4);
+  buffer.rect(- stampW/2, - stampH/2, stampW, stampH, size / 4);
   buffer.pop();
 }
 
@@ -372,33 +376,41 @@ function updateUI() {
   // Clear the indicator buffer
   uiGraphics.clear();
 
+  // Brush preview
+  const cornerPreviewBrushSize = constrain(easeInCirc(brushSize, 4, 600), 8, gadgetRadius/3);
+  for (let x = 30; x < 70; x += 5) {
+    drawBrushstroke(uiGraphics, x, 30, cornerPreviewBrushSize, penAngle);
+  }
+
+  // top left menu text
+
   const visibleTextLum = constrain(bgLuminance + (bgLuminance > 0.5 ? -0.3 : 0.3), 0, 1.0);
   const visHex = okhex(visibleTextLum, min(bgChroma, 0.2), bgHue);
-  
-  // top left menu text
   uiGraphics.fill(visHex);
 
+  const leftW = 100
+  
   if (useMouse) {
-    uiGraphics.text("1:Hue/Hue Noise  2:Luminance/ Chroma  3:Size", 20, 30);
-    uiGraphics.text("C:Clear with color", 20, 50);
+    uiGraphics.text("1:Hue/Hue Noise  2:Luminance/ Chroma  3:Size", leftW, 30);
+    uiGraphics.text("C:Clear with color", leftW, 50);
   } else {
-    uiGraphics.text("Tap: HUE/VARIATION  •  Double-Tap: LUMINANCE/CHROMA  •  Triple-Tap: SIZE", 20, 30);
-    uiGraphics.text("Use pencil to draw/ edit", 20, 50);
-    // uiGraphics.text("Pencil down:" + penDown + " x" + penX + "y" + penY + " fingers:" + fingersDown, 20, 30);
-    // uiGraphics.text("Can decrease:" + fingerState.canDecreaseCount + " Peak:" + fingerState.peakCount, 20, 50);
-    // uiGraphics.text("startX " + penStartX + " startY " + penStartY, 20, 70);
+    uiGraphics.text("Tap: HUE/VARIATION  •  Double-Tap: LUMINANCE/CHROMA  •  Triple-Tap: SIZE", leftW, 30);
+    uiGraphics.text("Use pencil to draw/ edit", leftW, 50);
+    // uiGraphics.text("Pencil down:" + penDown + " x" + penX + "y" + penY + " fingers:" + fingersDown, leftW, 30);
+    // uiGraphics.text("Can decrease:" + fingerState.canDecreaseCount + " Peak:" + fingerState.peakCount, leftW, 50);
+    // uiGraphics.text("startX " + penStartX + " startY " + penStartY, leftW, 70);
     // // wip logging text
-    ongoingTouches.forEach((touch, index) => {
-      if (touch !== undefined) {
-        // uiGraphics.text(
-        //   touch.clientX + " " + touch.clientY + 
-        //   " force:" + touch.force + 
-        //   " id:" + touch.identifier, 
-        //   20, 90 + index * 20
-        // );
-        uiGraphics.text(touch.touchType + " " + touch.azimuthAngle ,20, 90 + index * 20);
-      }
-    });
+    // ongoingTouches.forEach((touch, index) => {
+    //   if (touch !== undefined) {
+    //     uiGraphics.text(
+    //       touch.clientX + " " + touch.clientY + 
+    //       " force:" + touch.force + 
+    //       " id:" + touch.identifier, 
+    //       leftW, 90 + index * 20
+    //     );
+    //     uiGraphics.text(touch.touchType + " " + touch.azimuthAngle ,leftW, 90 + index * 20);
+    //   }
+    // });
   }
 
   // bottom left text
@@ -429,10 +441,9 @@ function updateUI() {
   uiGraphics.fill(brushHex);
 
   // With color menus open, show the current color as a circle made out of arcs showing the hue variation
-  function drawEditedColor() {
+  function drawEditedColor(size) {
     uiGraphics.fill(brushHex);
-    const easedSize = easeInCirc(brushSize, 4, 600);
-    uiGraphics.ellipse(refX, refY, easedSize);
+    uiGraphics.ellipse(refX, refY, size);
 
     const varSegments = 32;
     for (let i = 0; i < varSegments; i++) {
@@ -444,7 +455,7 @@ function updateUI() {
         brushHue + varStrengths[i] * easedHueVar()
       );
       uiGraphics.fill(varHex);
-      uiGraphics.arc(refX, refY, easedSize, easedSize, start, stop);
+      uiGraphics.arc(refX, refY, size, size, start, stop);
     }
   }
 
@@ -453,6 +464,7 @@ function updateUI() {
   if (inputMode() === "hue") {
 
     // draw hue circle
+    const hueLineWidth = 6; // same as stroke width
 
     // Compute circle center position from reference
     const startAngle = TWO_PI * (brushHue / 360) - HALF_PI;
@@ -467,11 +479,15 @@ function updateUI() {
 
     // Draw hue circle around center
     uiGraphics.stroke(brushHex);
-    drawHueCircle(createVector(centerX, centerY), gadgetRadius, 36);
+    const outerLuminance = (brushLuminance > 0.5) ? brushLuminance - 0.3 : brushLuminance + 0.3;
+    drawHueCircle(createVector(centerX, centerY), gadgetRadius+hueLineWidth/2, 36, outerLuminance, 0.4);
+    drawHueCircle(createVector(centerX, centerY), gadgetRadius, 36, brushLuminance, brushChroma);
     uiGraphics.noStroke();
 
     // Show color at reference position
-    drawEditedColor();
+    const currentColorSize = constrain(easeInCirc(brushSize, 4, 600), 8, gadgetRadius/3);
+    drawEditedColor(currentColorSize);
+    drawCrosshair(currentColorSize, refX, refY);
 
   } else if (inputMode() === "lc") {
 
@@ -516,7 +532,9 @@ function updateUI() {
     uiGraphics.pop();
 
     // Show color at reference position
-    drawEditedColor();
+    const currentColorSize = constrain(easeInCirc(brushSize, 4, 600), 8, gadgetRadius/3);
+    drawEditedColor(currentColorSize);
+    drawCrosshair(currentColorSize, refX, refY);
 
   } else if (inputMode() === "size") {
 
@@ -529,16 +547,33 @@ function updateUI() {
     uiGraphics.ellipse(refX, lineTranslateY + gadgetRadius, 10);
     uiGraphics.ellipse(refX, lineTranslateY - gadgetRadius, 20);
 
-    uiGraphics.fill(visHex);
-    drawStamp(uiGraphics, refX, refY);
-    // uiGraphics.stroke(visHex);
-    // uiGraphics.lin
+    uiGraphics.fill(brushHex);
+    const easedSize = easeInCirc(brushSize, 4, 600);
+    drawStamp(uiGraphics, refX, refY, easedSize, undefined);
+    drawCrosshair(easedSize, refX, refY);
 
   } else if (visited && useMouse) {
 
     // draw at the pen position
-    drawStamp(uiGraphics, penX, penY);
+    const easedSize = easeInCirc(brushSize, 4, 600);
+    drawStamp(uiGraphics, penX, penY, easedSize, penAngle);
   }
+}
+
+function drawCrosshair(size, x, y) {
+  // draw the crosshair
+  uiGraphics.strokeWeight(2);
+  const outerLuminance = (brushLuminance > 0.5) ? 0.0 : 1.0;
+  uiGraphics.stroke(okhex(outerLuminance, 0.0, 0));
+
+  uiGraphics.line(x, y - size*0.5, x, y - size*0.5 - 6);
+  uiGraphics.line(x, y + size*0.5, x, y + size*0.5 + 6);
+  uiGraphics.line(x - size*0.5, y, x - size*0.5 - 6, y);
+  uiGraphics.line(x + size*0.5, y, x + size*0.5 + 6, y);
+
+  // reset
+  uiGraphics.strokeWeight(6);
+  uiGraphics.noStroke();
 }
 
 
@@ -569,12 +604,12 @@ function drawGradientLine(xStart, yStart, xEnd, yEnd, startArr, endArr) {
   }
 }
 
-function drawHueCircle(center, radius, numSegments) {
+function drawHueCircle(center, radius, numSegments, luminance, chroma) {
   let segmentAngle = TWO_PI / numSegments; // angle of each segment
 
   for (let i = 0; i < numSegments; i++) {
     let cHue = map(i, 0, numSegments, 0, 360); // map segment index to hue value
-    let brushHex = okhex(brushLuminance, brushChroma, cHue);
+    let brushHex = okhex(luminance, chroma, cHue);
     uiGraphics.stroke(brushHex); // set stroke color based on hue
     let startAngle = i * segmentAngle - HALF_PI; // starting angle of segment
     let endAngle = startAngle + segmentAngle; // ending angle of segment
@@ -597,10 +632,7 @@ function easeInCirc(x, from, to) {
   if (from === undefined) {
     return 1 - Math.sqrt(1 - Math.pow(x, 2));
   }
-  return (
-    (1 - Math.sqrt(1 - Math.pow((x - from) / (to - from), 2))) * (to - from) +
-    from
-  );
+  return ((1 - Math.sqrt(1 - Math.pow((x - from) / (to - from), 2))) * (to - from) +from);
 }
 
 function easeOutCubic(x) {
