@@ -28,6 +28,15 @@ let brushSize = 200;
 let brushTool = "Stamp Tool"
 let texture = "Rounded"
 
+// menu
+let toolPresets = [
+  {brush: "Stamp Tool", texture: "Rounded", menuName: "Rounded"},
+  {brush: "Stamp Tool", texture: "Rake", menuName: "Rake"},
+  {brush: "Line Tool", texture: undefined, menuName: "Line"},
+  {brush: "Fan Line Tool", texture: undefined, menuName: "Line F"},
+];
+let toolMenuOpened = false;
+
 // save 128 random 0-1 values here for consistent noise that stays between redraws
 let varStrengths = [];
 
@@ -78,7 +87,6 @@ function setup() {
   uiGraphics = createGraphics(width, height);
   uiGraphics.strokeWeight(6);
   uiGraphics.textSize((width < height) ? 13 : 16);
-  uiGraphics.textStyle(BOLD);
   uiGraphics.textFont("monospace");
 
   // new random noise
@@ -169,6 +177,24 @@ function mouseReleased(event) {
 }
 
 function updateInput(event) {
+
+  // menu first
+  const menuW = 100;
+  const menuH = 60 + ((toolMenuOpened) ? 60 * toolPresets.length : 0);
+  
+  function inMenu(x, y) {
+    if (x < menuW && y < menuH) {
+      const spot = Math.floor(y/60) - 1;
+      if (spot >= 0) {
+        brushTool = toolPresets[spot].brush;
+        texture = toolPresets[spot].texture;
+      } else {
+        toolMenuOpened = !toolMenuOpened;
+      }
+      return true;
+    }
+  }
+
   // update touches/mouse
   wasDown = penDown;
   fingersDown = 0;
@@ -176,8 +202,10 @@ function updateInput(event) {
 
   // first get the touches/mouse position
   if (ongoingTouches.length === 0 && mouseX !== undefined && mouseY !== undefined && useMouse) {
+    if (inMenu(mouseX, mouseY)) return;
     penX = mouseX;
     penY = mouseY;
+    
     if (event.type === "mousedown") {
       penDown = true;
     } else if (event.type === "mouseup") {
@@ -188,6 +216,7 @@ function updateInput(event) {
     // assuming apple pencil, using touchType property
     let containedPen = false;
     ongoingTouches.forEach((touch) => {
+      if (inMenu(touch.clientX, touch.clientY)) return;
       if (touch.touchType !== "stylus") {
         fingersDown++;
       } else {
@@ -329,7 +358,7 @@ function draw() {
     const easedSize = easeInCirc(brushSize, 4, 600);
 
     if (brushTool === "Stamp Tool" && penDown) {
-      drawBrushstroke(bufferGraphics, penX, penY, easedSize, penAngle, penPressure);
+      drawBrushstroke(bufferGraphics, penX, penY, easedSize, penAngle, penPressure, texture);
     } else if (brushTool === "Fan Line Tool" && penDown) {
       drawWithLine(bufferGraphics, penStartX, penStartY, penX, penY, easedSize);
     } else if (brushTool === "Line Tool" && wasDown && !penDown) {
@@ -387,16 +416,16 @@ function draw() {
   image(uiGraphics, 0, 0);
 }
 
-function drawBrushstroke(buffer, x, y, size, angle, pressure) {
+function drawBrushstroke(buffer, x, y, size, angle, pressure, texture) {
   // one color variation for each stamp instance
   const brushHex = brushHexWithHueVarSeed(x * y);
   buffer.fill(brushHex);
   buffer.noStroke();
 
-  drawStamp(buffer, x, y, size, angle, pressure);
+  drawStamp(buffer, x, y, size, angle, pressure, texture);
 }
 
-function drawStamp(buffer, x, y, size, angle, pressure) {
+function drawStamp(buffer, x, y, size, angle, pressure, texture) {
   buffer.push();
   buffer.translate(x, y);
   buffer.rotate(-HALF_PI);
@@ -485,38 +514,65 @@ function updateUI() {
   }
 
   // Corner brush preview
+  const visibleTextLum = constrain(bgLuminance + (bgLuminance > 0.5 ? -0.3 : 0.3), 0, 1.0);
+  const visHex = okhex(visibleTextLum, min(bgChroma, 0.2), bgHue);
+  
   const cornerPreviewBrushSize = constrain(easedSize, 8, gadgetRadius/3);
-  if (brushTool === "Stamp Tool") {
-    for (let x = 30; x < 70; x += 5) {
-      drawBrushstroke(uiGraphics, x, 30, cornerPreviewBrushSize, penAngle, penPressure);
-    }
-  } else {
-    //broken color somehow,see the line function
-    for (let a = 0; a < 12; a++) {
-      uiGraphics.push();
-      uiGraphics.translate(30, 30);
-      drawWithLine(uiGraphics, 40-40*(a/12), a*3.5, 0, 0, cornerPreviewBrushSize);
-      uiGraphics.pop();
-    }
+  displayTool(brushTool, texture, 0)
+  if (toolMenuOpened) {
+    toolPresets.forEach((tool, index) => {
+      displayTool(tool.brush, tool.texture, index+1, tool.menuName);
+    });
   }
 
+  function displayTool(brushTool, texture, spot, menuName) {
 
+    uiGraphics.push();
+    uiGraphics.translate(30, 30 + 60*spot);
+
+    if (brushTool === "Stamp Tool") {
+      for (let x = 0; x <= 40; x += 5) {
+        drawBrushstroke(uiGraphics, x, 0, cornerPreviewBrushSize, penAngle, penPressure, texture);
+      }
+    } else if (brushTool === "Line Tool") {
+      drawWithLine(uiGraphics, 0, 0, 40, 0, cornerPreviewBrushSize);
+    } else {
+      //broken color somehow,see the line function
+      for (let a = 0; a < 12; a++) {
+        drawWithLine(uiGraphics, 40-40*(a/12), a*3.5, 0, 0, cornerPreviewBrushSize);
+      }
+    }
+
+    uiGraphics.pop();
+
+    if (spot > 0) {
+      uiGraphics.fill(visHex);
+      uiGraphics.textAlign(CENTER, CENTER);
+      uiGraphics.text(menuName, 0, 0 + 60*spot, 100, 60);
+    }
+    uiGraphics.textAlign(LEFT);
+  }
+
+  // top left menu
+  uiGraphics.stroke(visHex);
+  uiGraphics.strokeWeight(1);
+  uiGraphics.line(0, 60, 100, 60)
+  uiGraphics.noStroke();
+  uiGraphics.strokeWeight(6);
 
   // top left menu text
 
-  const visibleTextLum = constrain(bgLuminance + (bgLuminance > 0.5 ? -0.3 : 0.3), 0, 1.0);
-  const visHex = okhex(visibleTextLum, min(bgChroma, 0.2), bgHue);
+
   uiGraphics.fill(visHex);
 
-  const leftW = 100
+  const leftW = 110
   
   if (useMouse) {
-    uiGraphics.text("1:Luminance/ Chroma  2:Hue/Hue Noise  3:Size", leftW, 30);
-    uiGraphics.text("C:Clear with color", leftW, 50);
+    uiGraphics.text("1:Luminance/ Chroma  2:Hue/Hue Noise  3:Size", leftW, 25);
+    uiGraphics.text("C:Clear with color", leftW, 45);
     //uiGraphics.text(penDown + "startX " + penStartX + " startY " + penStartY, leftW, 70);
   } else {
-    uiGraphics.text("Tap 1-3 Fingers, Stylus to draw", leftW, 30);
-    uiGraphics.text(brushTool + " (" + texture + " Texture)" + penPressure, leftW, 50);
+    uiGraphics.text(brushTool + " (" + texture + " Texture)", leftW, 30);
     // uiGraphics.text(wiplog, leftW, 70);
     // uiGraphics.text("Pencil down:" + penDown + " x" + penX + "y" + penY + " fingers:" + fingersDown, leftW, 30);
     // uiGraphics.text("Can decrease:" + fingerState.canDecreaseCount + " Peak:" + fingerState.peakCount, leftW, 70);
@@ -671,14 +727,14 @@ function updateUI() {
 
     uiGraphics.fill(brushHex);
     const easedSize = easeInCirc(brushSize, 4, 600);
-    drawStamp(uiGraphics, refX, refY, easedSize, undefined);
+    drawStamp(uiGraphics, refX, refY, easedSize, penAngle, penPressure, texture);
     drawCrosshair(easedSize, refX, refY);
 
   } else if (visited && useMouse && !penDown) {
 
     // draw hover stamp at the pen position
     const easedSize = easeInCirc(brushSize, 4, 600);
-    drawStamp(uiGraphics, penX, penY, easedSize, penAngle, penPressure);
+    drawStamp(uiGraphics, penX, penY, easedSize, penAngle, penPressure, texture);
   }
 }
 
