@@ -624,9 +624,9 @@ function updateUI() {
   uiGraphics.fill(brushHex);
 
   // With color menus open, show the current color as a circle made out of arcs showing the hue variation
-  function drawEditedColor(size) {
+  function drawEditedColor(size, x, y) {
     uiGraphics.fill(brushHex);
-    uiGraphics.ellipse(refX, refY, size);
+    uiGraphics.ellipse(x, y, size);
 
     const varSegments = 32;
     for (let i = 0; i < varSegments; i++) {
@@ -638,11 +638,14 @@ function updateUI() {
         brushHue + varStrengths[i] * easedHueVar()
       );
       uiGraphics.fill(varHex);
-      uiGraphics.arc(refX, refY, size, size, start, stop);
+      uiGraphics.arc(x, y, size, size, start, stop);
     }
   }
 
   // draw the input menus
+
+  const ankerX = constrain(refX, gadgetRadius*2, width - gadgetRadius*2);
+  const ankerY = constrain(refY, gadgetRadius*2, height - gadgetRadius*2);
 
   if (inputMode() === "hue") {
 
@@ -652,8 +655,8 @@ function updateUI() {
     // Compute circle center position from reference
     const startAngle = TWO_PI * (brushHue / 360) - HALF_PI;
     const startRadius = constrain(gadgetRadius * (1 - brushVar / 360), 0, gadgetRadius);
-    const centerX = refX - cos(startAngle) * startRadius;
-    const centerY = refY - sin(startAngle) * startRadius;
+    const centerX = ankerX - cos(startAngle) * startRadius;
+    const centerY = ankerY - sin(startAngle) * startRadius;
 
     // Draw center
     uiGraphics.fill(visHex);
@@ -669,14 +672,14 @@ function updateUI() {
 
     // Show color at reference position
     const currentColorSize = constrain(easeInCirc(brushSize, 4, 600), 8, gadgetRadius/3);
-    drawEditedColor(currentColorSize);
-    drawCrosshair(currentColorSize, refX, refY);
+    drawEditedColor(currentColorSize, ankerX, ankerY);
+    drawCrosshair(currentColorSize, ankerX, ankerY);
 
   } else if (inputMode() === "lc") {
 
     const radius = gadgetRadius;
-    const boxBaseX = refX + radius;
-    const boxBaseY = refY + radius;
+    const boxBaseX = ankerX + radius;
+    const boxBaseY = ankerY + radius;
 
     const boxAddX = radius * 2 * (brushChroma * 2);
     const boxAddY = radius * 2 * (1 - brushLuminance);
@@ -716,24 +719,24 @@ function updateUI() {
 
     // Show color at reference position
     const currentColorSize = constrain(easeInCirc(brushSize, 4, 600), 8, gadgetRadius/3);
-    drawEditedColor(currentColorSize);
-    drawCrosshair(currentColorSize, refX, refY);
+    drawEditedColor(currentColorSize, ankerX, ankerY);
+    drawCrosshair(currentColorSize, ankerX, ankerY);
 
   } else if (inputMode() === "size") {
 
     // scale
-    const lineBaseY = refY - gadgetRadius;
+    const lineBaseY = ankerY - gadgetRadius;
     const lineAddY = gadgetRadius * 2 * map(brushSize, 4, 600, 0, 1);
     const lineTranslateY = lineBaseY + lineAddY;
 
     uiGraphics.fill(visHex);
-    uiGraphics.ellipse(refX, lineTranslateY + gadgetRadius, 10);
-    uiGraphics.ellipse(refX, lineTranslateY - gadgetRadius, 20);
+    uiGraphics.ellipse(ankerX, lineTranslateY + gadgetRadius, 10);
+    uiGraphics.ellipse(ankerX, lineTranslateY - gadgetRadius, 20);
 
     uiGraphics.fill(brushHex);
     const easedSize = easeInCirc(brushSize, 4, 600);
-    drawStamp(uiGraphics, refX, refY, easedSize, penAngle, penPressure, texture);
-    drawCrosshair(easedSize, refX, refY);
+    drawStamp(uiGraphics, ankerX, ankerY, easedSize, penAngle, penPressure, texture);
+    drawCrosshair(easedSize, ankerX, ankerY);
 
   } else if (visited && useMouse && !penDown) {
 
