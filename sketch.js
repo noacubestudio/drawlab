@@ -26,8 +26,9 @@ let brushChroma = 0.2;
 let brushLuminance = 0.7;
 let brushSize = 200;
 let brushTool = "Stamp Tool"
+let texture = "Rounded"
 
-// save 64 random 0-1 values here for consistent noise that stays between redraws
+// save 128 random 0-1 values here for consistent noise that stays between redraws
 let varStrengths = [];
 
 // control
@@ -38,11 +39,10 @@ let penX;
 let penY;
 let penStartX;
 let penStartY;
-let penEndX;
-let penEndY;
 let wasDown = false;
 let penDown = false;
 let penAngle = undefined;
+let penPressure = undefined;
 let fingersDown = 0;
 let wiplog = "";
 
@@ -80,6 +80,10 @@ function setup() {
   uiGraphics.textSize((width < height) ? 13 : 16);
   uiGraphics.textStyle(BOLD);
   uiGraphics.textFont("monospace");
+
+  // new random noise
+  varStrengths = Array.from({ length: 128 }, () => random());
+  
   updateUI();
   draw();
 }
@@ -192,6 +196,7 @@ function updateInput(event) {
         penY = touch.clientY;
         containedPen = true;
         penAngle = touch.azimuthAngle;
+        penPressure = touch.force;
       }
     });
     penDown = containedPen;
@@ -293,6 +298,8 @@ function inputMode() {
 
 function draw() {
 
+  if (uiGraphics === undefined) return;
+
   // update the reference position
   if (inputMode() === "lc" || inputMode() === "hue" || inputMode() === "size") { //keys '1', '2', '3'
     // starting position
@@ -306,10 +313,6 @@ function draw() {
     if (refLuminance === undefined) refLuminance = brushLuminance;
     if (refSize === undefined) refSize = brushSize;
     if (refVar === undefined) refVar = brushVar;
-    // new random noise
-    if (varStrengths.length === 0) {
-      varStrengths = Array.from({ length: 64 }, () => random());
-    }
   } else {
     refX = undefined; // WIP WONT NEED THIS, SEE ABOVE
     refY = undefined;
@@ -318,7 +321,6 @@ function draw() {
     refLuminance = undefined;
     refSize = undefined;
     refVar = undefined;
-    varStrengths = [];
   }
 
   // DRAWING
@@ -327,7 +329,7 @@ function draw() {
     const easedSize = easeInCirc(brushSize, 4, 600);
 
     if (brushTool === "Stamp Tool" && penDown) {
-      drawBrushstroke(bufferGraphics, penX, penY, easedSize, penAngle);
+      drawBrushstroke(bufferGraphics, penX, penY, easedSize, penAngle, penPressure);
     } else if (brushTool === "Fan Line Tool" && penDown) {
       drawWithLine(bufferGraphics, penStartX, penStartY, penX, penY, easedSize);
     } else if (brushTool === "Line Tool" && wasDown && !penDown) {
@@ -385,20 +387,16 @@ function draw() {
   image(uiGraphics, 0, 0);
 }
 
-function drawBrushstroke(buffer, x, y, size, angle) {
+function drawBrushstroke(buffer, x, y, size, angle, pressure) {
   // one color variation for each stamp instance
-  const brushHex = okhex(
-    brushLuminance,
-    brushChroma,
-    brushHue + random(-easedHueVar(), easedHueVar())
-  );
+  const brushHex = brushHexWithHueVarSeed(x * y);
   buffer.fill(brushHex);
   buffer.noStroke();
 
-  drawStamp(buffer, x, y, size, angle);
+  drawStamp(buffer, x, y, size, angle, pressure);
 }
 
-function drawStamp(buffer, x, y, size, angle) {
+function drawStamp(buffer, x, y, size, angle, pressure) {
   buffer.push();
   buffer.translate(x, y);
   buffer.rotate(-HALF_PI);
@@ -409,22 +407,51 @@ function drawStamp(buffer, x, y, size, angle) {
   // brush shape
   if (angle !== undefined) {
     buffer.rotate(angle);
-    stampW = size * 0.7;
+  } else {
+    buffer.rotate(HALF_PI);
   }
-  buffer.rect(- stampW/2, - stampH/2, stampW, stampH, size / 4);
+
+  if (texture === "Rounded") {
+    if (angle !== undefined) {
+      stampW = size * 0.7;
+    }
+    buffer.rect(- stampW/2, - stampH/2, stampW, stampH, size / 4);
+  } else if (texture === "Rake") {
+    const circleCount = 4;
+    const gapSize = (pressure !== undefined) ? map(pressure, 0.0, 0.2, 3.0, 0.0, true) : 1.0;
+
+    // calculate the actual sizes
+    const circleSize = stampH / ((circleCount-1)*gapSize + circleCount);
+    buffer.translate(0, -stampH*0.5 + circleSize/2);
+    for (let i = 0; i < circleCount; i++) {
+      const rakeY = i*(circleSize*(1+gapSize));
+      // modify color too
+      const brushHex = brushHexWithHueVarSeed(i + Math.round(angle*6));
+      buffer.fill(brushHex);
+
+      buffer.ellipse(0, rakeY, circleSize);
+    }
+  }
+  
+
   buffer.pop();
+}
+
+function brushHexWithHueVarSeed(seed) {
+  return okhex(
+    brushLuminance,
+    brushChroma,
+    brushHue + varStrengths[seed % varStrengths.length] * easedHueVar()
+  );
 }
 
 function drawWithLine(buffer, xa, ya, xb, yb, size) {
 
   if (xa === undefined || ya === undefined || xb === undefined || yb === undefined) return;
 
-  // one color variation for each stamp instance
-  const brushHex = okhex(
-    brushLuminance,
-    brushChroma,
-    brushHue + random(-easedHueVar(), easedHueVar())
-  );
+  // one color variation for each line instance
+  const brushHex = brushHexWithHueVarSeed(xa * ya);
+
   buffer.stroke(brushHex);
 
   // draw the line rect
@@ -459,9 +486,20 @@ function updateUI() {
 
   // Corner brush preview
   const cornerPreviewBrushSize = constrain(easedSize, 8, gadgetRadius/3);
-  for (let x = 30; x < 70; x += 5) {
-    drawBrushstroke(uiGraphics, x, 30, cornerPreviewBrushSize, penAngle);
+  if (brushTool === "Stamp Tool") {
+    for (let x = 30; x < 70; x += 5) {
+      drawBrushstroke(uiGraphics, x, 30, cornerPreviewBrushSize, penAngle, penPressure);
+    }
+  } else {
+    //broken color somehow,see the line function
+    for (let a = 0; a < 12; a++) {
+      uiGraphics.push();
+      uiGraphics.translate(30, 30);
+      drawWithLine(uiGraphics, 40-40*(a/12), a*3.5, 0, 0, cornerPreviewBrushSize);
+      uiGraphics.pop();
+    }
   }
+
 
 
   // top left menu text
@@ -478,7 +516,7 @@ function updateUI() {
     //uiGraphics.text(penDown + "startX " + penStartX + " startY " + penStartY, leftW, 70);
   } else {
     uiGraphics.text("Tap 1-3 Fingers, Stylus to draw", leftW, 30);
-    uiGraphics.text(brushTool, leftW, 50);
+    uiGraphics.text(brushTool + " (" + texture + " Texture)" + penPressure, leftW, 50);
     // uiGraphics.text(wiplog, leftW, 70);
     // uiGraphics.text("Pencil down:" + penDown + " x" + penX + "y" + penY + " fingers:" + fingersDown, leftW, 30);
     // uiGraphics.text("Can decrease:" + fingerState.canDecreaseCount + " Peak:" + fingerState.peakCount, leftW, 70);
@@ -640,7 +678,7 @@ function updateUI() {
 
     // draw hover stamp at the pen position
     const easedSize = easeInCirc(brushSize, 4, 600);
-    drawStamp(uiGraphics, penX, penY, easedSize, penAngle);
+    drawStamp(uiGraphics, penX, penY, easedSize, penAngle, penPressure);
   }
 }
 
