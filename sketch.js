@@ -301,7 +301,7 @@ function keyPressed() {
       brushLuminance += 0.05;
     }
   } else if (key === "s") {
-    saveCanvas("myCanvas", "png");
+    saveCanvas(bufferGraphics, "drawlab-canvas", "png");
   }
   if (key !== undefined) draw();
 }
@@ -462,7 +462,7 @@ function drawStamp(buffer, x, y, size, angle, pressure, texture) {
     for (let i = 0; i < circleCount; i++) {
       const rakeY = i*(circleSize*(1+gapSize));
       // modify color too
-      const brushHex = brushHexWithHueVarSeed(i + Math.round(angle*6));
+      const brushHex = brushHexWithHueVarSeed(i + Math.round((angle !== undefined) ? angle*6 : 0));
       buffer.fill(brushHex);
 
       buffer.ellipse(0, rakeY, circleSize);
@@ -517,7 +517,7 @@ function updateUI() {
   }
 
   // Corner brush preview
-  const visibleTextLum = constrain(bgLuminance + (bgLuminance > 0.5 ? -0.3 : 0.3), 0, 1.0);
+  const visibleTextLum = constrain(bgLuminance + (bgLuminance > 0.5 ? -0.4 : 0.4), 0, 1.0);
   const visHex = okhex(visibleTextLum, min(bgChroma, 0.2), bgHue);
   const brushHex = okhex(brushLuminance, brushChroma, brushHue);
   const refHex = okhex(refLuminance, refChroma, refHue);
@@ -575,8 +575,7 @@ function updateUI() {
   const leftW = 110
   
   if (useMouse) {
-    uiGraphics.text("1:Luminance/ Chroma  2:Hue/Hue Noise  3:Size", leftW, 25);
-    uiGraphics.text("C:Clear with color", leftW, 45);
+    uiGraphics.text("1/2/3: Color/Size •  C:Clear with color", leftW, 30);
     //uiGraphics.text(penDown + "startX " + penStartX + " startY " + penStartY, leftW, 70);
   } else {
     const textureText = (texture !== undefined) ? " (" + texture + " Texture)" : "";
