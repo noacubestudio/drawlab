@@ -17,6 +17,7 @@ let refVar;
 let refChroma;
 let refLuminance;
 let refSize;
+let gadgetRadius; // based on canvas size
 
 // current brush settings for drawing
 let brushHue = 0;
@@ -24,28 +25,70 @@ let brushVar = 80;
 let brushChroma = 0.2;
 let brushLuminance = 0.7;
 let brushSize = 200;
-let visited = false;
-let gadgetRadius; // based on canvas size
+let brushTool = "Stamp Tool"
 
 // save 64 random 0-1 values here for consistent noise that stays between redraws
 let varStrengths = [];
 
 // control
+let visited = false;
 let useMouse = false;
 let ongoingTouches = []; 
 let penX; 
 let penY;
 let penStartX;
 let penStartY;
+let penEndX;
+let penEndY;
+let wasDown = false;
 let penDown = false;
 let penAngle = undefined;
 let fingersDown = 0;
+let wiplog = "";
 
 // touch control state
 const fingerState = {
   peakCount: 0,
   canDecreaseCount: false
 }
+
+
+function setup() {
+  cnv = createCanvas(windowWidth - 10, windowHeight - 10);
+  cnv.touchStarted(handleTouchStart);
+  cnv.touchMoved(handleTouchMove);
+  cnv.touchEnded(handleTouchEnd);
+  noLoop();
+
+  gadgetRadius = min(width, height) / 8;
+  penX = width/2;
+  penY = height/2;
+  refX = penX;
+  refY = penY;
+
+  // Create a graphics buffer for the painting
+  bufferGraphics = createGraphics(width, height);
+  if ((width * displayDensity()) > 3000) {
+    bufferGraphics.pixelDensity(1);
+  }
+  bufferGraphics.background(okhex(bgLuminance, bgChroma, bgHue));
+  document.body.style.backgroundColor = okhex(bgLuminance*0.9, bgChroma*0.5, bgHue);
+
+  // Create a graphics buffer for the indicator
+  uiGraphics = createGraphics(width, height);
+  uiGraphics.strokeWeight(6);
+  uiGraphics.textSize((width < height) ? 13 : 16);
+  uiGraphics.textStyle(BOLD);
+  uiGraphics.textFont("monospace");
+  updateUI();
+  draw();
+}
+
+function windowResized() {
+  resizeCanvas(windowWidth - 10, windowHeight - 10);
+  draw();
+}
+
 
 function handleTouchStart(event) {
   event.preventDefault();
@@ -95,37 +138,51 @@ function ongoingTouchIndexById(idToFind) {
   return -1; // not found
 }
 
-function mouseClicked() {
+function mousePressed(event) {
   visited = true;
-  updateInput();
-  draw();
+  if (useMouse) {
+    updateInput(event);
+    draw();
+  }
 }
-function mouseMoved() {
+function mouseMoved(event) {
   useMouse = true;
-  updateInput();
+  updateInput(event);
   draw();
 }
-function mouseDragged() {
+function mouseDragged(event) {
   visited = true;
-  updateInput();
-  draw();
+  if (useMouse) {
+    updateInput(event);
+    draw();
+  }
+}
+function mouseReleased(event) {
+  if (useMouse) {
+    updateInput(event);
+    draw();
+  }
 }
 
 function updateInput(event) {
   // update touches/mouse
-  const wasDown = penDown;
-  penDown = false;
+  wasDown = penDown;
   fingersDown = 0;
+  //wiplog += event.type + event.changedTouches[0].identifier + " "
 
-  if (ongoingTouches.length === 0) {
-    if (mouseX !== undefined && mouseY !== undefined && useMouse) {
-      penX = mouseX;
-      penY = mouseY;
-      penDown = (mouseIsPressed && mouseButton === LEFT);
-    } 
+  // first get the touches/mouse position
+  if (ongoingTouches.length === 0 && mouseX !== undefined && mouseY !== undefined && useMouse) {
+    penX = mouseX;
+    penY = mouseY;
+    if (event.type === "mousedown") {
+      penDown = true;
+    } else if (event.type === "mouseup") {
+      penDown = false;
+    }
   } else {
     // find pencil and count other touches
     // assuming apple pencil, using touchType property
+    let containedPen = false;
     ongoingTouches.forEach((touch) => {
       if (touch.touchType !== "stylus") {
         fingersDown++;
@@ -133,30 +190,42 @@ function updateInput(event) {
         // must be Pencil
         penX = touch.clientX;
         penY = touch.clientY;
-        penDown = true;
+        containedPen = true;
         penAngle = touch.azimuthAngle;
       }
-    })
+    });
+    penDown = containedPen;
   }
-  // update finger state
+
+  // update state based on the result
+
   if (event === undefined) return;
 
-  if (event.type === "touchstart" && penDown) {
+  // pen down
+  if ((event.type === "touchstart" || event.type === "mousedown") && penDown) {
     penStartX = penX;
     penStartY = penY;
     return;
   }
 
+  // tap
   if (event.type === "touchstart" && !penDown) {
     if (fingerState.canDecreaseCount) {
       fingerState.peakCount = (fingersDown > fingerState.peakCount) ? fingersDown : 0;
-      fingerState.canDecreaseCount = false;
+      fingerState.canDecreaseCount = false; //false;
     } else {
       fingerState.peakCount = max(fingerState.peakCount, fingersDown);
     }
+    penStartX = undefined;
+    penStartY = undefined;
     return;
   }
+
+  // pen lifted
   if (wasDown && !penDown && fingersDown === 0) {
+    fingerState.peakCount = 0;
+    fingerState.canDecreaseCount = false;
+
     // save the last drawing position as the ref
     // WIP WAS BROKEN LAST TESTING
     // if (fingerState.peakCount === 0) {
@@ -164,12 +233,10 @@ function updateInput(event) {
     //   refY = penY;
     // }
 
-    fingerState.peakCount = 0;
-    fingerState.canDecreaseCount = false;
-    penStartX = undefined;
-    penStartY = undefined;
     return;
   }
+
+  // last finger lifted
   if ((event.type === "touchend" && ongoingTouches.length === 0) || event.type === "touchcancel") {
     // was in a mode
     if (fingerState.peakCount > 0) {
@@ -188,7 +255,7 @@ function keyPressed() {
     bgHue = brushHue;
 
     bufferGraphics.background(okhex(bgLuminance, bgChroma, bgHue));
-    document.body.style.backgroundColor = okhex(bgLuminance, bgChroma, bgHue);
+    document.body.style.backgroundColor = okhex(bgLuminance*0.9, bgChroma*0.5, bgHue);
 
     //fix the current brush color so it's visible
     if (brushLuminance > 0.5) {
@@ -209,50 +276,19 @@ function keyReleased() {
 
 
 function inputMode() {
-  //'1', hue
-  if (keyIsDown(49) || fingerState.peakCount === 1) {
-    return "hue";
-  }
-  //'2', luminance and chroma 
-  if (keyIsDown(50) || fingerState.peakCount === 2) {
+  //'1', luminance and chroma 
+  if (keyIsDown(49) || (fingerState.peakCount === 1 && fingersDown === 0)) {
     return "lc";
   }
+  //'2', hue
+  if (keyIsDown(50) || (fingerState.peakCount === 2 && fingersDown === 0)) {
+    return "hue";
+  }
   //'3', size
-  if (keyIsDown(51) || fingerState.peakCount === 3) {
+  if (keyIsDown(51) || (fingerState.peakCount === 3 && fingersDown === 0)) {
     return "size";
   }
   return "draw";
-}
-
-function setup() {
-  cnv = createCanvas(windowWidth - 10, windowHeight - 10);
-  cnv.touchStarted(handleTouchStart);
-  cnv.touchMoved(handleTouchMove);
-  cnv.touchEnded(handleTouchEnd);
-  noLoop();
-
-  gadgetRadius = min(width, height) / 8;
-  penX = width/2;
-  penY = height/2;
-  refX = penX;
-  refY = penY;
-
-  // Create a graphics buffer for the painting
-  bufferGraphics = createGraphics(width, height);
-  if ((width * displayDensity()) > 3000) {
-    bufferGraphics.pixelDensity(1);
-  }
-  bufferGraphics.background(okhex(bgLuminance, bgChroma, bgHue));
-  document.body.style.backgroundColor = okhex(bgLuminance, bgChroma, bgHue);
-
-  // Create a graphics buffer for the indicator
-  uiGraphics = createGraphics(width, height);
-  uiGraphics.strokeWeight(6);
-  uiGraphics.textSize((width < height) ? 13 : 16);
-  uiGraphics.textStyle(BOLD);
-  uiGraphics.textFont("monospace");
-  updateUI();
-  draw();
 }
 
 function draw() {
@@ -286,14 +322,21 @@ function draw() {
   }
 
   // DRAWING
-  if (inputMode() === "draw" && penDown) {
+  if (inputMode() === "draw") {
 
     const easedSize = easeInCirc(brushSize, 4, 600);
-    drawBrushstroke(bufferGraphics, penX, penY, easedSize, penAngle);
+
+    if (brushTool === "Stamp Tool" && penDown) {
+      drawBrushstroke(bufferGraphics, penX, penY, easedSize, penAngle);
+    } else if (brushTool === "Fan Line Tool" && penDown) {
+      drawWithLine(bufferGraphics, penStartX, penStartY, penX, penY, easedSize);
+    } else if (brushTool === "Line Tool" && wasDown && !penDown) {
+      drawWithLine(bufferGraphics, penStartX, penStartY, penX, penY, easedSize);
+    }
 
   } else { // MENU OPENED
 
-    const penMode = (penStartX !== undefined && penStartY !== undefined)
+    const penMode = (!useMouse && penStartX !== undefined && penStartY !== undefined)
 
     if (inputMode() === "lc") { 
       // Get positions
@@ -372,15 +415,54 @@ function drawStamp(buffer, x, y, size, angle) {
   buffer.pop();
 }
 
+function drawWithLine(buffer, xa, ya, xb, yb, size) {
+
+  if (xa === undefined || ya === undefined || xb === undefined || yb === undefined) return;
+
+  // one color variation for each stamp instance
+  const brushHex = okhex(
+    brushLuminance,
+    brushChroma,
+    brushHue + random(-easedHueVar(), easedHueVar())
+  );
+  buffer.stroke(brushHex);
+
+  // draw the line rect
+  buffer.strokeWeight(size);
+  buffer.line(xa, ya, xb, yb);
+
+  buffer.strokeWeight(6);
+  buffer.noStroke();
+}
+
 function updateUI() {
   // Clear the indicator buffer
   uiGraphics.clear();
 
-  // Brush preview
-  const cornerPreviewBrushSize = constrain(easeInCirc(brushSize, 4, 600), 8, gadgetRadius/3);
+  // Background borders
+  const borderH = height/8;
+  const borderW = width/8;
+  uiGraphics.fill(okhex(bgLuminance*0.9, bgChroma*0.5, bgHue));
+  uiGraphics.rect(0,              0, width, borderH);
+  uiGraphics.rect(0, height-borderH, width, borderH);
+  uiGraphics.rect(            0, 0, borderW, height);
+  uiGraphics.rect(width-borderW, 0, borderW, height);
+
+
+  
+  const easedSize = easeInCirc(brushSize, 4, 600);
+
+  // Unfinished brushstroke preview
+  if (brushTool === "Line Tool" && penDown) {
+    drawWithLine(uiGraphics, penStartX, penStartY, penX, penY, easedSize);
+  }
+
+  // Corner brush preview
+  const cornerPreviewBrushSize = constrain(easedSize, 8, gadgetRadius/3);
   for (let x = 30; x < 70; x += 5) {
     drawBrushstroke(uiGraphics, x, 30, cornerPreviewBrushSize, penAngle);
   }
+
 
   // top left menu text
 
@@ -391,13 +473,15 @@ function updateUI() {
   const leftW = 100
   
   if (useMouse) {
-    uiGraphics.text("1:Hue/Hue Noise  2:Luminance/ Chroma  3:Size", leftW, 30);
+    uiGraphics.text("1:Luminance/ Chroma  2:Hue/Hue Noise  3:Size", leftW, 30);
     uiGraphics.text("C:Clear with color", leftW, 50);
+    //uiGraphics.text(penDown + "startX " + penStartX + " startY " + penStartY, leftW, 70);
   } else {
-    uiGraphics.text("Tap: HUE/VARIATION  •  Double-Tap: LUMINANCE/CHROMA  •  Triple-Tap: SIZE", leftW, 30);
-    uiGraphics.text("Use pencil to draw/ edit", leftW, 50);
+    uiGraphics.text("Tap 1-3 Fingers, Stylus to draw", leftW, 30);
+    uiGraphics.text(brushTool, leftW, 50);
+    // uiGraphics.text(wiplog, leftW, 70);
     // uiGraphics.text("Pencil down:" + penDown + " x" + penX + "y" + penY + " fingers:" + fingersDown, leftW, 30);
-    // uiGraphics.text("Can decrease:" + fingerState.canDecreaseCount + " Peak:" + fingerState.peakCount, leftW, 50);
+    // uiGraphics.text("Can decrease:" + fingerState.canDecreaseCount + " Peak:" + fingerState.peakCount, leftW, 70);
     // uiGraphics.text("startX " + penStartX + " startY " + penStartY, leftW, 70);
     // // wip logging text
     // ongoingTouches.forEach((touch, index) => {
@@ -408,7 +492,7 @@ function updateUI() {
     //       " id:" + touch.identifier, 
     //       leftW, 90 + index * 20
     //     );
-    //     uiGraphics.text(touch.touchType + " " + touch.azimuthAngle ,leftW, 90 + index * 20);
+    //     //uiGraphics.text(touch.touchType + " " + touch.azimuthAngle ,leftW, 90 + index * 20);
     //   }
     // });
   }
@@ -552,9 +636,9 @@ function updateUI() {
     drawStamp(uiGraphics, refX, refY, easedSize, undefined);
     drawCrosshair(easedSize, refX, refY);
 
-  } else if (visited && useMouse) {
+  } else if (visited && useMouse && !penDown) {
 
-    // draw at the pen position
+    // draw hover stamp at the pen position
     const easedSize = easeInCirc(brushSize, 4, 600);
     drawStamp(uiGraphics, penX, penY, easedSize, penAngle);
   }
