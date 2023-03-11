@@ -88,6 +88,7 @@ function setup() {
   uiGraphics.strokeWeight(6);
   uiGraphics.textSize((width < height) ? 13 : 16);
   uiGraphics.textFont("monospace");
+  uiGraphics.textAlign(LEFT, CENTER);
 
   // new random noise
   varStrengths = Array.from({ length: 128 }, () => random());
@@ -184,12 +185,14 @@ function updateInput(event) {
   
   function inMenu(x, y) {
     if (x < menuW && y < menuH) {
-      const spot = Math.floor(y/60) - 1;
-      if (spot >= 0) {
-        brushTool = toolPresets[spot].brush;
-        texture = toolPresets[spot].texture;
-      } else {
-        toolMenuOpened = !toolMenuOpened;
+      if (event.type === "mousedown" || event.type === "touchstart") {
+        const spot = Math.floor(y/60) - 1;
+        if (spot >= 0) {
+          brushTool = toolPresets[spot].brush;
+          texture = toolPresets[spot].texture;
+        } else {
+          toolMenuOpened = !toolMenuOpened;
+        }
       }
       return true;
     }
@@ -360,8 +363,12 @@ function draw() {
     if (brushTool === "Stamp Tool" && penDown) {
       drawBrushstroke(bufferGraphics, penX, penY, easedSize, penAngle, penPressure, texture);
     } else if (brushTool === "Fan Line Tool" && penDown) {
+      // one color variation for each line instance
+      bufferGraphics.stroke(brushHexWithHueVarSeed(penY * penX));
       drawWithLine(bufferGraphics, penStartX, penStartY, penX, penY, easedSize);
     } else if (brushTool === "Line Tool" && wasDown && !penDown) {
+      // one color variation for each line instance
+      bufferGraphics.stroke(brushHexWithHueVarSeed(penStartX * penStartY));
       drawWithLine(bufferGraphics, penStartX, penStartY, penX, penY, easedSize);
     }
 
@@ -477,11 +484,6 @@ function brushHexWithHueVarSeed(seed) {
 function drawWithLine(buffer, xa, ya, xb, yb, size) {
 
   if (xa === undefined || ya === undefined || xb === undefined || yb === undefined) return;
-
-  // one color variation for each line instance
-  const brushHex = brushHexWithHueVarSeed(xa * ya);
-
-  buffer.stroke(brushHex);
 
   // draw the line rect
   buffer.strokeWeight(size);
