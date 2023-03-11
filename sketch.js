@@ -425,7 +425,7 @@ function draw() {
 
 function drawBrushstroke(buffer, x, y, size, angle, pressure, texture) {
   // one color variation for each stamp instance
-  const brushHex = brushHexWithHueVarSeed(x * y);
+  const brushHex = brushHexWithHueVarSeed(x + y);
   buffer.fill(brushHex);
   buffer.noStroke();
 
@@ -512,12 +512,15 @@ function updateUI() {
 
   // Unfinished brushstroke preview
   if (brushTool === "Line Tool" && penDown) {
+    uiGraphics.stroke(brushHexWithHueVarSeed(penStartX * penStartY));
     drawWithLine(uiGraphics, penStartX, penStartY, penX, penY, easedSize);
   }
 
   // Corner brush preview
   const visibleTextLum = constrain(bgLuminance + (bgLuminance > 0.5 ? -0.3 : 0.3), 0, 1.0);
   const visHex = okhex(visibleTextLum, min(bgChroma, 0.2), bgHue);
+  const brushHex = okhex(brushLuminance, brushChroma, brushHue);
+  const refHex = okhex(refLuminance, refChroma, refHue);
   
   const cornerPreviewBrushSize = constrain(easedSize, 8, gadgetRadius/3);
   displayTool(brushTool, texture, 0)
@@ -537,10 +540,12 @@ function updateUI() {
         drawBrushstroke(uiGraphics, x, 0, cornerPreviewBrushSize, penAngle, penPressure, texture);
       }
     } else if (brushTool === "Line Tool") {
+      uiGraphics.stroke(brushHex);
       drawWithLine(uiGraphics, 0, 0, 40, 0, cornerPreviewBrushSize);
     } else {
       //broken color somehow,see the line function
       for (let a = 0; a < 12; a++) {
+        uiGraphics.stroke(brushHexWithHueVarSeed(a));
         drawWithLine(uiGraphics, 40-40*(a/12), a*3.5, 0, 0, cornerPreviewBrushSize);
       }
     }
@@ -574,7 +579,8 @@ function updateUI() {
     uiGraphics.text("C:Clear with color", leftW, 45);
     //uiGraphics.text(penDown + "startX " + penStartX + " startY " + penStartY, leftW, 70);
   } else {
-    uiGraphics.text(brushTool + " (" + texture + " Texture)", leftW, 30);
+    const textureText = (texture !== undefined) ? " (" + texture + " Texture)" : "";
+    uiGraphics.text(brushTool + textureText, leftW, 30);
     // uiGraphics.text(wiplog, leftW, 70);
     // uiGraphics.text("Pencil down:" + penDown + " x" + penX + "y" + penY + " fingers:" + fingersDown, leftW, 30);
     // uiGraphics.text("Can decrease:" + fingerState.canDecreaseCount + " Peak:" + fingerState.peakCount, leftW, 70);
@@ -615,8 +621,6 @@ function updateUI() {
 
 
   // Update the indicator buffer with the current brush color and size
-  const brushHex = okhex(brushLuminance, brushChroma, brushHue);
-  const refHex = okhex(refLuminance, refChroma, refHue);
   uiGraphics.noStroke();
   uiGraphics.fill(brushHex);
 
