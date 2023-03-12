@@ -102,6 +102,8 @@ function setup() {
 
 function windowResized() {
   resizeCanvas(windowWidth - 10, windowHeight - 10);
+  interfaceBuffer.resizeCanvas(width, height);
+  interfaceBuffer.textSize((width < height) ? 13 : 16);
   draw();
 }
 
@@ -584,17 +586,19 @@ function redrawInterface(buffer, currentInputMode) {
   // MENUS
   // Corner brush preview
   const cornerPreviewBrushSize = constrain(easedSize, 8, gadgetRadius/3);
-  displayTool(brushTool, texture, 0)
+  buffer.noStroke();
+  displayTool(brushTool, texture, 0, 0)
+
   if (toolMenuOpened) {
     toolPresets.forEach((tool, index) => {
-      displayTool(tool.brush, tool.texture, index+1, tool.menuName);
+      displayTool(tool.brush, tool.texture, 0, index+1, tool.menuName);
     });
   }
 
-  function displayTool(brushTool, texture, spot, menuName) {
+  function displayTool(brushTool, texture, spotX, spotY, menuName) {
 
     buffer.push();
-    buffer.translate(30, 30 + 60*spot);
+    buffer.translate(30 + 100*spotX, 30 + 60*spotY);
 
     if (brushTool === "Stamp Tool") {
       for (let x = 0; x <= 40; x += 5) {
@@ -613,27 +617,30 @@ function redrawInterface(buffer, currentInputMode) {
 
     buffer.pop();
 
-    if (spot > 0) {
+    if (spotY > 0) {
       buffer.fill(visHex);
       buffer.textAlign(CENTER);
-      buffer.text(menuName, 0, 0 + 60*spot, 100, 60);
+      buffer.text(menuName, 0, 0 + 60*spotY, 100, 60);
     }
     buffer.textAlign(LEFT);
   }
 
-  // top left menu line
-  buffer.stroke(visHex);
-  buffer.strokeWeight(1);
-  buffer.line(0+10, 60, 100-10, 60)
-  buffer.noStroke();
-  buffer.strokeWeight(6);
+  function topButton(text, x) {
+    buffer.fill(visHex);
+    buffer.text(text, x, 0, 100, 60);
+    buffer.stroke(visHex);
+    buffer.strokeWeight(1);
+    buffer.line(x+10, 60, x+90, 60)
+    buffer.noStroke();
+    buffer.strokeWeight(6);
+  }
 
-  // top menu text
-  buffer.fill(visHex);
+  // top menu buttons
   buffer.textAlign(CENTER);
-  buffer.text("Undo (U)", 100*1, 0, 100, 60);
-  buffer.text("Clear (C)", width-100*2, 0, 100, 60);
-  buffer.text("Save (S)", width-100*1, 0, 100, 60);
+  topButton("tools", 0);
+  topButton("undo U", 100*1);
+  topButton("clear C", width-100*2);
+  topButton("save S", width-100*1);
   buffer.textAlign(LEFT);
 
   // const leftW = 110
@@ -661,6 +668,11 @@ function redrawInterface(buffer, currentInputMode) {
   //   //   }
   //   // });
   // }
+
+  // bottom right text
+  buffer.textAlign(RIGHT);
+  buffer.text("adjust 1/2/3 (multitouch/ keys)", width - 20, height - 20);
+  buffer.textAlign(LEFT);
 
   // bottom left text
   buffer.text("okLCH:" + brushLuminance.toFixed(3) +
