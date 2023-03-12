@@ -362,7 +362,7 @@ function draw() {
 
     if (brushTool === "Stamp Tool" && penDown) {
       drawBrushstroke(bufferGraphics, penX, penY, easedSize, penAngle, penPressure, texture);
-      wiplog += penPressure.toFixed(3) + " " + (penStartX === penX);
+        //wiplog += penPressure.toFixed(3) + " " + (penStartX === penX);
     } else if (brushTool === "Fan Line Tool" && penDown) {
       // one color variation for each line instance
       bufferGraphics.stroke(brushHexWithHueVarSeed(penY * penX));
@@ -584,7 +584,7 @@ function updateUI() {
   } else {
     const textureText = (texture !== undefined) ? " (" + texture + " Texture)" : "";
     uiGraphics.text(brushTool + textureText, leftW, 30);
-    uiGraphics.text(wiplog, leftW, 70);
+    // uiGraphics.text(wiplog, leftW, 70);
     // uiGraphics.text("Pencil down:" + penDown + " x" + penX + "y" + penY + " fingers:" + fingersDown, leftW, 30);
     // uiGraphics.text("Can decrease:" + fingerState.canDecreaseCount + " Peak:" + fingerState.peakCount, leftW, 70);
     // uiGraphics.text("startX " + penStartX + " startY " + penStartY, leftW, 70);
