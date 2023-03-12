@@ -448,11 +448,14 @@ function drawStamp(buffer, x, y, size, angle, pressure, texture) {
   }
 
   if (texture === "Rounded") {
+
     if (angle !== undefined) {
-      stampW = size * 0.7;
+      stampW = (pressure !== undefined) ? size * map(pressure, 0.0, 0.2, 0.1, 0.9, true) : size * 0.7;
     }
     buffer.rect(- stampW/2, - stampH/2, stampW, stampH, size / 4);
+
   } else if (texture === "Rake") {
+
     const circleCount = 4;
     const gapSize = (pressure !== undefined) ? map(pressure, 0.0, 0.2, 3.0, 0.0, true) : 1.0;
 
