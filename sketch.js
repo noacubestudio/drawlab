@@ -494,11 +494,23 @@ function updateBrushSettingsFromInput(currentInputMode) {
 }
 
 function drawBrushstroke(buffer, x, y, size, angle, pressure, texture) {
+  buffer.noStroke();
+
+  // draw bigger version behind to give some extra detail
+  if (texture === "Rounded") {
+    const rainbow = okhex(
+      brushLuminance*0.98,
+      brushChroma,
+      brushHue + varStrengths[(x * y) % varStrengths.length] * easedHueVar()
+    );
+    buffer.fill(rainbow);
+    drawStamp(buffer, x, y, size*1.05, angle, pressure, texture);
+  }
+  
+
   // one color variation for each stamp instance
   const brushHex = brushHexWithHueVarSeed(x + y);
   buffer.fill(brushHex);
-  buffer.noStroke();
-
   drawStamp(buffer, x, y, size, angle, pressure, texture);
 }
 
@@ -526,7 +538,8 @@ function drawStamp(buffer, x, y, size, angle, pressure, texture) {
 
   } else if (texture === "Rake") {
 
-    const circleCount = 4;
+    // if the brush size is small relative to the painting size, use less circles, if it's big use more
+    const circleCount = Math.floor(map(size, 4, 300, 2, 12));
     const gapSize = (pressure !== undefined) ? map(pressure, 0.0, 0.2, 3.0, 0.0, true) : 1.0;
 
     // calculate the actual sizes
