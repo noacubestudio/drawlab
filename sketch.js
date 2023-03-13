@@ -317,20 +317,13 @@ function doAction(action) {
 
   } else if (action === "clear") {
 
-    bgLuminance = brushLuminance;
-    bgChroma = brushChroma;
-    bgHue = brushHue;
+    [bgLuminance, brushLuminance] = [brushLuminance, bgLuminance];
+    [bgChroma, brushChroma] = [brushChroma, bgChroma];
+    [bgHue, brushHue] = [brushHue, bgHue];
 
     newStrokeBuffer.clear();
     paintingBuffer.background(okhex(bgLuminance, bgChroma, bgHue));
     document.body.style.backgroundColor = okhex(bgLuminance*0.9, bgChroma*0.5, bgHue);
-
-    //fix the current brush color so it's visible
-    if (brushLuminance > 0.5) {
-      brushLuminance -= 0.05;
-    } else {
-      brushLuminance += 0.05;
-    }
 
   } else if (action === "save") {
 
