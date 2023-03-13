@@ -340,7 +340,7 @@ function keyReleased() {
 function inputMode() {
   //'1', luminance and chroma 
   if (keyIsDown(49) || (fingerState.peakCount === 1 && fingersDown === 0)) {
-    return "lc";
+    return "lumAndChr";
   }
   //'2', hue
   if (keyIsDown(50) || (fingerState.peakCount === 2 && fingersDown === 0)) {
@@ -349,6 +349,10 @@ function inputMode() {
   //'3', size
   if (keyIsDown(51) || (fingerState.peakCount === 3 && fingersDown === 0)) {
     return "size";
+  }
+  //'e', eyedropper
+  if (keyIsDown(69)) {
+    return "eyedropper"
   }
   return "draw";
 }
@@ -372,7 +376,10 @@ function draw() {
       drawInNewStrokeBuffer(newStrokeBuffer);
     }
 
-  } else if (currentInputMode === "lc" || currentInputMode === "hue" || currentInputMode === "size") { // menu opened
+  } else if (currentInputMode === "lumAndChr" 
+      || currentInputMode === "hue" 
+      || currentInputMode === "size" 
+      || currentInputMode === "eyedropper") { // menu opened
 
     // save the old brush values as a reference when opening a menu
     updateBrushReferenceFromInput();
@@ -436,7 +443,7 @@ function drawInNewStrokeBuffer(buffer) {
 function updateBrushSettingsFromInput(currentInputMode) {
   const penMode = (!useMouse && penStartX !== undefined && penStartY !== undefined)
 
-  if (currentInputMode === "lc") { 
+  if (currentInputMode === "lumAndChr") { 
     // Get positions
     let deltaX = penX - (penMode ? penStartX : refX);
     let deltaY = penY - (penMode ? penStartY : refY);
@@ -470,6 +477,19 @@ function updateBrushSettingsFromInput(currentInputMode) {
     const rangeY = gadgetRadius * 2;
 
     brushSize = map(-deltaY + rangeY * map(refSize, 4, 600, 0, 1), 0, rangeY, 4, 600, true);
+  
+  } else if (currentInputMode === "eyedropper") {
+    paintingBuffer.image(newStrokeBuffer, 0, 0);
+    newStrokeBuffer.clear();
+
+    const colorArray = paintingBuffer.get(penX, penY);
+    const oklchArray = chroma(colorArray.slice(0,3)).oklch();
+
+    // default to current hue if gray
+    if (isNaN(oklchArray[2])) oklchArray[2] = brushHue;
+
+    // replace brush with new colors
+    [brushLuminance, brushChroma, brushHue] = oklchArray;
   }
 }
 
@@ -686,112 +706,123 @@ function redrawInterface(buffer, currentInputMode) {
     );
   }
 
-  // draw the brush setting gadgets
-  if (refX === undefined || refY === undefined) return;
+  // depending on input mode, draw the right gadget
+  drawGadgets();
 
-  buffer.noStroke();
+  // draw the hover preview
   buffer.fill(brushHex);
-
-  const ankerX = constrain(refX, gadgetRadius*2, width - gadgetRadius*2);
-  const ankerY = constrain(refY, gadgetRadius*2, height - gadgetRadius*2);
-
-  if (currentInputMode === "hue") {
-
-    // draw hue circle
-    const hueLineWidth = 6; // same as stroke width
-
-    // Compute circle center position from reference
-    const startAngle = TWO_PI * (brushHue / 360) - HALF_PI;
-    const startRadius = constrain(gadgetRadius * (1 - brushVar / 360), 0, gadgetRadius);
-    const centerX = ankerX - cos(startAngle) * startRadius;
-    const centerY = ankerY - sin(startAngle) * startRadius;
-
-    // Draw center
-    buffer.fill(visHex);
-    buffer.noStroke();
-    buffer.ellipse(centerX, centerY, 20);
-
-    // Draw hue circle around center
-    buffer.stroke(brushHex);
-    const outerLuminance = (brushLuminance > 0.5) ? brushLuminance - 0.3 : brushLuminance + 0.3;
-    drawHueCircle(createVector(centerX, centerY), gadgetRadius+hueLineWidth/2, 36, outerLuminance, 0.4);
-    drawHueCircle(createVector(centerX, centerY), gadgetRadius, 36, brushLuminance, brushChroma);
-    buffer.noStroke();
-
-    // Show color at reference position
-    const currentColorSize = constrain(easeInCirc(brushSize, 4, 600), 8, gadgetRadius/3);
-    drawEditedColor(currentColorSize, ankerX, ankerY);
-    drawCrosshair(currentColorSize, ankerX, ankerY);
-
-  } else if (currentInputMode === "lc") {
-
-    const radius = gadgetRadius;
-    const boxBaseX = ankerX + radius;
-    const boxBaseY = ankerY + radius;
-
-    const boxAddX = radius * 2 * (brushChroma * 2);
-    const boxAddY = radius * 2 * (1 - brushLuminance);
-
-    buffer.push();
-    buffer.translate(boxBaseX - boxAddX, boxBaseY - boxAddY);
-
-    // gray left
-    let startLCHarr = [1.0, 0.0, brushHue];
-    let endLCHarr = [0.0, 0.0, brushHue];
-    drawGradientLine(-radius, -radius, -radius, radius, startLCHarr, endLCHarr);
-    // top
-    buffer.fill("white");
-    startLCHarr = [1.0, 0.5, brushHue];
-    endLCHarr = [1.0, 0.0, brushHue];
-    drawGradientLine(radius, -radius, -radius, -radius, startLCHarr, endLCHarr);
-    buffer.noStroke();
-    buffer.ellipse(-radius, -radius, 20);
-    // colorful right
-    buffer.fill(okhex(1, 0.5, brushHue));
-    startLCHarr = [0.0, 0.5, brushHue];
-    endLCHarr = [1.0, 0.5, brushHue];
-    drawGradientLine(radius, radius, radius, -radius, startLCHarr, endLCHarr);
-    buffer.noStroke();
-    buffer.ellipse(radius, -radius, 20);
-    // bottom
-    buffer.stroke("black");
-    buffer.fill("black");
-    buffer.line(-radius, radius, radius, radius);
-    buffer.noStroke();
-    buffer.ellipse(-radius, radius, 20);
-    buffer.fill(okhex(0.0, 0.5, brushHue));
-    buffer.ellipse(radius, radius, 20);
-
-    buffer.noStroke();
-    buffer.pop();
-
-    // Show color at reference position
-    const currentColorSize = constrain(easeInCirc(brushSize, 4, 600), 8, gadgetRadius/3);
-    drawEditedColor(currentColorSize, ankerX, ankerY);
-    drawCrosshair(currentColorSize, ankerX, ankerY);
-
-  } else if (currentInputMode === "size") {
-
-    // scale
-    const lineBaseY = ankerY - gadgetRadius;
-    const lineAddY = gadgetRadius * 2 * map(brushSize, 4, 600, 0, 1);
-    const lineTranslateY = lineBaseY + lineAddY;
-
-    buffer.fill(visHex);
-    buffer.ellipse(ankerX, lineTranslateY + gadgetRadius, 10);
-    buffer.ellipse(ankerX, lineTranslateY - gadgetRadius, 20);
-
-    buffer.fill(brushHex);
-    const easedSize = easeInCirc(brushSize, 4, 600);
-    drawStamp(buffer, ankerX, ankerY, easedSize, penAngle, penPressure, texture);
-    drawCrosshair(easedSize, ankerX, ankerY);
-
-  } else if (visited && useMouse && !penDown) {
-
+  if (currentInputMode === "draw" && visited && useMouse && !penDown) {
     // draw hover stamp at the pen position
     const easedSize = easeInCirc(brushSize, 4, 600);
     drawStamp(buffer, penX, penY, easedSize, penAngle, penPressure, texture);
   }
+
+  // end of redrawInterface
+
+  function drawGadgets() {
+    // draw the brush setting gadgets
+    if (refX === undefined || refY === undefined) return;
+
+    buffer.noStroke();
+    buffer.fill(brushHex);
+
+    const ankerX = constrain(refX, gadgetRadius*2, width - gadgetRadius*2);
+    const ankerY = constrain(refY, gadgetRadius*2, height - gadgetRadius*2);
+
+    if (currentInputMode === "hue") {
+
+      // draw hue circle
+      const hueLineWidth = 6; // same as stroke width
+
+      // Compute circle center position from reference
+      const startAngle = TWO_PI * (brushHue / 360) - HALF_PI;
+      const startRadius = constrain(gadgetRadius * (1 - brushVar / 360), 0, gadgetRadius);
+      const centerX = ankerX - cos(startAngle) * startRadius;
+      const centerY = ankerY - sin(startAngle) * startRadius;
+
+      // Draw center
+      buffer.fill(visHex);
+      buffer.noStroke();
+      buffer.ellipse(centerX, centerY, 20);
+
+      // Draw hue circle around center
+      buffer.stroke(brushHex);
+      const outerLuminance = (brushLuminance > 0.5) ? brushLuminance - 0.3 : brushLuminance + 0.3;
+      drawHueCircle(createVector(centerX, centerY), gadgetRadius+hueLineWidth/2, 36, outerLuminance, 0.4);
+      drawHueCircle(createVector(centerX, centerY), gadgetRadius, 36, brushLuminance, brushChroma);
+      buffer.noStroke();
+
+      // Show color at reference position
+      const currentColorSize = constrain(easeInCirc(brushSize, 4, 600), 8, gadgetRadius/3);
+      drawEditedColor(currentColorSize, ankerX, ankerY);
+      drawCrosshair(currentColorSize, ankerX, ankerY);
+
+    } else if (currentInputMode === "lumAndChr") {
+
+      const radius = gadgetRadius;
+      const boxBaseX = ankerX + radius;
+      const boxBaseY = ankerY + radius;
+
+      const boxAddX = radius * 2 * (brushChroma * 2);
+      const boxAddY = radius * 2 * (1 - brushLuminance);
+
+      buffer.push();
+      buffer.translate(boxBaseX - boxAddX, boxBaseY - boxAddY);
+
+      // gray left
+      let startLCHarr = [1.0, 0.0, brushHue];
+      let endLCHarr = [0.0, 0.0, brushHue];
+      drawGradientLine(-radius, -radius, -radius, radius, startLCHarr, endLCHarr);
+      // top
+      buffer.fill("white");
+      startLCHarr = [1.0, 0.5, brushHue];
+      endLCHarr = [1.0, 0.0, brushHue];
+      drawGradientLine(radius, -radius, -radius, -radius, startLCHarr, endLCHarr);
+      buffer.noStroke();
+      buffer.ellipse(-radius, -radius, 20);
+      // colorful right
+      buffer.fill(okhex(1, 0.5, brushHue));
+      startLCHarr = [0.0, 0.5, brushHue];
+      endLCHarr = [1.0, 0.5, brushHue];
+      drawGradientLine(radius, radius, radius, -radius, startLCHarr, endLCHarr);
+      buffer.noStroke();
+      buffer.ellipse(radius, -radius, 20);
+      // bottom
+      buffer.stroke("black");
+      buffer.fill("black");
+      buffer.line(-radius, radius, radius, radius);
+      buffer.noStroke();
+      buffer.ellipse(-radius, radius, 20);
+      buffer.fill(okhex(0.0, 0.5, brushHue));
+      buffer.ellipse(radius, radius, 20);
+
+      buffer.noStroke();
+      buffer.pop();
+
+      // Show color at reference position
+      const currentColorSize = constrain(easeInCirc(brushSize, 4, 600), 8, gadgetRadius/3);
+      drawEditedColor(currentColorSize, ankerX, ankerY);
+      drawCrosshair(currentColorSize, ankerX, ankerY);
+
+    } else if (currentInputMode === "size") {
+
+      // scale
+      const lineBaseY = ankerY - gadgetRadius;
+      const lineAddY = gadgetRadius * 2 * map(brushSize, 4, 600, 0, 1);
+      const lineTranslateY = lineBaseY + lineAddY;
+
+      buffer.fill(visHex);
+      buffer.ellipse(ankerX, lineTranslateY + gadgetRadius, 10);
+      buffer.ellipse(ankerX, lineTranslateY - gadgetRadius, 20);
+
+      buffer.fill(brushHex);
+      const easedSize = easeInCirc(brushSize, 4, 600);
+      drawStamp(buffer, ankerX, ankerY, easedSize, penAngle, penPressure, texture);
+      drawCrosshair(easedSize, ankerX, ankerY);
+
+    }
+  }
+
 
   // With color menus open, show the current color as a circle made out of arcs showing the hue variation
   function drawEditedColor(size, x, y) {
