@@ -57,6 +57,9 @@ let penPressure = undefined;
 let fingersDown = 0;
 let wiplog = "";
 
+// recorded brushstroke
+let penRecording = [];
+
 // touch control state
 const fingerState = {
   peakCount: 0,
@@ -263,7 +266,19 @@ function updateInput(event) {
     penStartX = penX;
     penStartY = penY;
     penStarted = true;
+    penRecording = [];
     return;
+  }
+
+  // record
+  if (penDown) {
+    penRecording.push({
+      x: penX,
+      y: penY,
+      angle: penAngle,
+      pressure: penPressure,
+      event: event.type
+    });
   }
 
   // tap
@@ -729,6 +744,19 @@ function redrawInterface(buffer, currentInputMode) {
     const easedSize = easeInCirc(brushSize, 4, 600);
     drawStamp(buffer, penX, penY, easedSize, penAngle, penPressure, texture);
   }
+
+  // draw recording debug info
+  // let lastX;
+  // let lastY;
+  // buffer.stroke("red");
+  // penRecording.forEach((point) => {
+  //   if (lastX !== undefined) {
+  //     buffer.line(lastX, lastY, point.x, point.y)
+  //   }
+  //   lastX = point.x;
+  //   lastY = point.y
+  // });
+  // buffer.noStroke();
 
   // end of redrawInterface
 
