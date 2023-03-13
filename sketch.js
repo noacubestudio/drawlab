@@ -441,9 +441,16 @@ function drawInNewStrokeBuffer(buffer) {
   if (buffer === undefined) return;
   const easedSize = easeInCirc(brushSize, 4, 600);
 
+  // use recording
+  // if (brushTool === "Stamp Tool" && penDown) {
+  //   buffer.clear();
+  //   penRecording.forEach((point) => {
+  //     drawBrushstroke(buffer, point.x, point.y, easedSize, point.angle, point.pressure, texture);
+  //   });
+  // }
+
   if (brushTool === "Stamp Tool" && penDown) {
     drawBrushstroke(buffer, penX, penY, easedSize, penAngle, penPressure, texture);
-      //wiplog += penPressure.toFixed(3) + " " + (penStartX === penX);
   } else if (brushTool === "Fan Line Tool" && penDown) {
     // one color variation for each line instance
     buffer.stroke(brushHexWithHueVarSeed(penY * penX));
@@ -619,7 +626,7 @@ function redrawInterface(buffer, currentInputMode) {
 
 
   // Unfinished brushstroke preview
-  if (brushTool === "Line Tool" && penDown) {
+  if (brushTool === "Line Tool" && penDown && currentInputMode === "draw") {
     buffer.stroke(brushHexWithHueVarSeed(penStartX * penStartY));
     drawWithLine(buffer, penStartX, penStartY, penX, penY, easedSize);
   }
