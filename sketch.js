@@ -204,6 +204,12 @@ function updateInput(event) {
       if (spot >= 0) {
         brushTool = toolPresets[spot].brush;
         texture = toolPresets[spot].texture;
+        if (editMode) {
+          penLastX = undefined;
+          penLastY = undefined;
+          editMode = false;
+          redrawLastStroke(newStrokeBuffer);
+        }
       } else {
         toolMenuOpened = !toolMenuOpened;
       }
@@ -369,7 +375,7 @@ function doAction(action) {
   } else if (action === "edit") {
 
     editMode = !editMode;
-
+    
   }
 }
 
