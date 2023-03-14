@@ -487,6 +487,17 @@ function redrawLastStroke(buffer, xDiff, yDiff) {
       if (yDiff !== undefined) point.y += yDiff;
       drawBrushstroke(buffer, point.x, point.y, easedSize, point.angle, point.pressure, texture);
     });
+  } else if (brushTool === "Fan Line Tool") {
+    buffer.clear();
+    if (xDiff !== undefined) penStartX += xDiff;
+    if (yDiff !== undefined) penStartY += yDiff;
+    penRecording.forEach((point) => {
+      if (xDiff !== undefined) point.x += xDiff;
+      if (yDiff !== undefined) point.y += yDiff;
+      // one color variation for each line instance
+      buffer.stroke(brushHexWithHueVarSeed(point.y * point.x));
+      drawWithLine(buffer, penStartX, penStartY, point.x, point.y, easedSize);
+    });
   }
 }
 
