@@ -49,6 +49,8 @@ let penX;
 let penY;
 let penStartX;
 let penStartY;
+let penLastX;
+let penLastY;
 let penStarted = false;
 let wasDown = false;
 let penDown = false;
@@ -59,6 +61,7 @@ let wiplog = "";
 
 // recorded brushstroke
 let penRecording = [];
+let editMode = false;
 
 // touch control state
 const fingerState = {
@@ -210,6 +213,10 @@ function updateInput(event) {
       doAction("undo");
       return true;
     }
+    if (y < 60 && x > menuW*2 && x < menuW*3) {
+      doAction("edit");
+      return true;
+    }
     if (y < 60 && x > width-menuW*1 && x < width-menuW*0) {
       doAction("save");
       return true;
@@ -229,6 +236,8 @@ function updateInput(event) {
   // first get the touches/mouse position
   if (ongoingTouches.length === 0 && mouseX !== undefined && mouseY !== undefined && useMouse) {
     if (tappedInMenu(mouseX, mouseY)) return;
+    penLastX = penX;
+    penLastY = penY;
     penX = mouseX;
     penY = mouseY;
     
@@ -247,6 +256,8 @@ function updateInput(event) {
         fingersDown++;
       } else {
         // must be Pencil
+        penLastX = penX;
+        penLastY = penY;
         penX = touch.clientX;
         penY = touch.clientY;
         containedPen = true;
@@ -266,12 +277,12 @@ function updateInput(event) {
     penStartX = penX;
     penStartY = penY;
     penStarted = true;
-    penRecording = [];
+    if (!editMode && inputMode() === "draw") penRecording = [];
     return;
   }
 
   // record
-  if (penDown) {
+  if (penDown && !editMode && inputMode() === "draw") {
     penRecording.push({
       x: penX,
       y: penY,
@@ -298,6 +309,10 @@ function updateInput(event) {
   if (wasDown && !penDown && fingersDown === 0) {
     fingerState.peakCount = 0;
     fingerState.canDecreaseCount = false;
+    // also leave edit mode
+    editMode = false;
+    penLastX = undefined;
+    penLastY = undefined;
     return;
   }
 
@@ -320,6 +335,8 @@ function keyPressed() {
     doAction("save");
   } else if (key === "u") {
     doAction("undo");
+  } else if (key === "e") {
+    doAction("edit");
   }
   if (key !== undefined) draw();
 }
@@ -329,6 +346,8 @@ function doAction(action) {
   if (action === "undo") {
 
     newStrokeBuffer.clear();
+    penRecording = [];
+    editMode = false;
 
   } else if (action === "clear") {
 
@@ -337,12 +356,19 @@ function doAction(action) {
     [bgHue, brushHue] = [brushHue, bgHue];
 
     newStrokeBuffer.clear();
+    penRecording = [];
+    editMode = false;
+
     paintingBuffer.background(okhex(bgLuminance, bgChroma, bgHue));
     document.body.style.backgroundColor = okhex(bgLuminance*0.9, bgChroma*0.5, bgHue);
 
   } else if (action === "save") {
 
     saveCanvas(paintingBuffer, "drawlab-canvas", "png");
+
+  } else if (action === "edit") {
+
+    editMode = !editMode;
 
   }
 }
@@ -365,8 +391,8 @@ function inputMode() {
   if (keyIsDown(51) || (fingerState.peakCount === 3 && fingersDown === 0)) {
     return "size";
   }
-  //'e', eyedropper
-  if (keyIsDown(69)) {
+  //'4', eyedropper ... WIP, currently not on touch and a bit broken
+  if (keyIsDown(52)) {
     return "eyedropper"
   }
   return "draw";
@@ -381,15 +407,25 @@ function draw() {
     clearBrushReference();
 
     // start of brushstroke
-    if (penStarted) {
-      // don't draw on initial spot as a WIP pressure fix
-      // commit the new stroke to the painting and clear the buffer
-      paintingBuffer.image(newStrokeBuffer, 0, 0);
-      newStrokeBuffer.clear();
+    if (!editMode) {
+      if (penStarted) {
+        // don't draw on initial spot as a WIP pressure fix
+        // commit the new stroke to the painting and clear the buffer
+        paintingBuffer.image(newStrokeBuffer, 0, 0);
+        newStrokeBuffer.clear();
+      } else {
+        // draw to the stroke buffer
+        drawInNewStrokeBuffer(newStrokeBuffer);
+      }
     } else {
-      // draw to the stroke buffer
-      drawInNewStrokeBuffer(newStrokeBuffer);
+      // edit mode
+      if (penDown) {
+        const xDiff = penX-penLastX;
+        const yDiff = penY-penLastY;
+        redrawLastStroke(newStrokeBuffer, xDiff, yDiff);
+      }
     }
+    
 
   } else if (currentInputMode === "lumAndChr" 
       || currentInputMode === "hue" 
@@ -400,6 +436,8 @@ function draw() {
     updateBrushReferenceFromInput();
     // get the new changed brush values
     updateBrushSettingsFromInput(currentInputMode);
+
+    if (editMode) redrawLastStroke(newStrokeBuffer);
   }
 
   // draw the UI to the ui buffer
@@ -437,17 +475,24 @@ function updateBrushReferenceFromInput() {
   if (refVar === undefined) refVar = brushVar;
 }
 
-function drawInNewStrokeBuffer(buffer) {
+function redrawLastStroke(buffer, xDiff, yDiff) {
   if (buffer === undefined) return;
   const easedSize = easeInCirc(brushSize, 4, 600);
 
   // use recording
-  // if (brushTool === "Stamp Tool" && penDown) {
-  //   buffer.clear();
-  //   penRecording.forEach((point) => {
-  //     drawBrushstroke(buffer, point.x, point.y, easedSize, point.angle, point.pressure, texture);
-  //   });
-  // }
+  if (brushTool === "Stamp Tool") {
+    buffer.clear();
+    penRecording.forEach((point) => {
+      if (xDiff !== undefined) point.x += xDiff;
+      if (yDiff !== undefined) point.y += yDiff;
+      drawBrushstroke(buffer, point.x, point.y, easedSize, point.angle, point.pressure, texture);
+    });
+  }
+}
+
+function drawInNewStrokeBuffer(buffer) {
+  if (buffer === undefined) return;
+  const easedSize = easeInCirc(brushSize, 4, 600);
 
   if (brushTool === "Stamp Tool" && penDown) {
     drawBrushstroke(buffer, penX, penY, easedSize, penAngle, penPressure, texture);
@@ -626,7 +671,7 @@ function redrawInterface(buffer, currentInputMode) {
 
 
   // Unfinished brushstroke preview
-  if (brushTool === "Line Tool" && penDown && currentInputMode === "draw") {
+  if (brushTool === "Line Tool" && penDown && currentInputMode === "draw" && !editMode) {
     buffer.stroke(brushHexWithHueVarSeed(penStartX * penStartY));
     drawWithLine(buffer, penStartX, penStartY, penX, penY, easedSize);
   }
@@ -687,6 +732,7 @@ function redrawInterface(buffer, currentInputMode) {
   buffer.textAlign(CENTER);
   topButton("tools", 0);
   topButton("undo U", 100*1);
+  topButton("edit E", 100*2);
   topButton("clear C", width-100*2);
   topButton("save S", width-100*1);
   buffer.textAlign(LEFT);
@@ -741,17 +787,6 @@ function redrawInterface(buffer, currentInputMode) {
     );
   }
 
-  // depending on input mode, draw the right gadget
-  drawGadgets();
-
-  // draw the hover preview
-  buffer.fill(brushHex);
-  if (currentInputMode === "draw" && visited && useMouse && !penDown) {
-    // draw hover stamp at the pen position
-    const easedSize = easeInCirc(brushSize, 4, 600);
-    drawStamp(buffer, penX, penY, easedSize, penAngle, penPressure, texture);
-  }
-
   // draw recording debug info
   // let lastX;
   // let lastY;
@@ -764,6 +799,41 @@ function redrawInterface(buffer, currentInputMode) {
   //   lastY = point.y
   // });
   // buffer.noStroke();
+
+  // draw debug rectangle around last stroke
+  if (editMode && penRecording.length > 0) {
+    const xmin = penRecording.reduce((a, b) => Math.min(a, b.x),  Infinity) - easedSize*0.5;
+    const xmax = penRecording.reduce((a, b) => Math.max(a, b.x), -Infinity) + easedSize*0.5;
+    const ymin = penRecording.reduce((a, b) => Math.min(a, b.y),  Infinity) - easedSize*0.5;
+    const ymax = penRecording.reduce((a, b) => Math.max(a, b.y), -Infinity) + easedSize*0.5;
+  
+    buffer.stroke(okhex(bgLuminance, bgChroma, bgHue));
+    buffer.strokeWeight(3);
+    buffer.line(xmin, ymin, xmax, ymin);
+    buffer.line(xmin, ymin, xmin, ymax);
+    buffer.line(xmin, ymax, xmax, ymax);
+    buffer.line(xmax, ymin, xmax, ymax);
+    buffer.stroke(visHex);
+    buffer.strokeWeight(1);
+    buffer.line(xmin, ymin, xmax, ymin);
+    buffer.line(xmin, ymin, xmin, ymax);
+    buffer.line(xmin, ymax, xmax, ymax);
+    buffer.line(xmax, ymin, xmax, ymax);
+    buffer.strokeWeight(6);
+    buffer.noStroke();
+  }
+
+
+  // depending on input mode, draw the right gadget
+  drawGadgets();
+
+  // draw the hover preview
+  buffer.fill(brushHex);
+  if (currentInputMode === "draw" && visited && useMouse && !penDown && !editMode) {
+    // draw hover stamp at the pen position
+    drawStamp(buffer, penX, penY, easedSize, penAngle, penPressure, texture);
+  }
+
 
   // end of redrawInterface
 
