@@ -20,23 +20,24 @@ let refLuminance;
 let refSize;
 let gadgetRadius; // based on canvas size
 
-// current brush settings for drawing
-let brushHue = 0;
-let brushVar = 80;
-let brushChroma = 0.2;
-let brushLuminance = 0.7;
-let brushSize = 200;
-let brushTool = "Stamp Tool"
-let texture = "Rounded"
-
 // menu
 let toolPresets = [
   {brush: "Stamp Tool", texture: "Rounded", menuName: "Rounded"},
   {brush: "Stamp Tool", texture: "Rake", menuName: "Rake"},
   {brush: "Line Tool", texture: undefined, menuName: "Line"},
   {brush: "Fan Line Tool", texture: undefined, menuName: "Line F"},
+  {brush: "Triangle Tool", texture: undefined, menuName: "Tri"},
 ];
 let toolMenuOpened = false;
+
+// current brush settings for drawing
+let brushHue = 0;
+let brushVar = 80;
+let brushChroma = 0.2;
+let brushLuminance = 0.7;
+let brushSize = 200;
+let brushTool = toolPresets[0].brush;
+let texture = toolPresets[0].texture;
 
 // save 128 random 0-1 values here for consistent noise that stays between redraws
 let varStrengths = [];
@@ -521,6 +522,10 @@ function drawInNewStrokeBuffer(buffer) {
     // one color variation for each line instance
     buffer.stroke(brushHexWithHueVarSeed(penStartX * penStartY));
     drawWithLine(buffer, penStartX, penStartY, penX, penY, easedSize);
+  } else if (brushTool === "Triangle Tool" && wasDown && !penDown) {
+    // one color variation for each line instance
+    buffer.fill(brushHexWithHueVarSeed(penStartX * penStartY));
+    drawwithTriangle(buffer, penStartX, penStartY, penX, penY, penRecording, easedSize);
   }
 }
 
@@ -662,6 +667,99 @@ function drawWithLine(buffer, xa, ya, xb, yb, size) {
   buffer.noStroke();
 }
 
+function drawwithTriangle(buffer, xa, ya, xb, yb, penRecording, size) {
+  if (xa === undefined || ya === undefined || xb === undefined || yb === undefined) return;
+  buffer.noStroke();
+
+  buffer.push();
+  buffer.translate(xa, ya);
+  //const angle = p5.Vector.angleBetween(createVector(xb-xa, yb-ya), createVector(1, 0));
+  //buffer.rotate(-angle);
+  //const length = dist(xa, ya, xb, yb);
+
+  if (penRecording !== undefined && penRecording.length > 2) {
+
+    let highestDist = 0;
+    let furthestX = undefined;
+    let furthestY = undefined;
+    
+    penRecording.forEach((point, index) => { 
+      if (index > 0 && index < penRecording.length-1) {
+        // const angle = p5.Vector.angleBetween(createVector(xb-xa, yb-ya), createVector(point.x-xa, point.y-ya));
+        // const hypo = dist(xa, ya, point.x, point.y);
+        // const alti = sin(angle)*hypo;
+        // nDist = min(nDist, alti);
+        // pDist = max(pDist, alti);
+        const totalDist = dist(point.x, point.y, xa, ya) + dist(point.x, point.y, xb, yb)
+        if (totalDist > highestDist) {
+          highestDist = totalDist
+          furthestX = point.x
+          furthestY = point.y
+        }
+      }
+    });
+    //print(nDist, pDist)
+    buffer.beginShape();
+    buffer.vertex(0,0);
+    buffer.vertex(furthestX-xa, furthestY-ya);
+    buffer.vertex(xb-xa, yb-ya);
+    buffer.endShape();
+  } else {
+    buffer.beginShape();
+    buffer.vertex(0,0);
+    buffer.vertex((xb-xa)*0.5, (xb-xa)*0.3);
+    buffer.vertex(xb-xa, yb-ya);
+    buffer.endShape();
+  }
+
+  buffer.pop();
+}
+
+// function drawwithTriangle(buffer, xa, ya, xb, yb, penRecording, size) {
+//   if (xa === undefined || ya === undefined || xb === undefined || yb === undefined) return;
+//   buffer.noStroke();
+
+//   const angles = [];
+//   let relLowest = 0;
+//   let relHighest = 0;
+//   let startAngle = 0;
+
+//   if (penRecording !== undefined && penRecording.length >= 3) {
+
+//     startAngle = p5.Vector.angleBetween(createVector(penRecording[1].x -xa, penRecording[1].y -ya), createVector(1, 0));
+//     lastAngle = startAngle;
+
+//     penRecording.forEach((point) => {
+//       const angle = p5.Vector.angleBetween(createVector(point.x-xa, point.y-ya), createVector(1, 0))
+//       if (startAngle - angle <  relLowest)  relLowest = startAngle - angle;
+//       if (startAngle - angle > relHighest) relHighest = startAngle - angle;
+//     });
+//   } 
+
+//   if (relLowest !== undefined && relHighest !== undefined) {
+//     const length = dist(xa, ya, xb, yb);
+//     buffer.arc(xa, ya, length*2, length*2, startAngle+relLowest, startAngle+relHighest)
+//   } else {
+//     // draw the shape
+//     buffer.push();
+//     buffer.translate(xa, ya);
+//     const angle = p5.Vector.angleBetween(createVector(xb-xa, yb-ya), createVector(1, 0));
+//     buffer.rotate(-angle);
+//     const length = dist(xa, ya, xb, yb);
+//     // buffer.beginShape();
+//     // buffer.vertex(0,0);
+//     // buffer.vertex(length/2,-length/4);
+//     // buffer.vertex(length  , 0);
+//     // buffer.vertex(length/2, length/4);
+//     // buffer.endShape();
+//     buffer.arc(0, 0, length*2, length*2, TWO_PI*-0.05, TWO_PI*0.05)
+
+//     buffer.pop();
+//   }
+
+
+
+// }
 
 function redrawInterface(buffer, currentInputMode) {
   if (buffer === undefined) return;
@@ -688,9 +786,14 @@ function redrawInterface(buffer, currentInputMode) {
 
 
   // Unfinished brushstroke preview
-  if (brushTool === "Line Tool" && penDown && currentInputMode === "draw" && !editMode) {
-    buffer.stroke(brushHexWithHueVarSeed(penStartX * penStartY));
-    drawWithLine(buffer, penStartX, penStartY, penX, penY, easedSize);
+  if (penDown && currentInputMode === "draw" && !editMode) {
+    if (brushTool === "Line Tool") {
+      buffer.stroke(brushHexWithHueVarSeed(penStartX * penStartY));
+      drawWithLine(buffer, penStartX, penStartY, penX, penY, easedSize);
+    } else if (brushTool === "Triangle Tool") {
+      buffer.fill(brushHexWithHueVarSeed(penStartX * penStartY));
+      drawwithTriangle(buffer, penStartX, penStartY, penX, penY, penRecording, easedSize);
+    }
   }
   
   // MENUS
@@ -717,6 +820,9 @@ function redrawInterface(buffer, currentInputMode) {
     } else if (brushTool === "Line Tool") {
       buffer.stroke(brushHex);
       drawWithLine(buffer, 0, 0, 40, 0, cornerPreviewBrushSize);
+    } else if (brushTool === "Triangle Tool") {
+      buffer.fill(brushHex);
+      drawwithTriangle(buffer, 0, 0, 40, 0, undefined, cornerPreviewBrushSize);
     } else {
       //broken color somehow,see the line function
       for (let a = 0; a < 12; a++) {
@@ -839,6 +945,16 @@ function redrawInterface(buffer, currentInputMode) {
     buffer.strokeWeight(6);
     buffer.noStroke();
   }
+
+  //wip
+  // buffer.fill("black");
+  // for (let i = 0; i < 20; i++) {
+  //   buffer.rect(200 + i * 40, 160 + 0, 30, 1)
+  //   buffer.rect(200 + i * 40, 160 + 30, 30, 1)
+  //   buffer.rect(200 + i * 40, 160 + 60, 30, 30)
+  //   buffer.rect(200 + i * 40, 160 + 120, 30, 1)
+  //   buffer.rect(200 + i * 40, 160 + 150, 30, 1)
+  // }
 
 
   // depending on input mode, draw the right gadget
