@@ -27,6 +27,7 @@ let toolPresets = [
   {brush: "Line Tool", texture: undefined, menuName: "Line"},
   {brush: "Fan Line Tool", texture: undefined, menuName: "Line F"},
   {brush: "Triangle Tool", texture: undefined, menuName: "Triangle"},
+  {brush: "Lasso Tool", texture: undefined, menuName: "Lasso"},
   {brush: "Mirror Tool", texture: undefined, menuName: "Mirror"},
 ];
 let toolMenuOpened = false;
@@ -527,7 +528,11 @@ function drawInNewStrokeBuffer(buffer) {
     // one color variation for each line instance
     buffer.fill(brushHexWithHueVarSeed(penStartX * penStartY));
     drawwithTriangle(buffer, penStartX, penStartY, penX, penY, penRecording, easedSize);
-  } else if (brushTool === "Mirror Tool" && wasDown && !penDown) {
+  } else if (brushTool === "Lasso Tool" && wasDown && !penDown) {
+    // one color variation for each line instance
+    buffer.fill(brushHexWithHueVarSeed(penStartX * penStartY));
+    drawwithLasso(buffer, penStartX, penStartY, penX, penY, penRecording, easedSize);
+  }else if (brushTool === "Mirror Tool" && wasDown && !penDown) {
     // one color variation for each line instance
     buffer.fill(brushHexWithHueVarSeed(penStartX * penStartY));
     drawwithMirror(buffer, penStartX, penStartY, penX, penY, penRecording, easedSize);
@@ -668,6 +673,19 @@ function drawWithLine(buffer, xa, ya, xb, yb, size) {
   buffer.strokeWeight(size);
   buffer.line(xa, ya, xb, yb);
 
+  buffer.strokeWeight(6);
+  buffer.noStroke();
+}
+
+function drawWithPlaceholder(buffer, xa, ya, xb, yb, size) {
+  if (xa === undefined || ya === undefined || xb === undefined || yb === undefined) return;
+
+  // draw the line rect
+  buffer.strokeWeight(size);
+  buffer.strokeCap(SQUARE);
+  buffer.line(xa, ya, xb, yb);
+
+  buffer.strokeCap(ROUND);
   buffer.strokeWeight(6);
   buffer.noStroke();
 }
@@ -857,6 +875,9 @@ function redrawInterface(buffer, currentInputMode) {
     } else if (brushTool === "Triangle Tool") {
       buffer.fill(brushHexWithHueVarSeed(penStartX * penStartY));
       drawwithTriangle(buffer, penStartX, penStartY, penX, penY, penRecording, easedSize);
+    } else if (brushTool === "Lasso Tool") {
+      buffer.fill(brushHexWithHueVarSeed(penStartX * penStartY));
+      drawwithLasso(buffer, penStartX, penStartY, penX, penY, penRecording, easedSize);
     } else if (brushTool === "Mirror Tool") {
       buffer.fill(brushHexWithHueVarSeed(penStartX * penStartY));
       drawwithMirror(buffer, penStartX, penStartY, penX, penY, penRecording, easedSize);
@@ -884,19 +905,24 @@ function redrawInterface(buffer, currentInputMode) {
       for (let x = 0; x <= 40; x += 5) {
         drawBrushstroke(buffer, x, 0, cornerPreviewBrushSize, penAngle, penPressure, texture);
       }
-    } else if (brushTool === "Line Tool") {
+    } else if (brushTool === "Line Tool" || brushTool === "Fan Line Tool") {
       buffer.stroke(brushHex);
       drawWithLine(buffer, 0, 0, 40, 0, cornerPreviewBrushSize);
-    } else if (brushTool === "Triangle Tool") {
-      buffer.fill(brushHex);
-      drawwithTriangle(buffer, 0, 0, 40, 0, undefined, cornerPreviewBrushSize);
-    } else if (brushTool === "Fan Line Tool") {
-      //broken color somehow,see the line function
-      for (let a = 0; a < 12; a++) {
-        buffer.stroke(brushHexWithHueVarSeed(a));
-        drawWithLine(buffer, 40-40*(a/12), a*3.5, 0, 0, cornerPreviewBrushSize);
-      }
+    }  else {
+      buffer.stroke(brushHex);
+      drawWithPlaceholder(buffer, 0, 0, 40, 0, cornerPreviewBrushSize);
     }
+    // else if (brushTool === "Triangle Tool") {
+    //   buffer.fill(brushHex);
+    //   drawwithTriangle(buffer, 0, 0, 40, 0, undefined, cornerPreviewBrushSize);
+    // } 
+    // else if (brushTool === "Fan Line Tool") {
+    //   //broken color somehow,see the line function
+    //   for (let a = 0; a < 12; a++) {
+    //     buffer.stroke(brushHexWithHueVarSeed(a));
+    //     drawWithLine(buffer, 40-40*(a/12), a*3.5, 0, 0, cornerPreviewBrushSize);
+    //   }
+    // }
 
     buffer.pop();
 
