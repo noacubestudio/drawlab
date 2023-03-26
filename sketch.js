@@ -26,14 +26,15 @@ let toolPresets = [
   {brush: "Stamp Tool", texture: "Rake", menuName: "Rake"},
   {brush: "Line Tool", texture: undefined, menuName: "Line"},
   {brush: "Fan Line Tool", texture: undefined, menuName: "Line F"},
-  {brush: "Triangle Tool", texture: undefined, menuName: "Tri"},
+  {brush: "Triangle Tool", texture: undefined, menuName: "Triangle"},
+  {brush: "Mirror Tool", texture: undefined, menuName: "Mirror"},
 ];
 let toolMenuOpened = false;
 
 // current brush settings for drawing
-let brushHue = 0;
+let brushHue = 300;
 let brushVar = 80;
-let brushChroma = 0.2;
+let brushChroma = 0.15;
 let brushLuminance = 0.7;
 let brushSize = 200;
 let brushTool = toolPresets[0].brush;
@@ -526,6 +527,10 @@ function drawInNewStrokeBuffer(buffer) {
     // one color variation for each line instance
     buffer.fill(brushHexWithHueVarSeed(penStartX * penStartY));
     drawwithTriangle(buffer, penStartX, penStartY, penX, penY, penRecording, easedSize);
+  } else if (brushTool === "Mirror Tool" && wasDown && !penDown) {
+    // one color variation for each line instance
+    buffer.fill(brushHexWithHueVarSeed(penStartX * penStartY));
+    drawwithMirror(buffer, penStartX, penStartY, penX, penY, penRecording, easedSize);
   }
 }
 
@@ -715,6 +720,65 @@ function drawwithTriangle(buffer, xa, ya, xb, yb, penRecording, size) {
   buffer.pop();
 }
 
+function drawwithMirror(buffer, xa, ya, xb, yb, penRecording, size) {
+  if (xa === undefined || ya === undefined || xb === undefined || yb === undefined) return;
+  buffer.noStroke();
+
+  if (penRecording !== undefined && penRecording.length > 2) {
+
+    const slices = [{x: 0, y: 0}]
+
+    penRecording.forEach((point, index) => { 
+      if (index > 0) {
+        // point after start
+        const length = dist(xa, ya, point.x, point.y);
+        const angle = p5.Vector.angleBetween(createVector(xb-xa, yb-ya), createVector(point.x-xa, point.y-ya))
+        const height = length * sin(angle);
+        const baseLength = Math.sqrt( length ** 2 - height ** 2) * ((angle < -HALF_PI) ? -1 : 1);
+        slices.push({x: baseLength, y: height});
+      }
+    });
+
+    buffer.push();
+    buffer.translate(xa, ya);
+    buffer.rotate(p5.Vector.angleBetween(createVector(1, 0), createVector(xb-xa, yb-ya)));
+
+    buffer.beginShape();
+    buffer.vertex(0, 0);
+    slices.forEach((slice) => {
+      buffer.vertex(slice.x, slice.y);
+    });
+    buffer.endShape();
+
+    buffer.beginShape();
+    buffer.vertex(0, 0);
+    slices.forEach((slice) => {
+      buffer.vertex(slice.x, -slice.y);
+    });
+    buffer.endShape();
+
+    buffer.pop();
+  }
+}
+
+function drawwithLasso(buffer, xa, ya, xb, yb, penRecording, size) {
+  if (xa === undefined || ya === undefined || xb === undefined || yb === undefined) return;
+  buffer.noStroke();
+
+  if (penRecording !== undefined && penRecording.length > 2) {
+    buffer.beginShape();
+    buffer.vertex(xa, ya);
+    penRecording.forEach((point, index) => { 
+      if (index > 0 && index < penRecording.length-1) {
+        // point in between start and end
+        buffer.vertex(point.x, point.y);
+      }
+    });
+    buffer.vertex(xb, yb);
+    buffer.endShape();
+  }
+}
+
 // function drawwithTriangle(buffer, xa, ya, xb, yb, penRecording, size) {
 //   if (xa === undefined || ya === undefined || xb === undefined || yb === undefined) return;
 //   buffer.noStroke();
@@ -793,6 +857,9 @@ function redrawInterface(buffer, currentInputMode) {
     } else if (brushTool === "Triangle Tool") {
       buffer.fill(brushHexWithHueVarSeed(penStartX * penStartY));
       drawwithTriangle(buffer, penStartX, penStartY, penX, penY, penRecording, easedSize);
+    } else if (brushTool === "Mirror Tool") {
+      buffer.fill(brushHexWithHueVarSeed(penStartX * penStartY));
+      drawwithMirror(buffer, penStartX, penStartY, penX, penY, penRecording, easedSize);
     }
   }
   
@@ -823,7 +890,7 @@ function redrawInterface(buffer, currentInputMode) {
     } else if (brushTool === "Triangle Tool") {
       buffer.fill(brushHex);
       drawwithTriangle(buffer, 0, 0, 40, 0, undefined, cornerPreviewBrushSize);
-    } else {
+    } else if (brushTool === "Fan Line Tool") {
       //broken color somehow,see the line function
       for (let a = 0; a < 12; a++) {
         buffer.stroke(brushHexWithHueVarSeed(a));
