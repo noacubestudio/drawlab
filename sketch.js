@@ -45,8 +45,8 @@ let texture = toolPresets[0].texture;
 let varStrengths = [];
 
 // control
-let visited = false;
-let useMouse = false;
+let deviceMode = undefined;
+
 let ongoingTouches = []; 
 let penX; 
 let penY;
@@ -75,9 +75,15 @@ const fingerState = {
 
 function setup() {
   cnv = createCanvas(windowWidth - 10, windowHeight - 10);
-  cnv.touchStarted(handleTouchStart);
-  cnv.touchMoved(handleTouchMove);
-  cnv.touchEnded(handleTouchEnd);
+  cnv.id("myCanvas");
+  const el = document.getElementById("myCanvas");
+  el.addEventListener("touchstart", handleTouchStart);
+  el.addEventListener("touchmove", handleTouchMove);
+  el.addEventListener("touchend", handleTouchEnd);
+  el.addEventListener("pointerdown", handlePointerChangeEvent);
+  el.addEventListener("pointerup", handlePointerChangeEvent);
+  el.addEventListener("pointercancel", handlePointerChangeEvent);
+  el.addEventListener("pointermove", handlePointerMoveEvent);
   noLoop();
 
   gadgetRadius = min(width, height) / 8;
@@ -119,13 +125,17 @@ function windowResized() {
 
 function handleTouchStart(event) {
   event.preventDefault();
+  if (deviceMode === undefined) {
+    deviceMode = "touch";
+    print("Tap started without prior mouse movement, assuming touch mode.")
+  }
   event.changedTouches.forEach((touch) => {
     ongoingTouches.push(copyTouch(touch));
   });
-  visited = true;
   updateInput(event);
   draw();
 }
+
 function handleTouchMove(event) { 
   event.preventDefault();
   event.changedTouches.forEach((touch) => {
@@ -165,35 +175,38 @@ function ongoingTouchIndexById(idToFind) {
   return -1; // not found
 }
 
-function mousePressed(event) {
-  visited = true;
-  if (useMouse) {
-    updateInput(event);
-    draw();
+function handlePointerChangeEvent(event) {
+  event.preventDefault();
+  if (deviceMode === undefined) {
+    if (event.pointerType === "pen" || event.pointerType === "touch") {
+      deviceMode === "touch";
+      print("Tap started without prior mouse movement, assuming touch mode.")
+    }
   }
-}
-function mouseMoved(event) {
-  useMouse = true;
+  if (deviceMode === "touch") return;
   updateInput(event);
   draw();
 }
-function mouseDragged(event) {
-  visited = true;
-  if (useMouse) {
-    updateInput(event);
-    draw();
+
+function handlePointerMoveEvent(event) {
+  event.preventDefault();
+  if (event.pointerType === "mouse" && deviceMode !== "notouch") {
+    deviceMode = "notouch";
+    print("Using a device with mouse or touchpad, assume non-touch mode.")
   }
-}
-function mouseReleased(event) {
-  if (useMouse) {
-    updateInput(event);
-    draw();
+  if (event.pointerType === "pen" && deviceMode === undefined) {
+    deviceMode = "notouch";
+    print("Moving pen without touching surface first, assume non-touch mode.")
   }
+  if (deviceMode === "touch") return;
+  updateInput(event);
+  draw();
 }
 
 function updateInput(event) {
 
-  const startEventTypes = ["mousedown", "touchstart"];
+  const startEventTypes = ["pointerdown", "touchstart"];
+  const endEventTypes = ["pointerup", "pointercancel", "touchend", "touchcancel"];
 
   // menu first
   const menuW = 100;
@@ -243,19 +256,24 @@ function updateInput(event) {
   //wiplog += event.type + event.changedTouches[0].identifier + " "
 
   // first get the touches/mouse position
-  if (ongoingTouches.length === 0 && mouseX !== undefined && mouseY !== undefined && useMouse) {
-    if (tappedInMenu(mouseX, mouseY)) return;
+  if (deviceMode === "notouch") {
+    if (tappedInMenu(event.clientX, event.clientY)) return;
     penLastX = penX;
     penLastY = penY;
-    penX = mouseX;
-    penY = mouseY;
+    penX = event.clientX;
+    penY = event.clientY;
+
+    if (event.pointerType === "pen") {
+      if (event.pressure > 0) penPressure = event.pressure;
+      penAngle = tiltToAngle(event.tiltX, event.tiltY);
+    }
     
-    if (event.type === "mousedown") {
+    if (startEventTypes.includes(event.type)) {
       penDown = true;
-    } else if (event.type === "mouseup") {
+    } else if (endEventTypes.includes(event.type)) {
       penDown = false;
     }
-  } else {
+  } else if (deviceMode === "touch") {
     // find pencil and count other touches
     // assuming apple pencil, using touchType property
     let containedPen = false;
@@ -337,7 +355,6 @@ function updateInput(event) {
 }
 
 function keyPressed() {
-  visited = true;
   if (key === "c") {
     doAction("clear");
   } else if (key === "s") {
@@ -540,7 +557,7 @@ function drawInNewStrokeBuffer(buffer) {
 }
 
 function updateBrushSettingsFromInput(currentInputMode) {
-  const penMode = (!useMouse && penStartX !== undefined && penStartY !== undefined)
+  const penMode = (deviceMode === "touch" && penStartX !== undefined && penStartY !== undefined)
 
   if (currentInputMode === "lumAndChr") { 
     // Get positions
@@ -950,9 +967,10 @@ function redrawInterface(buffer, currentInputMode) {
   topButton("save S", width-100*1);
   buffer.textAlign(LEFT);
 
-  // const leftW = 110
+  //const leftW = 110
+  //buffer.text(deviceMode + " " + penDown + " start x " + penStartX + ",y " + penStartY + ", pen x" + penX + ",y " + penY + " a" + penAngle + " p" + penPressure, leftW, 70);
   
-  // if (useMouse) {
+  // if (devicemode === "notouch") {
   //   buffer.text("1/2/3: Color/Size •  C:Clear with color", leftW, 30);
   //   //buffer.text(penDown + "startX " + penStartX + " startY " + penStartY, leftW, 70);
   // } else {
@@ -978,7 +996,8 @@ function redrawInterface(buffer, currentInputMode) {
 
   // bottom right text
   buffer.textAlign(RIGHT);
-  buffer.text("adjust 1/2/3 (multitouch/ keys)", width - 20, height - 20);
+  const rightCornerText = (deviceMode !== "notouch") ? "TAP 1/2/3 FINGERS, APPLE PENCIL TO DRAW" : "KEYS 1/2/3/4 TO ADJUST"
+  buffer.text(rightCornerText, width - 20, height - 20);
   buffer.textAlign(LEFT);
 
   // bottom left text
@@ -1052,7 +1071,7 @@ function redrawInterface(buffer, currentInputMode) {
 
   // draw the hover preview
   buffer.fill(brushHex);
-  if ((currentInputMode === "draw") && visited && useMouse && !penDown && !editMode) {
+  if ((currentInputMode === "draw") && (deviceMode === "notouch") && !penDown && !editMode) {
     // draw hover stamp at the pen position
     drawStamp(buffer, penX, penY, easedSize, penAngle, penPressure, texture);
   }
@@ -1283,4 +1302,24 @@ function easedHueVar() {
     easeInCirc(baseVar*0.5, 0, 360),
     easeOutCubic(brushChroma * 2)
   );
+}
+
+function tiltToAngle(tiltX, tiltY) {
+  // perpendicular
+  if (tiltX === 0 && tiltY === 0) return undefined;
+
+  //converts to radians
+  radX = map(tiltX, -90, 90, -HALF_PI, HALF_PI)
+  radY = map(tiltY, -90, 90,  HALF_PI, -HALF_PI)
+
+  // from https://gist.github.com/k3a/2903719bb42b48c9198d20c2d6f73ac1
+  const y =  Math.cos(radX) * Math.sin(radY); 
+  const x = -Math.sin(radX) * -Math.cos(radY); 
+  //const z = -Math.cos(radX) * -Math.cos(radY); 
+  let azimuthRad = -Math.atan2(y, x); //+ HALF_PI;
+
+  // to range 0 to TWO_PI
+  if (azimuthRad < 0) azimuthRad += TWO_PI;
+
+  return azimuthRad;
 }
