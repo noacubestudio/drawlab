@@ -399,7 +399,7 @@ function inputMode() {
   if (keyIsDown(51) || (fingerState.peakCount === 3 && fingersDown === 0)) {
     return "size";
   }
-  //'4', eyedropper ... WIP, currently not on touch and a bit broken
+  //'4', eyedropper ... WIP, currently not on touch
   if (keyIsDown(52)) {
     return "eyedropper"
   }
@@ -410,7 +410,20 @@ function draw() {
 
   const currentInputMode = inputMode();
 
-  if (currentInputMode === "draw") {
+  if (currentInputMode === "lumAndChr" 
+    || currentInputMode === "hue" 
+    || currentInputMode === "size" 
+    || currentInputMode === "eyedropper") { // menu opened
+
+  // save the old brush values as a reference when opening a menu
+  updateBrushReferenceFromInput();
+  // get the new changed brush values
+  updateBrushSettingsFromInput(currentInputMode);
+
+  if (editMode) redrawLastStroke(newStrokeBuffer);
+  }
+
+  if (currentInputMode === "draw" || currentInputMode === "eyedropper") {
     // clear the reference values so they could be changed again when opening a menu
     clearBrushReference();
 
@@ -433,19 +446,6 @@ function draw() {
         redrawLastStroke(newStrokeBuffer, xDiff, yDiff);
       }
     }
-    
-
-  } else if (currentInputMode === "lumAndChr" 
-      || currentInputMode === "hue" 
-      || currentInputMode === "size" 
-      || currentInputMode === "eyedropper") { // menu opened
-
-    // save the old brush values as a reference when opening a menu
-    updateBrushReferenceFromInput();
-    // get the new changed brush values
-    updateBrushSettingsFromInput(currentInputMode);
-
-    if (editMode) redrawLastStroke(newStrokeBuffer);
   }
 
   // draw the UI to the ui buffer
@@ -850,7 +850,7 @@ function redrawInterface(buffer, currentInputMode) {
 
 
   // Unfinished brushstroke preview
-  if (penDown && currentInputMode === "draw" && !editMode) {
+  if (penDown && (currentInputMode === "draw" || currentInputMode === "eyedropper") && !editMode) {
     if (brushTool === "Line Tool") {
       buffer.stroke(brushHexWithHueVarSeed(penStartX * penStartY));
       drawWithLine(buffer, penStartX, penStartY, penX, penY, easedSize);
@@ -1029,7 +1029,7 @@ function redrawInterface(buffer, currentInputMode) {
 
   // draw the hover preview
   buffer.fill(brushHex);
-  if (currentInputMode === "draw" && visited && useMouse && !penDown && !editMode) {
+  if ((currentInputMode === "draw" || currentInputMode === "eyedropper") && visited && useMouse && !penDown && !editMode) {
     // draw hover stamp at the pen position
     drawStamp(buffer, penX, penY, easedSize, penAngle, penPressure, texture);
   }
@@ -1241,6 +1241,10 @@ function easeOutCubic(x) {
 }
 
 function easedHueVar() {
+
+  // during eyedropper, vary the hue less
+  brushVar *= (inputMode() === "eyedropper") ? 0.3 : 1;
+
   // for low chroma, use the no curve amount of hue variation (more intense)
   // for high chroma, use the curve (less intense)
   return lerp(
