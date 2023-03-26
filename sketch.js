@@ -896,40 +896,37 @@ function redrawInterface(buffer, currentInputMode) {
     });
   }
 
-  function displayTool(brushTool, texture, spotX, spotY, menuName) {
+  function displayTool(menuBrushTool, menuTexture, spotX, spotY, menuName) {
 
     buffer.push();
     buffer.translate(30 + 100*spotX, 30 + 60*spotY);
 
-    if (brushTool === "Stamp Tool") {
-      for (let x = 0; x <= 40; x += 5) {
-        drawBrushstroke(buffer, x, 0, cornerPreviewBrushSize, penAngle, penPressure, texture);
+    if (spotY === 0 || (brushTool !== menuBrushTool || texture !== menuTexture)) {
+      // draw example
+
+      if (menuBrushTool === "Stamp Tool") {
+        for (let x = 0; x <= 40; x += 5) {
+          drawBrushstroke(buffer, x, 0, cornerPreviewBrushSize, penAngle, penPressure, menuTexture);
+        }
+      } else if (menuBrushTool === "Line Tool" || menuBrushTool === "Fan Line Tool") {
+        buffer.stroke(brushHex);
+        drawWithLine(buffer, 0, 0, 40, 0, cornerPreviewBrushSize);
+      }  else {
+        buffer.stroke(brushHex);
+        drawWithPlaceholder(buffer, 0, 0, 40, 0, cornerPreviewBrushSize);
       }
-    } else if (brushTool === "Line Tool" || brushTool === "Fan Line Tool") {
-      buffer.stroke(brushHex);
-      drawWithLine(buffer, 0, 0, 40, 0, cornerPreviewBrushSize);
-    }  else {
-      buffer.stroke(brushHex);
-      drawWithPlaceholder(buffer, 0, 0, 40, 0, cornerPreviewBrushSize);
     }
-    // else if (brushTool === "Triangle Tool") {
-    //   buffer.fill(brushHex);
-    //   drawwithTriangle(buffer, 0, 0, 40, 0, undefined, cornerPreviewBrushSize);
-    // } 
-    // else if (brushTool === "Fan Line Tool") {
-    //   //broken color somehow,see the line function
-    //   for (let a = 0; a < 12; a++) {
-    //     buffer.stroke(brushHexWithHueVarSeed(a));
-    //     drawWithLine(buffer, 40-40*(a/12), a*3.5, 0, 0, cornerPreviewBrushSize);
-    //   }
-    // }
 
     buffer.pop();
 
     if (spotY > 0) {
       buffer.fill(visHex);
       buffer.textAlign(CENTER);
+      if (brushTool === menuBrushTool && texture === menuTexture) {
+        buffer.textStyle(ITALIC);
+      }
       buffer.text(menuName, 0, 0 + 60*spotY, 100, 60);
+      buffer.textStyle(NORMAL);
     }
     buffer.textAlign(LEFT);
   }
