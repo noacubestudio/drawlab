@@ -103,7 +103,7 @@ function setup() {
   interfaceBuffer.textAlign(LEFT, CENTER);
 
   // new random noise
-  varStrengths = Array.from({ length: 128 }, () => random());
+  varStrengths = Array.from({ length: 128 }, () => random(-1, 1));
   
   draw();
 }
@@ -1244,8 +1244,8 @@ function easedHueVar() {
   // for low chroma, use the no curve amount of hue variation (more intense)
   // for high chroma, use the curve (less intense)
   return lerp(
-    brushVar,
-    easeInCirc(brushVar, 0, 360),
+    brushVar*1,
+    easeInCirc(brushVar*0.5, 0, 360),
     easeOutCubic(brushChroma * 2)
   );
 }
