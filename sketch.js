@@ -1029,7 +1029,7 @@ function redrawInterface(buffer, currentInputMode) {
 
   // draw the hover preview
   buffer.fill(brushHex);
-  if ((currentInputMode === "draw" || currentInputMode === "eyedropper") && visited && useMouse && !penDown && !editMode) {
+  if ((currentInputMode === "draw") && visited && useMouse && !penDown && !editMode) {
     // draw hover stamp at the pen position
     drawStamp(buffer, penX, penY, easedSize, penAngle, penPressure, texture);
   }
@@ -1038,6 +1038,14 @@ function redrawInterface(buffer, currentInputMode) {
   // end of redrawInterface
 
   function drawGadgets() {
+
+    if (currentInputMode === "eyedropper") {
+      buffer.fill(brushHex);
+      const easedSize = easeInCirc(brushSize, 4, 600);
+      drawStamp(buffer, penX, penY, easedSize, penAngle, penPressure, texture);
+      drawCrosshair(easedSize, penX, penY);
+    }
+
     // draw the brush setting gadgets
     if (refX === undefined || refY === undefined) return;
 
@@ -1243,13 +1251,13 @@ function easeOutCubic(x) {
 function easedHueVar() {
 
   // during eyedropper, vary the hue less
-  brushVar *= (inputMode() === "eyedropper") ? 0.3 : 1;
+  const baseVar = brushVar * ((inputMode() === "eyedropper") ? 0.3 : 1);
 
   // for low chroma, use the no curve amount of hue variation (more intense)
   // for high chroma, use the curve (less intense)
   return lerp(
-    brushVar*1,
-    easeInCirc(brushVar*0.5, 0, 360),
+    baseVar*1,
+    easeInCirc(baseVar*0.5, 0, 360),
     easeOutCubic(brushChroma * 2)
   );
 }
