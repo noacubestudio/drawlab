@@ -700,26 +700,37 @@ function drawWithLine(buffer, xa, ya, xb, yb, size) {
   buffer.noStroke();
 }
 
+
 function drawWithSharpLine(buffer, startX, startY, startAngle, endX, endY, endAngle, size) {
   if (startX === undefined || startY === undefined || endX === undefined || endY === undefined) return;
 
-  startAngle ??= p5.Vector.angleBetween(createVector(0, 1), createVector(endX-startX, endY-startY));
-  endAngle ??= p5.Vector.angleBetween(createVector(0, 1), createVector(endX-startX, endY-startY));
+  startAngle ??= p5.Vector.angleBetween(createVector(0, -1), createVector(endX-startX, endY-startY));
+  endAngle ??= p5.Vector.angleBetween(createVector(0, -1), createVector(endX-startX, endY-startY));
 
-  startEdgeVector = p5.Vector.fromAngle(startAngle, size/2);
-  endEdgeVector = p5.Vector.fromAngle(endAngle, size/2);
-
-  const brushHex = brushHexWithHueVarSeed(startX + startY);
-  buffer.fill(brushHex);
   buffer.noStroke();
+  const steps = map(size, 4, 300, 5, 36);
 
-  buffer.beginShape();
-  buffer.vertex(startX - startEdgeVector.x, startY - startEdgeVector.y);
-  buffer.vertex(startX + startEdgeVector.x, startY + startEdgeVector.y);
-  buffer.vertex(endX + endEdgeVector.x, endY + endEdgeVector.y);
-  buffer.vertex(endX - endEdgeVector.x, endY - endEdgeVector.y);
-  buffer.endShape();
+  for (let i = 0; i < steps; i++) {
+    const brushHex = brushHexWithHueVarSeed(startX + startY + i);
+    buffer.fill(brushHex);
+
+    const lowerSide = (i/steps) - 0.5;
+    const higherSide = ((i === 0) ? 1 : (i+1)/steps) - 0.5;
+
+    startEdgeVectorLower  = p5.Vector.fromAngle(startAngle, lowerSide*size);
+    endEdgeVectorLower    = p5.Vector.fromAngle(endAngle, lowerSide*size);
+    startEdgeVectorHigher = p5.Vector.fromAngle(startAngle, higherSide*size);
+    endEdgeVectorHigher   = p5.Vector.fromAngle(endAngle, higherSide*size);
+
+    buffer.beginShape();
+    buffer.vertex(startX + startEdgeVectorLower.x, startY + startEdgeVectorLower.y);
+    buffer.vertex(startX + startEdgeVectorHigher.x, startY + startEdgeVectorHigher.y);
+    buffer.vertex(endX + endEdgeVectorHigher.x, endY + endEdgeVectorHigher.y);
+    buffer.vertex(endX + endEdgeVectorLower.x, endY + endEdgeVectorLower.y);
+    buffer.endShape();
+  }
 }
+
 
 function drawWithPlaceholder(buffer, xa, ya, xb, yb, size) {
   if (xa === undefined || ya === undefined || xb === undefined || yb === undefined) return;
@@ -733,6 +744,7 @@ function drawWithPlaceholder(buffer, xa, ya, xb, yb, size) {
   buffer.strokeWeight(6);
   buffer.noStroke();
 }
+
 
 function drawwithTriangle(buffer, xa, ya, xb, yb, penRecording, size) {
   if (xa === undefined || ya === undefined || xb === undefined || yb === undefined) return;
