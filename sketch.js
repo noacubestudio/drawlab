@@ -65,6 +65,7 @@ let fingersDown = 0;
 let wiplog = "";
 
 // recorded brushstroke
+let currentInputMode;
 let penRecording = [];
 let editMode = false;
 
@@ -430,19 +431,20 @@ function inputMode() {
 
 function draw() {
 
-  const currentInputMode = inputMode();
+  const wasInMenu = (currentInputMode !== "draw" && currentInputMode !== "eyedropper") ;
+  currentInputMode = inputMode();
 
   if (currentInputMode === "lumAndChr" 
     || currentInputMode === "hue" 
     || currentInputMode === "size" 
     || currentInputMode === "eyedropper") { // menu opened
 
-  // save the old brush values as a reference when opening a menu
-  updateBrushReferenceFromInput();
-  // get the new changed brush values
-  updateBrushSettingsFromInput(currentInputMode);
+    // save the old brush values as a reference when opening a menu
+    updateBrushReferenceFromInput();
+    // get the new changed brush values
+    updateBrushSettingsFromInput(currentInputMode);
 
-  if (editMode) redrawLastStroke(newStrokeBuffer);
+    if (editMode) redrawLastStroke(newStrokeBuffer);
   }
 
   if (currentInputMode === "draw" || currentInputMode === "eyedropper") {
@@ -450,7 +452,7 @@ function draw() {
     clearBrushReference();
 
     // start of brushstroke
-    if (!editMode) {
+    if (!editMode && !wasInMenu) {
       if (penStarted) {
         // don't draw on initial spot as a WIP pressure fix
         // commit the new stroke to the painting and clear the buffer
@@ -460,13 +462,10 @@ function draw() {
         // draw to the stroke buffer
         drawInNewStrokeBuffer(newStrokeBuffer);
       }
-    } else {
-      // edit mode
-      if (penDown) {
-        const xDiff = penX-penLastX;
-        const yDiff = penY-penLastY;
-        redrawLastStroke(newStrokeBuffer, xDiff, yDiff);
-      }
+    } else if (editMode && penDown) {
+      const xDiff = penX-penLastX;
+      const yDiff = penY-penLastY;
+      redrawLastStroke(newStrokeBuffer, xDiff, yDiff);
     }
   }
 
@@ -925,7 +924,9 @@ function redrawInterface(buffer, currentInputMode) {
       } else if (menuBrushTool === "Round Line Tool" || menuBrushTool === "Fan Line Tool") {
         buffer.stroke(brushHex);
         drawWithLine(buffer, 0, 0, 40, 0, cornerPreviewBrushSize);
-      }  else {
+      } else if (menuBrushTool === "Sharp Line Tool") {
+        drawWithSharpLine(buffer, 0, 0, penStartAngle, 40, 0, penAngle, cornerPreviewBrushSize);
+      } else {
         buffer.stroke(brushHex);
         drawWithPlaceholder(buffer, 0, 0, 40, 0, cornerPreviewBrushSize);
       }
