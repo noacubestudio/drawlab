@@ -338,11 +338,17 @@ function updateInput(event) {
   }
 
   // pen lifted
-  if (wasDown && !penDown && fingersDown === 0) {
-    fingerState.peakCount = 0;
-    fingerState.canDecreaseCount = false;
+  if (wasDown && !penDown) {
+    if (fingersDown === 0) {
+      fingerState.peakCount = 0;
+      fingerState.canDecreaseCount = false;
+    }
     // also leave edit mode
-    editMode = false;
+    if (editMode) {
+      editMode = false;
+      // don't even send this as a confirm to draw
+      wasDown = false;
+    }
     penLastX = undefined;
     penLastY = undefined;
     return;
@@ -431,7 +437,7 @@ function inputMode() {
 
 function draw() {
 
-  const wasInMenu = (currentInputMode !== "draw" && currentInputMode !== "eyedropper") ;
+  const wasInMenu = (currentInputMode !== "draw" && currentInputMode !== "eyedropper");
   currentInputMode = inputMode();
 
   if (currentInputMode === "lumAndChr" 
@@ -459,8 +465,14 @@ function draw() {
         paintingBuffer.image(newStrokeBuffer, 0, 0);
         newStrokeBuffer.clear();
       } else {
-        // draw to the stroke buffer
-        drawInNewStrokeBuffer(newStrokeBuffer);
+        // draw to the stroke buffer immediately
+        if ((brushTool === "Stamp Tool" || brushTool === "Fan Line Tool") && penDown) {
+          drawInNewStrokeBuffer(newStrokeBuffer, penStartX, penStartY, penStartAngle, undefined, penX, penY, penAngle, penPressure, penRecording)
+
+        } else if (!penDown && wasDown) {
+          // drawn when pen lifted
+          drawInNewStrokeBuffer(newStrokeBuffer, penStartX, penStartY, penStartAngle, undefined, penX, penY, penAngle, penPressure, penRecording)
+        }
       }
     } else if (editMode && penDown) {
       const xDiff = penX-penLastX;
@@ -508,56 +520,81 @@ function redrawLastStroke(buffer, xDiff, yDiff) {
   if (buffer === undefined) return;
   const easedSize = easeInCirc(brushSize, 4, 600);
 
+  // move recording
+  if (xDiff !== undefined && yDiff !== undefined) {
+    penRecording.forEach((point) => {
+      point.x += xDiff;
+      point.y += yDiff;
+    });
+  }
+
+  xDiff ??= 0;
+  yDiff ??= 0;
+
+  const recStartX = penRecording[0].x;
+  const recStartY = penRecording[0].y;
+  const recStartAngle = penRecording[0].angle;
+  const recStartPressure = penRecording[0].pressure;
+
+  // clear brushstroke before reconstructing from recording
+  buffer.clear();
+
   // use recording
-  if (brushTool === "Stamp Tool") {
-    buffer.clear();
+  if ((brushTool === "Stamp Tool" || brushTool === "Fan Line Tool")) {
     penRecording.forEach((point) => {
-      if (xDiff !== undefined) point.x += xDiff;
-      if (yDiff !== undefined) point.y += yDiff;
-      drawBrushstroke(buffer, point.x, point.y, easedSize, point.angle, point.pressure, texture);
+      drawInNewStrokeBuffer(buffer, recStartX, recStartY, recStartAngle, recStartPressure, point.x, point.y, point.angle, point.pressure, penRecording)
     });
-  } else if (brushTool === "Fan Line Tool") {
-    buffer.clear();
-    if (xDiff !== undefined) penStartX += xDiff;
-    if (yDiff !== undefined) penStartY += yDiff;
-    penRecording.forEach((point) => {
-      if (xDiff !== undefined) point.x += xDiff;
-      if (yDiff !== undefined) point.y += yDiff;
-      // one color variation for each line instance
-      buffer.stroke(brushHexWithHueVarSeed(point.y * point.x));
-      drawWithLine(buffer, penStartX, penStartY, point.x, point.y, easedSize);
-    });
+  } else {
+    const recEndX = penRecording[penRecording.length-1].x;
+    const recEndY = penRecording[penRecording.length-1].y;
+    const recEndAngle = penRecording[penRecording.length-1].angle;
+    const recEndPressure = penRecording[penRecording.length-1].pressure;
+    drawInNewStrokeBuffer(buffer, recStartX, recStartY, recStartAngle, recStartPressure, recEndX, recEndY, recEndAngle, recEndPressure, penRecording)
   }
 }
 
-function drawInNewStrokeBuffer(buffer) {
+function drawInNewStrokeBuffer(buffer, startX, startY, startAngle, startPressure, endX, endY, endAngle, endPressure, recording) {
   if (buffer === undefined) return;
+
   const easedSize = easeInCirc(brushSize, 4, 600);
 
-  if (brushTool === "Stamp Tool" && penDown) {
-    drawBrushstroke(buffer, penX, penY, easedSize, penAngle, penPressure, texture);
-  } else if (brushTool === "Fan Line Tool" && penDown) {
+  if (brushTool === "Stamp Tool") {
+
+    drawBrushstroke(buffer, endX, endY, easedSize, endAngle, endPressure, texture);
+
+  } else if (brushTool === "Fan Line Tool") {
+
     // one color variation for each line instance
-    buffer.stroke(brushHexWithHueVarSeed(penY * penX));
-    drawWithLine(buffer, penStartX, penStartY, penX, penY, easedSize);
-  } else if (brushTool === "Round Line Tool" && wasDown && !penDown) {
+    buffer.stroke(brushHexWithHueVarSeed(endX * endY));
+    drawWithLine(buffer, startX, startY, endX, endY, easedSize);
+
+  } else if (brushTool === "Round Line Tool") {
+
     // one color variation for each line instance
-    buffer.stroke(brushHexWithHueVarSeed(penStartX * penStartY));
-    drawWithLine(buffer, penStartX, penStartY, penX, penY, easedSize);
-  } else if (brushTool === "Sharp Line Tool" && wasDown && !penDown) {
-    drawWithSharpLine(buffer, penStartX, penStartY, penStartAngle, penX, penY, penAngle, easedSize);
-  } else if (brushTool === "Triangle Tool" && wasDown && !penDown) {
+    buffer.stroke(brushHexWithHueVarSeed(startX * startY));
+    drawWithLine(buffer, startX, startY, endX, endY, easedSize);
+
+  } else if (brushTool === "Sharp Line Tool") {
+
+    drawWithSharpLine(buffer, startX, startY, startAngle, endX, endY, endAngle, easedSize);
+
+  } else if (brushTool === "Triangle Tool") {
+
     // one color variation for each line instance
-    buffer.fill(brushHexWithHueVarSeed(penStartX * penStartY));
-    drawwithTriangle(buffer, penStartX, penStartY, penX, penY, penRecording, easedSize);
-  } else if (brushTool === "Lasso Tool" && wasDown && !penDown) {
+    buffer.fill(brushHexWithHueVarSeed(startX * startY));
+    drawwithTriangle(buffer, startX, startY, endX, endY, recording, easedSize);
+
+  } else if (brushTool === "Lasso Tool") {
+
     // one color variation for each line instance
-    buffer.fill(brushHexWithHueVarSeed(penStartX * penStartY));
-    drawwithLasso(buffer, penStartX, penStartY, penX, penY, penRecording, easedSize);
-  }else if (brushTool === "Mirror Tool" && wasDown && !penDown) {
+    buffer.fill(brushHexWithHueVarSeed(startX * startY));
+    drawwithLasso(buffer, startX, startY, endX, endY, recording, easedSize);
+
+  } else if (brushTool === "Mirror Tool") {
+
     // one color variation for each line instance
-    buffer.fill(brushHexWithHueVarSeed(penStartX * penStartY));
-    drawwithMirror(buffer, penStartX, penStartY, penX, penY, penRecording, easedSize);
+    buffer.fill(brushHexWithHueVarSeed(startX * startY));
+    drawwithMirror(buffer, startX, startY, endX, endY, recording, easedSize);
   }
 }
 
