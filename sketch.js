@@ -24,7 +24,8 @@ let gadgetRadius; // based on canvas size
 let toolPresets = [
   {brush: "Stamp Tool", texture: "Rounded", menuName: "Rounded"},
   {brush: "Stamp Tool", texture: "Rake", menuName: "Rake"},
-  {brush: "Line Tool", texture: undefined, menuName: "Line"},
+  {brush: "Sharp Line Tool", texture: undefined, menuName: "Line"},
+  {brush: "Round Line Tool", texture: undefined, menuName: "Line R"},
   {brush: "Fan Line Tool", texture: undefined, menuName: "Line F"},
   {brush: "Triangle Tool", texture: undefined, menuName: "Triangle"},
   {brush: "Lasso Tool", texture: undefined, menuName: "Lasso"},
@@ -52,6 +53,7 @@ let penX;
 let penY;
 let penStartX;
 let penStartY;
+let penStartAngle;
 let penLastX;
 let penLastY;
 let penStarted = false;
@@ -303,6 +305,7 @@ function updateInput(event) {
   if (startEventTypes.includes(event.type) && penDown) {
     penStartX = penX;
     penStartY = penY;
+    penStartAngle = penAngle;
     penStarted = true;
     if (!editMode && inputMode() === "draw") penRecording = [];
     return;
@@ -329,6 +332,7 @@ function updateInput(event) {
     }
     penStartX = undefined;
     penStartY = undefined;
+    penStartAngle = undefined;
     return;
   }
 
@@ -537,10 +541,12 @@ function drawInNewStrokeBuffer(buffer) {
     // one color variation for each line instance
     buffer.stroke(brushHexWithHueVarSeed(penY * penX));
     drawWithLine(buffer, penStartX, penStartY, penX, penY, easedSize);
-  } else if (brushTool === "Line Tool" && wasDown && !penDown) {
+  } else if (brushTool === "Round Line Tool" && wasDown && !penDown) {
     // one color variation for each line instance
     buffer.stroke(brushHexWithHueVarSeed(penStartX * penStartY));
     drawWithLine(buffer, penStartX, penStartY, penX, penY, easedSize);
+  } else if (brushTool === "Sharp Line Tool" && wasDown && !penDown) {
+    drawWithSharpLine(buffer, penStartX, penStartY, penStartAngle, penX, penY, penAngle, easedSize);
   } else if (brushTool === "Triangle Tool" && wasDown && !penDown) {
     // one color variation for each line instance
     buffer.fill(brushHexWithHueVarSeed(penStartX * penStartY));
@@ -694,6 +700,27 @@ function drawWithLine(buffer, xa, ya, xb, yb, size) {
   buffer.noStroke();
 }
 
+function drawWithSharpLine(buffer, startX, startY, startAngle, endX, endY, endAngle, size) {
+  if (startX === undefined || startY === undefined || endX === undefined || endY === undefined) return;
+
+  startAngle ??= p5.Vector.angleBetween(createVector(0, 1), createVector(endX-startX, endY-startY));
+  endAngle ??= p5.Vector.angleBetween(createVector(0, 1), createVector(endX-startX, endY-startY));
+
+  startEdgeVector = p5.Vector.fromAngle(startAngle, size/2);
+  endEdgeVector = p5.Vector.fromAngle(endAngle, size/2);
+
+  const brushHex = brushHexWithHueVarSeed(startX + startY);
+  buffer.fill(brushHex);
+  buffer.noStroke();
+
+  buffer.beginShape();
+  buffer.vertex(startX - startEdgeVector.x, startY - startEdgeVector.y);
+  buffer.vertex(startX + startEdgeVector.x, startY + startEdgeVector.y);
+  buffer.vertex(endX + endEdgeVector.x, endY + endEdgeVector.y);
+  buffer.vertex(endX - endEdgeVector.x, endY - endEdgeVector.y);
+  buffer.endShape();
+}
+
 function drawWithPlaceholder(buffer, xa, ya, xb, yb, size) {
   if (xa === undefined || ya === undefined || xb === undefined || yb === undefined) return;
 
@@ -814,51 +841,7 @@ function drawwithLasso(buffer, xa, ya, xb, yb, penRecording, size) {
   }
 }
 
-// function drawwithTriangle(buffer, xa, ya, xb, yb, penRecording, size) {
-//   if (xa === undefined || ya === undefined || xb === undefined || yb === undefined) return;
-//   buffer.noStroke();
 
-//   const angles = [];
-//   let relLowest = 0;
-//   let relHighest = 0;
-//   let startAngle = 0;
-
-//   if (penRecording !== undefined && penRecording.length >= 3) {
-
-//     startAngle = p5.Vector.angleBetween(createVector(penRecording[1].x -xa, penRecording[1].y -ya), createVector(1, 0));
-//     lastAngle = startAngle;
-
-//     penRecording.forEach((point) => {
-//       const angle = p5.Vector.angleBetween(createVector(point.x-xa, point.y-ya), createVector(1, 0))
-//       if (startAngle - angle <  relLowest)  relLowest = startAngle - angle;
-//       if (startAngle - angle > relHighest) relHighest = startAngle - angle;
-//     });
-//   } 
-
-//   if (relLowest !== undefined && relHighest !== undefined) {
-//     const length = dist(xa, ya, xb, yb);
-//     buffer.arc(xa, ya, length*2, length*2, startAngle+relLowest, startAngle+relHighest)
-//   } else {
-//     // draw the shape
-//     buffer.push();
-//     buffer.translate(xa, ya);
-//     const angle = p5.Vector.angleBetween(createVector(xb-xa, yb-ya), createVector(1, 0));
-//     buffer.rotate(-angle);
-//     const length = dist(xa, ya, xb, yb);
-//     // buffer.beginShape();
-//     // buffer.vertex(0,0);
-//     // buffer.vertex(length/2,-length/4);
-//     // buffer.vertex(length  , 0);
-//     // buffer.vertex(length/2, length/4);
-//     // buffer.endShape();
-//     buffer.arc(0, 0, length*2, length*2, TWO_PI*-0.05, TWO_PI*0.05)
-
-//     buffer.pop();
-//   }
-
-
-
-// }
 
 function redrawInterface(buffer, currentInputMode) {
   if (buffer === undefined) return;
@@ -886,9 +869,11 @@ function redrawInterface(buffer, currentInputMode) {
 
   // Unfinished brushstroke preview
   if (penDown && (currentInputMode === "draw" || currentInputMode === "eyedropper") && !editMode) {
-    if (brushTool === "Line Tool") {
+    if (brushTool === "Round Line Tool") {
       buffer.stroke(brushHexWithHueVarSeed(penStartX * penStartY));
       drawWithLine(buffer, penStartX, penStartY, penX, penY, easedSize);
+    } else if (brushTool === "Sharp Line Tool") { 
+      drawWithSharpLine(buffer, penStartX, penStartY, penStartAngle, penX, penY, penAngle, easedSize);
     } else if (brushTool === "Triangle Tool") {
       buffer.fill(brushHexWithHueVarSeed(penStartX * penStartY));
       drawwithTriangle(buffer, penStartX, penStartY, penX, penY, penRecording, easedSize);
@@ -925,7 +910,7 @@ function redrawInterface(buffer, currentInputMode) {
         for (let x = 0; x <= 40; x += 5) {
           drawBrushstroke(buffer, x, 0, cornerPreviewBrushSize, penAngle, penPressure, menuTexture);
         }
-      } else if (menuBrushTool === "Line Tool" || menuBrushTool === "Fan Line Tool") {
+      } else if (menuBrushTool === "Round Line Tool" || menuBrushTool === "Fan Line Tool") {
         buffer.stroke(brushHex);
         drawWithLine(buffer, 0, 0, 40, 0, cornerPreviewBrushSize);
       }  else {
