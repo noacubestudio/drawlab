@@ -1105,10 +1105,19 @@ function redrawInterface(buffer, currentInputMode) {
   drawGadgets();
 
   // draw the hover preview
-  buffer.fill(brushHex);
   if ((currentInputMode === "draw") && (deviceMode === "notouch") && !penDown && !editMode) {
     // draw hover stamp at the pen position
-    drawStamp(buffer, penX, penY, easedSize, penAngle, penPressure, texture);
+    if (brushTool === "Stamp Tool") {
+      drawBrushstroke(buffer, penX, penY, easedSize, penAngle, penPressure, texture);
+    } else if (brushTool === "Round Line Tool" || brushTool === "Fan Line Tool") {
+      drawCrosshair(easedSize, penX, penY);
+      buffer.stroke(brushHexWithHueVarSeed(penX * penY));
+      drawWithLine(buffer, penX, penY, penX, penY, easedSize)
+    } else if (brushTool === "Sharp Line Tool") {
+      if (penLastX !== undefined && penLastY !== undefined) {
+        drawWithSharpLine(buffer, penLastX, penLastY, penAngle, penX, penY, penAngle, easedSize);
+      }
+    }
   }
 
 
