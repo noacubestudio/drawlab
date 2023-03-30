@@ -22,11 +22,12 @@ let gadgetRadius; // based on canvas size
 
 // menu
 let toolPresets = [
-  {brush: "Stamp Tool", texture: "Rounded", menuName: "Rounded"},
-  {brush: "Stamp Tool", texture: "Rake", menuName: "Rake"},
-  {brush: "Sharp Line Tool", texture: undefined, menuName: "Line"},
-  {brush: "Round Line Tool", texture: undefined, menuName: "Line R"},
-  {brush: "Fan Line Tool", texture: undefined, menuName: "Line F"},
+  {brush: "Stamp Tool", texture: "Rounded", menuName: "Round S"},
+  {brush: "Stamp Tool", texture: "Rake", menuName: "Rake S"},
+  {brush: "Sharp Line Tool", texture: "Regular", menuName: "Sharp L"},
+  {brush: "Sharp Line Tool", texture: "Rake", menuName: "Rake L"},
+  {brush: "Round Line Tool", texture: undefined, menuName: "Round L"},
+  {brush: "Fan Line Tool", texture: undefined, menuName: "Fan"},
   {brush: "Triangle Tool", texture: undefined, menuName: "Triangle"},
   {brush: "Lasso Tool", texture: undefined, menuName: "Lasso"},
   {brush: "Mirror Tool", texture: undefined, menuName: "Mirror"},
@@ -576,7 +577,7 @@ function drawInNewStrokeBuffer(buffer, startX, startY, startAngle, startPressure
 
   } else if (brushTool === "Sharp Line Tool") {
 
-    drawWithSharpLine(buffer, startX, startY, startAngle, endX, endY, endAngle, easedSize);
+    drawWithSharpLine(buffer, startX, startY, startAngle, endX, endY, endAngle, easedSize, texture);
 
   } else if (brushTool === "Triangle Tool") {
 
@@ -737,33 +738,62 @@ function drawWithLine(buffer, xa, ya, xb, yb, size) {
 }
 
 
-function drawWithSharpLine(buffer, startX, startY, startAngle, endX, endY, endAngle, size) {
+function drawWithSharpLine(buffer, startX, startY, startAngle, endX, endY, endAngle, size, texture) {
   if (startX === undefined || startY === undefined || endX === undefined || endY === undefined) return;
 
   startAngle ??= p5.Vector.angleBetween(createVector(0, -1), createVector(endX-startX, endY-startY));
   endAngle ??= p5.Vector.angleBetween(createVector(0, -1), createVector(endX-startX, endY-startY));
 
   buffer.noStroke();
-  const steps = map(size, 4, 300, 5, 36);
 
-  for (let i = 0; i < steps; i++) {
-    const brushHex = brushHexWithHueVarSeed(startX + startY + i);
-    buffer.fill(brushHex);
+  if (texture === "Rake") {
+    // if the brush size is small relative to the painting size, use less circles, if it's big use more
+    const steps = Math.floor(map(size, 4, 300, 3, 24));
+    const gapSize = 1.0; //(pressure !== undefined) ? map(pressure, 0.0, 0.2, 3.0, 0.0, true) : 1.0;
 
-    const lowerSide = (i/steps) - 0.5;
-    const higherSide = ((i === 0) ? 1 : (i+1)/steps) - 0.5;
+    // calculate the actual sizes
+    const circleSize = size / ((steps-1)*gapSize + steps);
 
-    startEdgeVectorLower  = p5.Vector.fromAngle(startAngle, lowerSide*size);
-    endEdgeVectorLower    = p5.Vector.fromAngle(endAngle, lowerSide*size);
-    startEdgeVectorHigher = p5.Vector.fromAngle(startAngle, higherSide*size);
-    endEdgeVectorHigher   = p5.Vector.fromAngle(endAngle, higherSide*size);
-
-    buffer.beginShape();
-    buffer.vertex(startX + startEdgeVectorLower.x, startY + startEdgeVectorLower.y);
-    buffer.vertex(startX + startEdgeVectorHigher.x, startY + startEdgeVectorHigher.y);
-    buffer.vertex(endX + endEdgeVectorHigher.x, endY + endEdgeVectorHigher.y);
-    buffer.vertex(endX + endEdgeVectorLower.x, endY + endEdgeVectorLower.y);
-    buffer.endShape();
+    for (let i = 0; i < steps; i++) {
+      const brushHex = brushHexWithHueVarSeed(startX + startY + i);
+      buffer.fill(brushHex);
+  
+      const lowerSide = size  * - 0.5 + (i) * (gapSize*circleSize + circleSize);
+      const higherSide = size * - 0.5 + (i) * (gapSize*circleSize + circleSize) + circleSize;
+  
+      startEdgeVectorLower  = p5.Vector.fromAngle(startAngle, lowerSide);
+      endEdgeVectorLower    = p5.Vector.fromAngle(endAngle, lowerSide);
+      startEdgeVectorHigher = p5.Vector.fromAngle(startAngle, higherSide);
+      endEdgeVectorHigher   = p5.Vector.fromAngle(endAngle, higherSide);
+  
+      buffer.beginShape();
+      buffer.vertex(startX + startEdgeVectorLower.x, startY + startEdgeVectorLower.y);
+      buffer.vertex(startX + startEdgeVectorHigher.x, startY + startEdgeVectorHigher.y);
+      buffer.vertex(endX + endEdgeVectorHigher.x, endY + endEdgeVectorHigher.y);
+      buffer.vertex(endX + endEdgeVectorLower.x, endY + endEdgeVectorLower.y);
+      buffer.endShape();
+    }
+  } else {
+    const steps = map(size, 4, 300, 5, 36);
+    for (let i = 0; i < steps; i++) {
+      const brushHex = brushHexWithHueVarSeed(startX + startY + i);
+      buffer.fill(brushHex);
+  
+      const lowerSide = (i/steps) - 0.5;
+      const higherSide = ((i === 0) ? 1 : (i+1)/steps) - 0.5;
+  
+      startEdgeVectorLower  = p5.Vector.fromAngle(startAngle, lowerSide*size);
+      endEdgeVectorLower    = p5.Vector.fromAngle(endAngle, lowerSide*size);
+      startEdgeVectorHigher = p5.Vector.fromAngle(startAngle, higherSide*size);
+      endEdgeVectorHigher   = p5.Vector.fromAngle(endAngle, higherSide*size);
+  
+      buffer.beginShape();
+      buffer.vertex(startX + startEdgeVectorLower.x, startY + startEdgeVectorLower.y);
+      buffer.vertex(startX + startEdgeVectorHigher.x, startY + startEdgeVectorHigher.y);
+      buffer.vertex(endX + endEdgeVectorHigher.x, endY + endEdgeVectorHigher.y);
+      buffer.vertex(endX + endEdgeVectorLower.x, endY + endEdgeVectorLower.y);
+      buffer.endShape();
+    }
   }
 }
 
@@ -921,7 +951,7 @@ function redrawInterface(buffer, currentInputMode) {
       buffer.stroke(brushHexWithHueVarSeed(penStartX * penStartY));
       drawWithLine(buffer, penStartX, penStartY, penX, penY, easedSize);
     } else if (brushTool === "Sharp Line Tool") { 
-      drawWithSharpLine(buffer, penStartX, penStartY, penStartAngle, penX, penY, penAngle, easedSize);
+      drawWithSharpLine(buffer, penStartX, penStartY, penStartAngle, penX, penY, penAngle, easedSize, texture);
     } else if (brushTool === "Triangle Tool") {
       buffer.fill(brushHexWithHueVarSeed(penStartX * penStartY));
       drawwithTriangle(buffer, penStartX, penStartY, penX, penY, penRecording, easedSize);
@@ -962,7 +992,7 @@ function redrawInterface(buffer, currentInputMode) {
         buffer.stroke(brushHex);
         drawWithLine(buffer, 0, 0, 40, 0, cornerPreviewBrushSize);
       } else if (menuBrushTool === "Sharp Line Tool") {
-        drawWithSharpLine(buffer, 0, 0, penStartAngle, 40, 0, penAngle, cornerPreviewBrushSize);
+        drawWithSharpLine(buffer, 0, 0, penStartAngle, 40, 0, penAngle, cornerPreviewBrushSize, menuTexture);
       } else {
         buffer.stroke(brushHex);
         drawWithPlaceholder(buffer, 0, 0, 40, 0, cornerPreviewBrushSize);
@@ -1115,7 +1145,7 @@ function redrawInterface(buffer, currentInputMode) {
       drawWithLine(buffer, penX, penY, penX, penY, easedSize)
     } else if (brushTool === "Sharp Line Tool") {
       if (penLastX !== undefined && penLastY !== undefined) {
-        drawWithSharpLine(buffer, penLastX, penLastY, penAngle, penX, penY, penAngle, easedSize);
+        drawWithSharpLine(buffer, penLastX, penLastY, penAngle, penX, penY, penAngle, easedSize, texture);
       }
     }
   }
