@@ -927,22 +927,26 @@ function redrawInterface(buffer, currentInputMode) {
   // Clear the UI buffer
   buffer.clear();
 
+  // Interface Colors
+  const bgHex = okhex(bgLuminance*0.9, bgChroma*0.5, bgHue)
+  const visibleTextLum = constrain(bgLuminance + (bgLuminance > 0.5 ? -0.4 : 0.4), 0, 1.0);
+  const lessTextLum = constrain(bgLuminance + (bgLuminance > 0.5 ? -0.25 : 0.25), 0, 1.0);
+  const visHex = okhex(visibleTextLum, min(bgChroma, 0.2), bgHue);
+
+  const brushHex = okhex(brushLuminance, brushChroma, brushHue);
+  const visibleTextOnBrushLum = constrain(brushLuminance + (brushLuminance > 0.5 ? -0.6 : 0.6), 0, 1.0);
+  const onBrushHex = okhex(visibleTextOnBrushLum, brushChroma*0.5, brushHue);
+  const refHex = okhex(refLuminance, refChroma, refHue);
+  const easedSize = easeInCirc(brushSize, 4, 600);
+
   // Background borders
   const borderH = height/8;
   const borderW = width/8;
-  buffer.fill(okhex(bgLuminance*0.9, bgChroma*0.5, bgHue));
+  buffer.fill(bgHex);
   buffer.rect(0,              0, width, borderH);
   buffer.rect(0, height-borderH, width, borderH);
   buffer.rect(            0, 0, borderW, height);
   buffer.rect(width-borderW, 0, borderW, height);
-
-
-  const visibleTextLum = constrain(bgLuminance + (bgLuminance > 0.5 ? -0.4 : 0.4), 0, 1.0);
-  const lessTextLum = constrain(bgLuminance + (bgLuminance > 0.5 ? -0.25 : 0.25), 0, 1.0);
-  const visHex = okhex(visibleTextLum, min(bgChroma, 0.2), bgHue);
-  const brushHex = okhex(brushLuminance, brushChroma, brushHue);
-  const refHex = okhex(refLuminance, refChroma, refHue);
-  const easedSize = easeInCirc(brushSize, 4, 600);
 
 
   // Unfinished brushstroke preview
@@ -1002,19 +1006,31 @@ function redrawInterface(buffer, currentInputMode) {
     buffer.pop();
 
     if (spotY > 0) {
-      buffer.fill(visHex);
       buffer.textAlign(CENTER);
       if (brushTool === menuBrushTool && texture === menuTexture) {
+        buffer.fill(visHex);
         buffer.textStyle(ITALIC);
+      } else {
+        buffer.stroke(brushHex);
+        buffer.strokeWeight(3);
+        buffer.fill(onBrushHex);
       }
       buffer.text(menuName, 0, 0 + 60*spotY, 100, 60);
       buffer.textStyle(NORMAL);
+      buffer.noStroke();
+      buffer.strokeWeight(6);
     }
     buffer.textAlign(LEFT);
   }
 
   function topButton(text, x) {
-    buffer.fill(visHex);
+    if (x === 0) {
+      buffer.stroke(brushHex);
+      buffer.strokeWeight(3);
+      buffer.fill(onBrushHex);
+    } else {
+      buffer.fill(visHex);
+    }
     buffer.text(text, x, 0, 100, 60);
     buffer.stroke(visHex);
     buffer.strokeWeight(1);
@@ -1059,50 +1075,43 @@ function redrawInterface(buffer, currentInputMode) {
   //   // });
   // }
 
-  // bottom right text
-  buffer.textAlign(RIGHT);
-  const rightCornerText = (deviceMode !== "notouch") ? "TAP 1/2/3 FINGERS, APPLE PENCIL TO DRAW" : "KEYS 1/2/3/4 TO ADJUST"
-  buffer.text(rightCornerText, width - 20, height - 20);
-  buffer.textAlign(LEFT);
-
   // bottom left text
-  buffer.text("okLCH:" + brushLuminance.toFixed(3) +
-      ", " + brushChroma.toFixed(3) +
-      ", " + brushHue.toFixed(1) +
-      "  noise:" + map(brushVar, 4, 600, 0, 100).toFixed(1) + "%",
-    20, height - 20
-  );
+  if (currentInputMode === "lumAndChr"
+    || currentInputMode === "hue" 
+    || currentInputMode === "eyedropper") {
 
-  buffer.fill(okhex(lessTextLum, min(bgChroma, 0.2), bgHue));
+    const newColorText = "okLCH:" + brushLuminance.toFixed(3) +
+    ", " + brushChroma.toFixed(3) +
+    ", " + brushHue.toFixed(1) +
+    "  noise:" + map(brushVar, 4, 600, 0, 100).toFixed(1) + "%";
 
-  if (refLuminance !== undefined) {
-    buffer.text("okLCH:" + refLuminance.toFixed(3) +
-        ", " + refChroma.toFixed(3) +
-        ", " + refHue.toFixed(1) +
-        "  noise:" + map(refVar, 4, 600, 0, 100).toFixed(1) + "%",
-      20, height - 40
-    );
+    buffer.text(newColorText, 20, height - 20);
+    
+    if (refLuminance !== undefined) {
+      buffer.fill(okhex(lessTextLum, min(bgChroma, 0.2), bgHue));
+
+      const refColorText = "okLCH:" + refLuminance.toFixed(3) +
+      ", " + refChroma.toFixed(3) +
+      ", " + refHue.toFixed(1) +
+      "  noise:" + map(refVar, 4, 600, 0, 100).toFixed(1) + "%";
+
+      buffer.text(refColorText, 20, height - 40);
+    }
+  } else if (currentInputMode === "size") {
+    buffer.text(easedSize.toFixed(1), 20, height - 20);
+  } else {
+    const controlsInfo = (deviceMode !== "notouch") ? "TAP 1/2/3 FINGERS, APPLE PENCIL TO DRAW" : "KEYS 1/2/3/4 TO ADJUST"
+    buffer.text(controlsInfo, 20, height - 20);
   }
 
-  // draw recording debug info
-  // let lastX;
-  // let lastY;
-  // buffer.stroke("red");
-  // penRecording.forEach((point) => {
-  //   if (lastX !== undefined) {
-  //     buffer.line(lastX, lastY, point.x, point.y)
-  //   }
-  //   lastX = point.x;
-  //   lastY = point.y
-  // });
-  // buffer.noStroke();
 
-  // draw debug rectangle around last stroke
+  // draw rectangle around stroke being edited
   if (editMode && penRecording.length > 0) {
-    const xmin = penRecording.reduce((a, b) => Math.min(a, b.x),  Infinity) - easedSize*0.5;
-    const xmax = penRecording.reduce((a, b) => Math.max(a, b.x), -Infinity) + easedSize*0.5;
-    const ymin = penRecording.reduce((a, b) => Math.min(a, b.y),  Infinity) - easedSize*0.5;
-    const ymax = penRecording.reduce((a, b) => Math.max(a, b.y), -Infinity) + easedSize*0.5;
+    const margin = (["Triangle Tool", "Lasso Tool", "Mirror Tool"].includes(brushTool)) ? 0 : easedSize*0.5;
+    const xmin = penRecording.reduce((a, b) => Math.min(a, b.x),  Infinity) - margin;
+    const xmax = penRecording.reduce((a, b) => Math.max(a, b.x), -Infinity) + margin;
+    const ymin = penRecording.reduce((a, b) => Math.min(a, b.y),  Infinity) - margin;
+    const ymax = penRecording.reduce((a, b) => Math.max(a, b.y), -Infinity) + margin;
   
     buffer.stroke(okhex(bgLuminance, bgChroma, bgHue));
     buffer.strokeWeight(3);
