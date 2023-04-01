@@ -71,9 +71,8 @@ let penRecording = [];
 let editMode = false;
 
 // touch control state
-const fingerState = {
-  peakCount: 0,
-  canDecreaseCount: false
+const touchInterfaceState = {
+  onPage: 0,
 }
 
 
@@ -255,6 +254,7 @@ function updateInput(event) {
 
   // update touches/mouse
   wasDown = penDown;
+  const wasFingersDown = fingersDown
   fingersDown = 0;
   penStarted = false;
   //wiplog += event.type + event.changedTouches[0].identifier + " "
@@ -326,12 +326,10 @@ function updateInput(event) {
 
   // tap
   if (event.type === "touchstart" && !penDown) {
-    if (fingerState.canDecreaseCount) {
-      fingerState.peakCount = (fingersDown > fingerState.peakCount) ? fingersDown : 0;
-      fingerState.canDecreaseCount = false; //false;
-    } else {
-      fingerState.peakCount = max(fingerState.peakCount, fingersDown);
-    }
+    const newTouches = fingersDown - wasFingersDown ;
+    touchInterfaceState.onPage = newTouches + touchInterfaceState.onPage;
+    if (touchInterfaceState.onPage >= 4) touchInterfaceState.onPage = 0;
+
     penStartX = undefined;
     penStartY = undefined;
     penStartAngle = undefined;
@@ -341,8 +339,7 @@ function updateInput(event) {
   // pen lifted
   if (wasDown && !penDown) {
     if (fingersDown === 0) {
-      fingerState.peakCount = 0;
-      fingerState.canDecreaseCount = false;
+      touchInterfaceState.onPage = 0;
     }
     // also leave edit mode
     if (editMode) {
@@ -356,14 +353,9 @@ function updateInput(event) {
   }
 
   // last finger lifted
-  if ((event.type === "touchend" && ongoingTouches.length === 0) || event.type === "touchcancel") {
-    // was in a mode
-    if (fingerState.peakCount > 0) {
-      // now that there are no touches, the next tap can set the mode to 0 if it's less fingers than the last
-      fingerState.canDecreaseCount = true; 
-    }
-    return;
-  }
+  // if ((event.type === "touchend" && ongoingTouches.length === 0) || event.type === "touchcancel") {
+  //   return;
+  // }
 }
 
 function keyPressed() {
@@ -418,15 +410,15 @@ function keyReleased() {
 
 function inputMode() {
   //'1', luminance and chroma 
-  if (keyIsDown(49) || (fingerState.peakCount === 1 && fingersDown === 0)) {
+  if (keyIsDown(49) || (touchInterfaceState.onPage === 1 && fingersDown === 0)) {
     return "lumAndChr";
   }
   //'2', hue
-  if (keyIsDown(50) || (fingerState.peakCount === 2 && fingersDown === 0)) {
+  if (keyIsDown(50) || (touchInterfaceState.onPage === 2 && fingersDown === 0)) {
     return "hue";
   }
   //'3', size
-  if (keyIsDown(51) || (fingerState.peakCount === 3 && fingersDown === 0)) {
+  if (keyIsDown(51) || (touchInterfaceState.onPage === 3 && fingersDown === 0)) {
     return "size";
   }
   //'4', eyedropper ... WIP, currently not on touch
@@ -1048,8 +1040,10 @@ function redrawInterface(buffer, currentInputMode) {
   topButton("save S", width-100*1);
   buffer.textAlign(LEFT);
 
-  //const leftW = 110
-  //buffer.text(deviceMode + " " + penDown + " start x " + penStartX + ",y " + penStartY + ", pen x" + penX + ",y " + penY + " a" + penAngle + " p" + penPressure, leftW, 70);
+  const leftW = 110
+  //const debugText = deviceMode + " " + penDown + " start x " + penStartX + ",y " + penStartY + ", pen x" + penX + ",y " + penY + " a" + penAngle + " p" + penPressure
+  const debugText = touchInterfaceState.onPage
+  buffer.text(debugText, leftW, 70);
   
   // if (devicemode === "notouch") {
   //   buffer.text("1/2/3: Color/Size •  C:Clear with color", leftW, 30);
