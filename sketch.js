@@ -65,6 +65,7 @@ let penStartX;
 let penStartY;
 let penStartAngle;
 let penStartPressure;
+let penStartTimeStamp;
 let penLastX;
 let penLastY;
 let penStarted = false;
@@ -354,6 +355,7 @@ function updateInput(event) {
     penStartAngle = penAngle;
     penStartPressure = penPressure;
     penStarted = true;
+    penStartTimeStamp = event.timeStamp;
     if (!editMode && inputMode() === "draw") penRecording = [];
     return;
   }
@@ -398,11 +400,7 @@ function updateInput(event) {
             touchInterfaceState.onPage = 1;
           }
         }
-      } else {
-        // always close menus after lifting the pen
-        touchInterfaceState.onPage = 0;
-      }
-      
+      } 
     }
     // also leave edit mode
     if (editMode) {
@@ -412,6 +410,23 @@ function updateInput(event) {
     }
     penLastX = undefined;
     penLastY = undefined;
+
+    const penDownDuration = event.timeStamp - penStartTimeStamp;
+    const penDownBounds = dist(penStartX, penStartY, penX, penY);
+
+    if (penDownDuration < 200 && penDownBounds < 20) {
+      doAction("undo");
+      touchInterfaceState.onPage++;
+      if (touchInterfaceState.onPage >= 4) touchInterfaceState.onPage = 0;
+      print(touchInterfaceState.onPage, fingersDown)
+    } else {
+      // was actually dragging
+      if (fingersDown === 0) {
+        // always close menus after lifting the pen
+        touchInterfaceState.onPage = 0;
+      }
+    }
+
     return;
   }
 
@@ -487,7 +502,7 @@ function inputMode() {
 
   //'1', luminance and chroma 
   if (keyIsDown(49) || (touchInterfaceState.onPage === 1 && fingersDown === 0)) {
-    return "penMenu"; //"lumAndChr";
+    return "lumAndChr";
   }
   //'2', hue
   if (keyIsDown(50) || (touchInterfaceState.onPage === 2 && fingersDown === 0)) {
@@ -513,8 +528,7 @@ function draw() {
     || currentInputMode === "hue" 
     || currentInputMode === "size" 
     || currentInputMode === "eyedropper"
-    || currentInputMode === "phoneMenu"
-    || currentInputMode === "penMenu") { // menu opened
+    || currentInputMode === "phoneMenu") { // menu opened
 
     // save the old brush values as a reference when opening a menu
     updateBrushReferenceFromInput();
@@ -696,17 +710,15 @@ function drawInNewStrokeBuffer(buffer, startX, startY, startAngle, startPressure
 function updateBrushSettingsFromInput(currentInputMode) {
   const penMode = (isTouchControl && penStartX !== undefined && penStartY !== undefined)
 
-  // TEST
-  if (currentInputMode === "penMenu") {
+  if (currentInputMode === "lumAndChr") {
 
     // Get altitude and angle change
-    let deltaAngle = p5.Vector.fromAngle(refAngle).angleBetween(p5.Vector.fromAngle(penAngle));
-    if (!Number.isNaN(deltaAngle)) {
-      brushHue = (refHue + degrees(deltaAngle));
-      if (brushHue < 0) brushHue += 360;
-      if (brushHue > 360) brushHue -= 360;
-    }
-
+    // let deltaAngle = p5.Vector.fromAngle(refAngle).angleBetween(p5.Vector.fromAngle(penAngle));
+    // if (!Number.isNaN(deltaAngle)) {
+    //   brushHue = (refHue + degrees(deltaAngle));
+    //   if (brushHue < 0) brushHue += 360;
+    //   if (brushHue > 360) brushHue -= 360;
+    // }
 
     // Get positions
     let deltaX = penX - (penMode ? penStartX : refX);
@@ -716,19 +728,6 @@ function updateBrushSettingsFromInput(currentInputMode) {
     //let rotationAngle = radians(brushHue - refHue);
     //[deltaX, deltaY] = adjustDeltaWithRotation(deltaX, deltaY, -rotationAngle);
 
-    let rangeX = gadgetRadius * 2;
-    let rangeY = gadgetRadius * 2;
-
-    // Map to chroma and luminance
-    brushChroma = map(deltaX + rangeX * (refChroma * 2), 0, rangeX, 0, 0.5, true);
-    brushLuminance = map(-deltaY + rangeY * refLuminance, 0, rangeY, 0, 1, true);
-
-    
-
-  } else if (currentInputMode === "lumAndChr") { 
-    // Get positions
-    let deltaX = penX - (penMode ? penStartX : refX);
-    let deltaY = penY - (penMode ? penStartY : refY);
     let rangeX = gadgetRadius * 2;
     let rangeY = gadgetRadius * 2;
 
@@ -1261,8 +1260,7 @@ function redrawInterface(buffer, currentInputMode) {
   if (!phoneMode) {
     if (currentInputMode === "lumAndChr"
       || currentInputMode === "hue" 
-      || currentInputMode === "eyedropper"
-      || currentInputMode === "penMenu") {
+      || currentInputMode === "eyedropper") {
 
       const newColorText = "okLCH:" + brushLuminance.toFixed(3) +
       ", " + brushChroma.toFixed(3) +
@@ -1432,7 +1430,7 @@ function redrawInterface(buffer, currentInputMode) {
       drawEditedColor(currentColorSize, ankerX, ankerY);
       drawCrosshair(currentColorSize, ankerX, ankerY);
 
-    } else if (currentInputMode === "penMenu") {
+    } else if (currentInputMode === "lumAndChr") {
 
       const radius = gadgetRadius;
       buffer.push();
@@ -1462,68 +1460,6 @@ function redrawInterface(buffer, currentInputMode) {
       // Show color at reference position
       const currentColorSize = constrain(easeInCirc(brushSize, 4, 600), 8, gadgetRadius/3);
       drawEditedColor(currentColorSize, ankerX, ankerY);
-
-      // draw hue circle at pencil
-      // if (penX !== refX) {
-      //   buffer.strokeWeight(8);
-      //   drawHueCircle(createVector(penX, penY-4), 12, 24, 0.0, brushChroma, radians(refHue));
-      //   buffer.strokeWeight(6);
-      //   drawHueCircle(createVector(penX, penY-4), 12, 24, brushLuminance, brushChroma, radians(refHue));
-      //   buffer.noStroke();
-      // }
-
-    } else if (currentInputMode === "lumAndChr") {
-
-      const radius = gadgetRadius;
-      const boxBaseX = ankerX + radius;
-      const boxBaseY = ankerY + radius;
-
-      const boxAddX = radius * 2 * (brushChroma * 2);
-      const boxAddY = radius * 2 * (1 - brushLuminance);
-
-      buffer.push();
-      buffer.translate(boxBaseX - boxAddX, boxBaseY - boxAddY);
-      
-      // test
-      // if (currentInputMode === "penMenu") {
-      //   buffer.rotate(radians(brushHue - refHue));
-      // }
-      
-
-      // gray left
-      let startLCHarr = [1.0, 0.0, brushHue];
-      let endLCHarr = [0.0, 0.0, brushHue];
-      drawGradientLine(-radius, -radius, -radius, radius, startLCHarr, endLCHarr);
-      // top
-      buffer.fill("white");
-      startLCHarr = [1.0, 0.5, brushHue];
-      endLCHarr = [1.0, 0.0, brushHue];
-      drawGradientLine(radius, -radius, -radius, -radius, startLCHarr, endLCHarr);
-      buffer.noStroke();
-      buffer.ellipse(-radius, -radius, 20);
-      // colorful right
-      buffer.fill(okhex(1, 0.5, brushHue));
-      startLCHarr = [0.0, 0.5, brushHue];
-      endLCHarr = [1.0, 0.5, brushHue];
-      drawGradientLine(radius, radius, radius, -radius, startLCHarr, endLCHarr);
-      buffer.noStroke();
-      buffer.ellipse(radius, -radius, 20);
-      // bottom
-      buffer.stroke("black");
-      buffer.fill("black");
-      buffer.line(-radius, radius, radius, radius);
-      buffer.noStroke();
-      buffer.ellipse(-radius, radius, 20);
-      buffer.fill(okhex(0.0, 0.5, brushHue));
-      buffer.ellipse(radius, radius, 20);
-
-      buffer.noStroke();
-      buffer.pop();
-
-      // Show color at reference position
-      const currentColorSize = constrain(easeInCirc(brushSize, 4, 600), 8, gadgetRadius/3);
-      drawEditedColor(currentColorSize, ankerX, ankerY);
-      drawCrosshair(currentColorSize, ankerX, ankerY);
 
     } else if (currentInputMode === "size") {
 
