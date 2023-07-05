@@ -13,6 +13,9 @@ let bgLuminance = 0.8;
 // reference of previous brush settings for relative change
 let refX;
 let refY;
+let refAlt;
+let refAngle;
+
 let refHue;
 let refVar;
 let refChroma;
@@ -68,6 +71,7 @@ let penStarted = false;
 let wasDown = false;
 let penDown = false;
 let penAngle = undefined;
+let penAltitude = undefined;
 let penPressure = undefined;
 let fingersDown = 0;
 let wiplog = "";
@@ -181,8 +185,8 @@ function handleTouchEnd(event) {
   updateInput(event);
   draw();
 }
-function copyTouch({identifier, clientX, clientY, force, touchType, azimuthAngle}) {
-  return {identifier, clientX, clientY, force, touchType, azimuthAngle};
+function copyTouch({identifier, clientX, clientY, force, touchType, azimuthAngle, altitudeAngle}) {
+  return {identifier, clientX, clientY, force, touchType, azimuthAngle, altitudeAngle};
 }
 
 function ongoingTouchIndexById(idToFind) {
@@ -321,6 +325,7 @@ function updateInput(event) {
         if (tappedInMenu(touch.clientX, touch.clientY)) return;
         if (touch.touchType !== "stylus") {
           fingersDown++;
+          refAngle = undefined;
         } else {
           // must be Pencil
           penLastX = penX;
@@ -329,6 +334,7 @@ function updateInput(event) {
           penY = touch.clientY;
           containedPen = true;
           penAngle = touch.azimuthAngle;
+          penAltitude = touch.altitudeAngle;
           penPressure = touch.force;
         }
       });
@@ -481,7 +487,7 @@ function inputMode() {
 
   //'1', luminance and chroma 
   if (keyIsDown(49) || (touchInterfaceState.onPage === 1 && fingersDown === 0)) {
-    return "lumAndChr";
+    return "penMenu"; //"lumAndChr";
   }
   //'2', hue
   if (keyIsDown(50) || (touchInterfaceState.onPage === 2 && fingersDown === 0)) {
@@ -507,7 +513,8 @@ function draw() {
     || currentInputMode === "hue" 
     || currentInputMode === "size" 
     || currentInputMode === "eyedropper"
-    || currentInputMode === "phoneMenu") { // menu opened
+    || currentInputMode === "phoneMenu"
+    || currentInputMode === "penMenu") { // menu opened
 
     // save the old brush values as a reference when opening a menu
     updateBrushReferenceFromInput();
@@ -566,12 +573,16 @@ function clearBrushReference() {
   refLuminance = undefined;
   refSize = undefined;
   refVar = undefined;
+  refAlt = undefined;
+  refAngle = undefined;
 }
 
 function updateBrushReferenceFromInput() {
   // starting position
   if (refX === undefined) refX = penX;
   if (refY === undefined) refY = penY;
+  if (refAlt === undefined) refAlt = penAltitude;
+  if (refAngle === undefined) refAngle = penAngle;
   // starting brush settings
   if (refHue === undefined) refHue = brushHue;
   if (refChroma === undefined) refChroma = brushChroma;
@@ -662,10 +673,59 @@ function drawInNewStrokeBuffer(buffer, startX, startY, startAngle, startPressure
   }
 }
 
+
+// function adjustDeltaWithRotation(deltaX, deltaY, rotationAngle) {
+//   // Calculate the length of the hypotenuse (r) using Pythagorean theorem
+//   const hypotenuse = Math.sqrt(deltaX ** 2 + deltaY ** 2);
+
+//   // Calculate the current angle (theta) using arctangent
+//   const currentAngle = Math.atan2(deltaY, deltaX);
+
+//   // Add the rotation angle to the current angle
+//   const newAngle = currentAngle + rotationAngle;
+
+//   // Calculate the adjusted deltaX and deltaY using trigonometry
+//   const adjustedDeltaX = hypotenuse * Math.cos(newAngle);
+//   const adjustedDeltaY = hypotenuse * Math.sin(newAngle);
+
+//   return [adjustedDeltaX, adjustedDeltaY];
+// }
+
+
+
 function updateBrushSettingsFromInput(currentInputMode) {
   const penMode = (isTouchControl && penStartX !== undefined && penStartY !== undefined)
 
-  if (currentInputMode === "lumAndChr") { 
+  // TEST
+  if (currentInputMode === "penMenu") {
+
+    // Get altitude and angle change
+    let deltaAngle = p5.Vector.fromAngle(refAngle).angleBetween(p5.Vector.fromAngle(penAngle));
+    if (!Number.isNaN(deltaAngle)) {
+      brushHue = (refHue + degrees(deltaAngle));
+      if (brushHue < 0) brushHue += 360;
+      if (brushHue > 360) brushHue -= 360;
+    }
+
+
+    // Get positions
+    let deltaX = penX - (penMode ? penStartX : refX);
+    let deltaY = penY - (penMode ? penStartY : refY);
+
+    // in rotated space
+    //let rotationAngle = radians(brushHue - refHue);
+    //[deltaX, deltaY] = adjustDeltaWithRotation(deltaX, deltaY, -rotationAngle);
+
+    let rangeX = gadgetRadius * 2;
+    let rangeY = gadgetRadius * 2;
+
+    // Map to chroma and luminance
+    brushChroma = map(deltaX + rangeX * (refChroma * 2), 0, rangeX, 0, 0.5, true);
+    brushLuminance = map(-deltaY + rangeY * refLuminance, 0, rangeY, 0, 1, true);
+
+    
+
+  } else if (currentInputMode === "lumAndChr") { 
     // Get positions
     let deltaX = penX - (penMode ? penStartX : refX);
     let deltaY = penY - (penMode ? penStartY : refY);
@@ -1201,7 +1261,8 @@ function redrawInterface(buffer, currentInputMode) {
   if (!phoneMode) {
     if (currentInputMode === "lumAndChr"
       || currentInputMode === "hue" 
-      || currentInputMode === "eyedropper") {
+      || currentInputMode === "eyedropper"
+      || currentInputMode === "penMenu") {
 
       const newColorText = "okLCH:" + brushLuminance.toFixed(3) +
       ", " + brushChroma.toFixed(3) +
@@ -1235,7 +1296,37 @@ function redrawInterface(buffer, currentInputMode) {
     }
   }
   
+  // draw the sliders at the top
+  const sliderStart = width/2 - 300;
+  drawGradientSlider(sliderStart, 0, 200, 60, [0.0, brushChroma, brushHue], [1.0, brushChroma, brushHue], brushLuminance)
+  drawGradientSlider(sliderStart+200, 0, 200, 60, [brushLuminance, 0.0, brushHue], [brushLuminance, 0.5, brushHue], brushChroma*2)
+  drawGradientSlider(sliderStart+400, 0, 200, 60, [brushLuminance, brushChroma, 0], [brushLuminance, brushChroma, 360], brushHue/360)
+  if (refHue !== undefined) {
+    drawGradientSlider(sliderStart, 0, 200, 10, [0.0, refChroma, refHue], [1.0, refChroma, refHue], refLuminance)
+    drawGradientSlider(sliderStart+200, 0, 200, 10, [refLuminance, 0.0, refHue], [refLuminance, 0.5, refHue], refChroma*2)
+    drawGradientSlider(sliderStart+400, 0, 200, 10, [refLuminance, refChroma, 0], [refLuminance, refChroma, 360], refHue/360)
+    buffer.fill(okhex(refLuminance, refChroma, refHue));
+  } else {
+    buffer.fill(okhex(brushLuminance, brushChroma, brushHue));
+  }
+  buffer.rect(sliderStart-60, 0, 60, 60);
+  
+  drawEditedColor(55, sliderStart - 30, 30);
 
+  // draw the size indicator
+  buffer.drawingContext.save();
+  buffer.fill(okhex(bgLuminance, bgChroma, bgHue));
+  buffer.rect(sliderStart + 600, 0, 60, 60);
+  buffer.drawingContext.clip();
+  buffer.fill(okhex(brushLuminance, brushChroma, brushHue));
+  drawStamp(buffer, sliderStart + 630, 30, easedSize, penAngle, penPressure, texture);
+  buffer.noFill();
+  buffer.stroke(visHex);
+  buffer.strokeWeight(1);
+  buffer.ellipse(sliderStart + 630, 30, easedSize, easedSize)
+  buffer.drawingContext.restore();
+  buffer.noStroke();
+  
 
   // draw rectangle around stroke being edited
   if (editMode && penRecording.length > 0) {
@@ -1341,6 +1432,46 @@ function redrawInterface(buffer, currentInputMode) {
       drawEditedColor(currentColorSize, ankerX, ankerY);
       drawCrosshair(currentColorSize, ankerX, ankerY);
 
+    } else if (currentInputMode === "penMenu") {
+
+      const radius = gadgetRadius;
+      buffer.push();
+      buffer.translate(ankerX, ankerY);
+
+      buffer.fill("black")
+      buffer.ellipse(0, 0, constrain(easeInCirc(brushSize, 4, 600), 8, gadgetRadius/3)+2)
+
+      let startLumArr = [1.0, brushChroma, brushHue];
+      let endLumArr = [0.0, brushChroma, brushHue];
+      buffer.stroke("black");
+      buffer.strokeWeight(8);
+      buffer.line(0, radius*2 * (-1 + brushLuminance), 0, radius*2 * brushLuminance);
+      buffer.strokeWeight(6);
+      drawGradientLine(0, radius*2 * (-1 + brushLuminance), 0, radius*2 * brushLuminance, startLumArr, endLumArr);
+
+      let startChromaArr = [brushLuminance, 0.0, brushHue];
+      let endChromaArr = [brushLuminance, 0.5, brushHue];
+      buffer.stroke("black");
+      buffer.strokeWeight(8);
+      buffer.line(radius*2 * (- brushChroma*2), 0, radius*2 * (1-brushChroma*2), 0);
+      buffer.strokeWeight(6);
+      drawGradientLine(radius*2 * (- brushChroma*2), 0, radius*2 * (1-brushChroma*2), 0, startChromaArr, endChromaArr);
+      
+      buffer.pop();
+
+      // Show color at reference position
+      const currentColorSize = constrain(easeInCirc(brushSize, 4, 600), 8, gadgetRadius/3);
+      drawEditedColor(currentColorSize, ankerX, ankerY);
+
+      // draw hue circle at pencil
+      // if (penX !== refX) {
+      //   buffer.strokeWeight(8);
+      //   drawHueCircle(createVector(penX, penY-4), 12, 24, 0.0, brushChroma, radians(refHue));
+      //   buffer.strokeWeight(6);
+      //   drawHueCircle(createVector(penX, penY-4), 12, 24, brushLuminance, brushChroma, radians(refHue));
+      //   buffer.noStroke();
+      // }
+
     } else if (currentInputMode === "lumAndChr") {
 
       const radius = gadgetRadius;
@@ -1352,6 +1483,12 @@ function redrawInterface(buffer, currentInputMode) {
 
       buffer.push();
       buffer.translate(boxBaseX - boxAddX, boxBaseY - boxAddY);
+      
+      // test
+      // if (currentInputMode === "penMenu") {
+      //   buffer.rotate(radians(brushHue - refHue));
+      // }
+      
 
       // gray left
       let startLCHarr = [1.0, 0.0, brushHue];
@@ -1478,8 +1615,17 @@ function redrawInterface(buffer, currentInputMode) {
     buffer.noStroke();
   }
 
+  function directMix(startArr, endArr, colorLerpAmt) {
+    const mixedArr = [
+      lerp(startArr[0], endArr[0], colorLerpAmt),
+      lerp(startArr[1], endArr[1], colorLerpAmt),
+      lerp(startArr[2], endArr[2], colorLerpAmt),
+    ];
+    return chroma.oklch(mixedArr[0], mixedArr[1], mixedArr[2]);
+  }
+
   function drawGradientLine(xStart, yStart, xEnd, yEnd, startArr, endArr) {
-    const segments = 20;
+    const segments = Math.floor(gadgetRadius)/2;
     let lastX = xStart;
     let lastY = yStart;
     for (let i = 1; i < segments + 1; i++) {
@@ -1494,14 +1640,23 @@ function redrawInterface(buffer, currentInputMode) {
       lastX = toX;
       lastY = toY;
     }
+  }
+
+  function drawGradientSlider(x, y, width, height, startArr, endArr, sliderPercent) {
+    const segments = 100;
+    const currentSegment = Math.round(segments * sliderPercent);
+
+    for (let i = 0; i < segments; i++) {
+      const colorLerpAmt = (i + 0.5) / segments;
+      const mixedOkLCH = directMix(startArr, endArr, colorLerpAmt);
   
-    function directMix(startArr, endArr, colorLerpAmt) {
-      const mixedArr = [
-        lerp(startArr[0], endArr[0], colorLerpAmt),
-        lerp(startArr[1], endArr[1], colorLerpAmt),
-        lerp(startArr[2], endArr[2], colorLerpAmt),
-      ];
-      return chroma.oklch(mixedArr[0], mixedArr[1], mixedArr[2]);
+      buffer.fill(mixedOkLCH.hex());
+      buffer.rect(x + (i/segments) * width, y, width/segments, height);
+
+      if (i === currentSegment) {
+        buffer.fill("white");
+        buffer.rect(x + (i/segments) * width, y, width/segments, height);
+      }
     }
   }
 
