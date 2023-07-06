@@ -77,6 +77,7 @@ let editMode = false;
 // touch control state
 const menuState = {
   onPage: 0,
+  lastGadgetPage: undefined,
   topSliderStartX: undefined,
   topSliderDeltaX: undefined,
   startedEventOnMenu: false
@@ -393,6 +394,7 @@ function updateInput(event) {
       doAction("undo");
       menuState.onPage = 1;
     } else if (menuState.onPage > 0) {
+      if (menuState.onPage > 1) menuState.lastGadgetPage = menuState.onPage;
       menuState.onPage = 0;
     }
 
@@ -663,6 +665,8 @@ function updateBrushSettingsFromInput(currentInputMode) {
         // vertical
         menuState.onPage = (deltaY < 0) ? 5 : 2;
       }  
+    } else if ((Math.abs(deltaX) > 0 || Math.abs(deltaY) > 0) && menuState.lastGadgetPage > 1) {
+      menuState.onPage = menuState.lastGadgetPage;
     }
 
   } else if (currentInputMode === "lumAndChr") {
@@ -1015,6 +1019,7 @@ function redrawInterface(buffer, activeInputGadget) {
   const visibleTextLum = constrain(bgLuminance + (bgLuminance > 0.5 ? -0.4 : 0.4), 0, 1.0);
   const lessTextLum = constrain(bgLuminance + (bgLuminance > 0.5 ? -0.25 : 0.25), 0, 1.0);
   const visHex = okhex(visibleTextLum, min(bgChroma, 0.2), bgHue);
+  const antiVisHex = okhex(constrain(0.5+(-visibleTextLum+0.5)*4, 0, 1.0), min(bgChroma, 0.2), bgHue);
 
   const brushHex = okhex(brushLuminance, brushChroma, brushHue);
   const visibleTextOnBrushLum = constrain(brushLuminance + (brushLuminance > 0.5 ? -0.6 : 0.6), 0, 1.0);
@@ -1273,8 +1278,6 @@ function redrawInterface(buffer, activeInputGadget) {
 
     if (activeInputGadget === "gadgetSelect") {
 
-      //left: LC, top: HV, right: eyedrop, bottom: eyedrop?
-
       buffer.stroke(visHex);
       buffer.strokeWeight(2);
       buffer.line(ankerX-10, ankerY, ankerX+10, ankerY);
@@ -1284,16 +1287,27 @@ function redrawInterface(buffer, activeInputGadget) {
       buffer.textStyle(BOLD);
       buffer.noStroke();
 
-      buffer.fill(bgHex+"A0");
-      buffer.ellipse(refX-40, refY   , 56, 56);
-      buffer.ellipse(refX+40, refY   , 56, 56);
-      buffer.ellipse(refX   , refY-40, 56, 56);
-      buffer.ellipse(refX   , refY+40, 56, 56);
-      buffer.fill(visHex);
-      buffer.text("H", refX-40, refY   );
-      buffer.text("S",  refX+40, refY   );
-      buffer.text("I",  refX   , refY-40);
-      buffer.text("LC",  refX   , refY+40);
+      function drawGadgetDirection(x, y, xDir, yDir, isActive, text) {
+        const size = 56;
+        const centerOffset = 40;
+        if (isActive) {
+          buffer.stroke(antiVisHex);
+          buffer.strokeWeight(20);
+          buffer.line(x, y, x+centerOffset*xDir, y+centerOffset*yDir)
+          buffer.noStroke();
+          buffer.fill(antiVisHex);
+        } else {
+          buffer.fill(bgHex+"A0");
+        }
+        buffer.ellipse(x+centerOffset*xDir, y+centerOffset*yDir, size, size);
+        buffer.fill(visHex);
+        buffer.text(text, x+centerOffset*xDir, y+centerOffset*yDir);
+      }
+
+      drawGadgetDirection(refX, refY, -1,  0, menuState.lastGadgetPage === 3, "H");
+      drawGadgetDirection(refX, refY,  1,  0, menuState.lastGadgetPage === 4, "S");
+      drawGadgetDirection(refX, refY,  0, -1, menuState.lastGadgetPage === 5, "I");
+      drawGadgetDirection(refX, refY,  0,  1, menuState.lastGadgetPage === 2, "LC");
     
     } else if (activeInputGadget === "hue") {
 
