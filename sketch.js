@@ -267,8 +267,9 @@ function updateInput(event) {
         doAction("save");
       } else if (x > width-menuW*2 && x < width-menuW*1) {
         doAction("clear");
-      } else if (x > width/2 - 200 && x < width/2 + 200) {
+      } else if (x > width/2 - 360 && x < width/2 + 360) {
         menuState.topSliderStartX = x;
+        updateBrushReferenceFromInput();
       }
       menuState.startedEventOnMenu = true;
       return true;
@@ -350,6 +351,7 @@ function updateInput(event) {
     menuState.topSliderDeltaX = undefined;
     menuState.topSliderStartX = undefined;
     menuState.startedEventOnMenu = false;
+    //clearBrushReference();
   }
 
   // pen down
@@ -1180,7 +1182,37 @@ function redrawInterface(buffer, activeInputGadget) {
       buffer.text(refColorText, width/2, 60 + 40);
     }
   } else if (menuState.topSliderDeltaX !== undefined) {
-    buffer.text(menuState.topSliderDeltaX, width/2, 60 + 20);
+    const xFromLeftEdgeOfSliders = menuState.topSliderStartX + 360 - width/2;
+    const xFromLeftWithDelta = xFromLeftEdgeOfSliders + menuState.topSliderDeltaX;
+    let section = undefined;
+    let sectionValue = undefined;
+    
+    if (xFromLeftEdgeOfSliders < 60) {
+      section = "var";
+      sectionValue = constrain(refVar + menuState.topSliderDeltaX * 0.2, 0, 360);
+      if (!isNaN(sectionValue)) brushVar = sectionValue;
+    } else if (xFromLeftEdgeOfSliders < 260) {
+      section = "luminance";
+      sectionValue = map(xFromLeftWithDelta, 60, 260, 0, 1.0);
+      brushLuminance = sectionValue;
+    } else if (xFromLeftEdgeOfSliders < 460) {
+      section = "chroma";
+      sectionValue = map(xFromLeftWithDelta, 260, 460, 0, 1.0);
+      brushChroma = sectionValue * 0.5;
+    } else if (xFromLeftEdgeOfSliders < 660) {
+      section = "hue";
+      sectionValue = map(xFromLeftWithDelta, 460, 660, 0, 1.0);
+      if (sectionValue > 1) sectionValue %= 1;
+      if (sectionValue < 0) sectionValue = 360-(Math.abs(sectionValue) % 1);
+      brushHue = sectionValue * 360;
+    } else {
+      section = "size";
+      sectionValue = constrain(refSize + menuState.topSliderDeltaX * 0.2, 4, 600);
+      if (!isNaN(sectionValue)) brushSize = sectionValue;
+    }
+
+    buffer.textAlign(CENTER);
+    buffer.text(section + ": " + sectionValue, width/2, 60 + 20);
   }
 
   buffer.textAlign(LEFT);
