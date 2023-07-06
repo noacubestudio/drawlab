@@ -75,9 +75,12 @@ let penRecording = [];
 let editMode = false;
 
 // touch control state
-const touchInterfaceState = {
+const menuState = {
   onPage: 0,
-}
+  topSliderStartX: undefined,
+  topSliderDeltaX: undefined,
+  startedEventOnMenu: false
+};
 
 
 function setup() {
@@ -130,8 +133,8 @@ function windowResized() {
 }
 
 function newCanvasSize() {
-  const scrollBarMargin = (isTouchControl) ? 0 : 10;
-  resizeCanvas(windowWidth - scrollBarMargin, windowHeight - scrollBarMargin);
+  const scrollBarMargin = (isTouchControl === false) ? 10 : 0;
+  resizeCanvas(windowWidth - scrollBarMargin, windowHeight - 0);
   gadgetRadius = (width > 300) ? 120 : 60;
 }
 
@@ -208,10 +211,14 @@ function handlePointerMoveEvent(event) {
   event.preventDefault();
   if (event.pointerType === "mouse" && isTouchControl !== false) {
     isTouchControl = false;
+    newCanvasSize();
+    newInterfaceSize();
     print("Device detected as desktop due to pointer move");
   }
   if (event.pointerType === "pen" && isTouchControl === undefined) {
     isTouchControl = false;
+    newCanvasSize();
+    newInterfaceSize();
     print("Device detected as desktop due to pointer move");
   }
   if (isTouchControl) return;
@@ -245,22 +252,24 @@ function updateInput(event) {
       } else {
         toolMenuOpened = !toolMenuOpened;
       }
+      menuState.startedEventOnMenu = true;
       return true;
     }
-    if (y < 60 && x > menuW && x < menuW*2) {
-      doAction("undo");
-      return true;
-    }
-    if (y < 60 && x > menuW*2 && x < menuW*3) {
-      doAction("edit");
-      return true;
-    }
-    if (y < 60 && x > width-menuW*1 && x < width-menuW*0) {
-      doAction("save");
-      return true;
-    }
-    if (y < 60 && x > width-menuW*2 && x < width-menuW*1) {
-      doAction("clear");
+
+    // anything besides tools menu
+    if (y < 60) {
+      if (x > menuW && x < menuW*2) {
+        doAction("undo");
+      } else if (x > menuW*2 && x < menuW*3) {
+        doAction("edit");
+      } else if (x > width-menuW*1 && x < width-menuW*0) {
+        doAction("save");
+      } else if (x > width-menuW*2 && x < width-menuW*1) {
+        doAction("clear");
+      } else if (x > width/2 - 200 && x < width/2 + 200) {
+        menuState.topSliderStartX = x;
+      }
+      menuState.startedEventOnMenu = true;
       return true;
     }
   }
@@ -276,6 +285,12 @@ function updateInput(event) {
   if (isTouchControl === false) {
 
     if (tappedInMenu(event.clientX, event.clientY)) return;
+    if (menuState.startedEventOnMenu) {
+      if (menuState.topSliderStartX !== undefined) {
+        menuState.topSliderDeltaX = menuState.topSliderStartX - touch.clientX;
+      }
+      return;
+    }
     penLastX = penX;
     penLastY = penY;
     penX = event.clientX;
@@ -301,6 +316,12 @@ function updateInput(event) {
     let containedPen = false;
     ongoingTouches.forEach((touch) => {
       if (tappedInMenu(touch.clientX, touch.clientY)) return;
+      if (menuState.startedEventOnMenu) {
+        if (menuState.topSliderStartX !== undefined) {
+          menuState.topSliderDeltaX = menuState.topSliderStartX - touch.clientX;
+        }
+        return;
+      }
       if (touch.touchType === "stylus") {
         // must be Pencil
         penLastX = penX;
@@ -322,6 +343,10 @@ function updateInput(event) {
 
   // update state based on the result
 
+  if (endEventTypes.includes(event.type)) {
+    menuState.topSliderStartX = undefined;
+    menuState.startedEventOnMenu = false;
+  }
 
   // pen down
   if (startEventTypes.includes(event.type) && penDown) {
@@ -361,11 +386,11 @@ function updateInput(event) {
     const penDownBounds = dist(penStartX, penStartY, penX, penY);
 
     // was drawing, but only short
-    if (touchInterfaceState.onPage === 0 && penDownDuration < 200 && penDownBounds < 20) {
+    if (menuState.onPage === 0 && penDownDuration < 200 && penDownBounds < 20) {
       doAction("undo");
-      touchInterfaceState.onPage = 1;
-    } else if (touchInterfaceState.onPage > 0) {
-      touchInterfaceState.onPage = 0;
+      menuState.onPage = 1;
+    } else if (menuState.onPage > 0) {
+      menuState.onPage = 0;
     }
 
     return;
@@ -424,24 +449,24 @@ function keyReleased() {
 
 function inputMode() {
   // desktop or tablet
-  if (touchInterfaceState.onPage === 1) {
+  if (menuState.onPage === 1) {
     return "gadgetSelect";
   }
 
   //'1', luminance and chroma 
-  if (keyIsDown(49) || touchInterfaceState.onPage === 2) {
+  if (keyIsDown(49) || menuState.onPage === 2) {
     return "lumAndChr";
   }
   //'2', hue
-  if (keyIsDown(50) || touchInterfaceState.onPage === 3) {
+  if (keyIsDown(50) || menuState.onPage === 3) {
     return "hue";
   }
   //'3', size
-  if (keyIsDown(51) || touchInterfaceState.onPage === 4) {
+  if (keyIsDown(51) || menuState.onPage === 4) {
     return "size";
   }
   //'4', eyedropper ... WIP, currently not on touch
-  if (keyIsDown(52) || touchInterfaceState.onPage === 5) {
+  if (keyIsDown(52) || menuState.onPage === 5) {
     return "eyedropper";
   }
   
@@ -630,10 +655,10 @@ function updateBrushSettingsFromInput(currentInputMode) {
     if (Math.abs(deltaX) > 10 || Math.abs(deltaY) > 10) {
       if (Math.abs(deltaX) > Math.abs(deltaY)) {
         // horizontal
-        touchInterfaceState.onPage = (deltaX < 0) ? 2 : 4; 
+        menuState.onPage = (deltaX < 0) ? 2 : 4; 
       } else {
         // vertical
-        touchInterfaceState.onPage = (deltaY < 0) ? 3 : 5;
+        menuState.onPage = (deltaY < 0) ? 3 : 5;
       }  
     }
 
@@ -979,7 +1004,7 @@ function redrawInterface(buffer, activeInputGadget) {
   buffer.clear();
 
   // Interface Colors
-  const bgHex = okhex(bgLuminance*0.9, bgChroma*0.5, bgHue)
+  const bgHex = okhex(bgLuminance*0.9, bgChroma*0.5, bgHue);
   const visibleTextLum = constrain(bgLuminance + (bgLuminance > 0.5 ? -0.4 : 0.4), 0, 1.0);
   const lessTextLum = constrain(bgLuminance + (bgLuminance > 0.5 ? -0.25 : 0.25), 0, 1.0);
   const visHex = okhex(visibleTextLum, min(bgChroma, 0.2), bgHue);
@@ -992,17 +1017,7 @@ function redrawInterface(buffer, activeInputGadget) {
 
   // Background borders
   buffer.fill(bgHex);
-  // if (phoneMode) {
-
-  // } else {
-  //   const borderH = height/8;
-  //   const borderW = width/8;
-  //   buffer.rect(0,              0, width, borderH);
-  //   buffer.rect(0, height-borderH, width, borderH);
-  //   buffer.rect(            0, 0, borderW, height);
-  //   buffer.rect(width-borderW, 0, borderW, height);
-  // }
-
+  buffer.rect(0, 0, width, 60);
 
   // Unfinished brushstroke preview
   if (penDown && (activeInputGadget === "draw" || activeInputGadget === "eyedropper") && !editMode) {
@@ -1078,24 +1093,26 @@ function redrawInterface(buffer, activeInputGadget) {
     buffer.textAlign(LEFT);
   }
 
+
   function topButton(text, x) {
     if (x === 0) {
-      buffer.stroke(brushHex);
-      buffer.strokeWeight(3);
+      //buffer.stroke(brushHex);
+      //buffer.strokeWeight(3);
       buffer.fill(onBrushHex);
     } else {
       buffer.fill(visHex);
     }
     buffer.text(text, x, 0, 100, 60);
-    buffer.stroke(visHex);
-    buffer.strokeWeight(1);
-    buffer.line(x+10, 60, x+90, 60)
-    buffer.noStroke();
-    buffer.strokeWeight(6);
+    // buffer.stroke(visHex);
+    // buffer.strokeWeight(1);
+    // buffer.line(x+10, 60, x+90, 60)
+    // buffer.noStroke();
+    // buffer.strokeWeight(6);
   }
 
   // top menu buttons
   buffer.textAlign(CENTER);
+  buffer.textStyle(BOLD);
   buffer.fill(visHex);
 
   topButton("tools", 0);
@@ -1105,6 +1122,7 @@ function redrawInterface(buffer, activeInputGadget) {
   topButton("save S", width-100*1);
   
   buffer.textAlign(LEFT);
+  buffer.textStyle(NORMAL);
 
 
   // draw the sliders at the top
@@ -1124,8 +1142,7 @@ function redrawInterface(buffer, activeInputGadget) {
   
   drawRoundColorExampleWithVariation(55, sliderStart - 30, 30);
 
-
-  // bottom left text
+  // bottom left/ top middle text
   buffer.fill(visHex);
 
   if (activeInputGadget === "lumAndChr"
@@ -1137,7 +1154,8 @@ function redrawInterface(buffer, activeInputGadget) {
     ", " + brushHue.toFixed(1) +
     "  noise:" + map(brushVar, 4, 600, 0, 100, true).toFixed(1) + "%";
 
-    buffer.text(newColorText, 20, height - 20);
+    buffer.textAlign(CENTER);
+    buffer.text(newColorText, width/2, 60 + 20);
     
     if (refLuminance !== undefined) {
       buffer.fill(okhex(lessTextLum, min(bgChroma, 0.2), bgHue));
@@ -1147,18 +1165,18 @@ function redrawInterface(buffer, activeInputGadget) {
       ", " + refHue.toFixed(1) +
       "  noise:" + map(refVar, 4, 600, 0, 100, true).toFixed(1) + "%";
 
-      buffer.text(refColorText, 20, height - 40);
+      buffer.text(refColorText, width/2, 60 + 40);
     }
-  } else if (activeInputGadget === "size") {
-    buffer.text(easedSize.toFixed(1), 20, height - 20);
-  } else {
-    const controlsInfo = (isTouchControl !== false) ? "APPLE PENCIL TO DRAW" : "KEYS 1/2/3/4 TO ADJUST"
-    buffer.text(controlsInfo, 20, height - 20);
   }
+
+  buffer.textAlign(LEFT);
+  buffer.fill(visHex);
+  const controlsInfo = (isTouchControl !== false) ? "(ignore touch draw: on)" : "KEYS 1/2/3/4 TO ADJUST"
+  buffer.text(controlsInfo, 20, height - 20);
 
   // draw the size indicator
   buffer.drawingContext.save();
-  buffer.fill(okhex(bgLuminance, bgChroma, bgHue));
+  buffer.fill(bgHex);
   buffer.rect(sliderStart + 600, 0, 60, 60);
   buffer.drawingContext.clip();
   buffer.fill(okhex(brushLuminance, brushChroma, brushHue));
@@ -1169,6 +1187,13 @@ function redrawInterface(buffer, activeInputGadget) {
   buffer.ellipse(sliderStart + 630, 30, easedSize, easedSize)
   buffer.drawingContext.restore();
   buffer.noStroke();
+  buffer.fill(visHex);
+  buffer.textSize(11);
+  buffer.text(Math.round(easedSize), sliderStart + 604, 10);
+
+  //reset text size
+  buffer.textSize((width < height) ? 13 : 16);
+
   
 
   // draw rectangle around stroke being edited
