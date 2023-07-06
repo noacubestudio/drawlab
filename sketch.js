@@ -845,11 +845,13 @@ function drawWithSharpLine(buffer, startX, startY, startAngle, startPressure, en
       startEdgeVectorHigher = p5.Vector.fromAngle(startAngle, startEdgeOffset + startCircleSize);
       endEdgeVectorHigher   = p5.Vector.fromAngle(endAngle, endEdgeOffset + endCircleSize);
   
+      const rf = size * easedHueVar()/360 * 0.5;
+
       buffer.beginShape();
-      buffer.vertex(startX + startEdgeVectorLower.x, startY + startEdgeVectorLower.y);
-      buffer.vertex(startX + startEdgeVectorHigher.x, startY + startEdgeVectorHigher.y);
-      buffer.vertex(endX + endEdgeVectorHigher.x, endY + endEdgeVectorHigher.y);
-      buffer.vertex(endX + endEdgeVectorLower.x, endY + endEdgeVectorLower.y);
+      buffer.vertex(startX + random(-rf,rf) + startEdgeVectorLower.x,  startY + random(-rf,rf) + startEdgeVectorLower.y);
+      buffer.vertex(startX + random(-rf,rf) + startEdgeVectorHigher.x, startY + random(-rf,rf) + startEdgeVectorHigher.y);
+      buffer.vertex(endX   + random(-rf,rf) + endEdgeVectorHigher.x,   endY   + random(-rf,rf) + endEdgeVectorHigher.y);
+      buffer.vertex(endX   + random(-rf,rf) + endEdgeVectorLower.x,    endY   + random(-rf,rf) + endEdgeVectorLower.y);
       buffer.endShape();
     }
   } else {
@@ -866,11 +868,13 @@ function drawWithSharpLine(buffer, startX, startY, startAngle, startPressure, en
       startEdgeVectorHigher = p5.Vector.fromAngle(startAngle, higherSide*size);
       endEdgeVectorHigher   = p5.Vector.fromAngle(endAngle, higherSide*size);
   
+      const rf = size * easedHueVar()/360;
+
       buffer.beginShape();
-      buffer.vertex(startX + startEdgeVectorLower.x, startY + startEdgeVectorLower.y);
-      buffer.vertex(startX + startEdgeVectorHigher.x, startY + startEdgeVectorHigher.y);
-      buffer.vertex(endX + endEdgeVectorHigher.x, endY + endEdgeVectorHigher.y);
-      buffer.vertex(endX + endEdgeVectorLower.x, endY + endEdgeVectorLower.y);
+      buffer.vertex(startX + startEdgeVectorLower.x  + random(-rf,rf), startY + random(-rf,rf) + startEdgeVectorLower.y);
+      buffer.vertex(startX + startEdgeVectorHigher.x + random(-rf,rf), startY + random(-rf,rf) + startEdgeVectorHigher.y);
+      buffer.vertex(endX   + endEdgeVectorHigher.x   + random(-rf,rf), endY   + random(-rf,rf) + endEdgeVectorHigher.y);
+      buffer.vertex(endX   + endEdgeVectorLower.x    + random(-rf,rf), endY   + random(-rf,rf) + endEdgeVectorLower.y);
       buffer.endShape();
     }
   }
