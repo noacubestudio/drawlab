@@ -51,12 +51,6 @@ let varStrengths = [];
 
 // control
 let isTouchControl = undefined;
-let phoneMode = undefined;
-let phoneMenuMode = undefined;
-let phoneMenuHueAngle = (brushHue/360)   * Math.PI*2;
-let phoneMenuVarAngle = (brushVar/360)   * Math.PI*2;
-let phoneMenuSatAngle = (brushChroma*2)  * Math.PI*2;
-let phoneMenuLumAngle = (brushLuminance) * Math.PI*2;
 
 let ongoingTouches = []; 
 let penX; 
@@ -74,8 +68,6 @@ let penDown = false;
 let penAngle = undefined;
 let penAltitude = undefined;
 let penPressure = undefined;
-let fingersDown = 0;
-let wiplog = "";
 
 // recorded brushstroke
 let currentInputMode;
@@ -89,7 +81,6 @@ const touchInterfaceState = {
 
 
 function setup() {
-  phoneMode = (windowWidth < windowHeight);
   cnv = createCanvas(windowWidth - 10, windowHeight - 10);
   newCanvasSize();
   cnv.id("myCanvas");
@@ -139,9 +130,9 @@ function windowResized() {
 }
 
 function newCanvasSize() {
-  const scrollBarMargin = (phoneMode) ? 0 : 10;
+  const scrollBarMargin = (isTouchControl) ? 0 : 10;
   resizeCanvas(windowWidth - scrollBarMargin, windowHeight - scrollBarMargin);
-  gadgetRadius = (phoneMode) ? width/3 : (min(width, height) / 8);
+  gadgetRadius = (width > 300) ? 120 : 60;
 }
 
 function newInterfaceSize() {
@@ -153,7 +144,7 @@ function handleTouchStart(event) {
   event.preventDefault();
   if (isTouchControl === undefined) {
     isTouchControl = true;
-    print("Tap started without prior mouse movement, assuming touch mode.")
+    print("Device detected as touch-screen (use pencil and fingers if enabled)");
   }
   event.changedTouches.forEach((touch) => {
     ongoingTouches.push(copyTouch(touch));
@@ -181,7 +172,6 @@ function handleTouchEnd(event) {
   });
   if (event.touches.length === 0) {
     ongoingTouches = [];
-    print("all fingers lifted")
   }
   updateInput(event);
   draw();
@@ -206,7 +196,7 @@ function handlePointerChangeEvent(event) {
   if (isTouchControl === undefined) {
     if (event.pointerType === "pen" || event.pointerType === "touch") {
       isTouchControl = true;
-      print("Tap started without prior mouse movement, assuming touch mode.")
+      print("Device detected as touch-screen (use pencil and fingers if enabled)");
     }
   }
   if (isTouchControl) return;
@@ -218,13 +208,11 @@ function handlePointerMoveEvent(event) {
   event.preventDefault();
   if (event.pointerType === "mouse" && isTouchControl !== false) {
     isTouchControl = false;
-    phoneMode = false;
-    print("Using a device with mouse or touchpad, assume non-touch mode.")
+    print("Device detected as desktop due to pointer move");
   }
   if (event.pointerType === "pen" && isTouchControl === undefined) {
     isTouchControl = false;
-    phoneMode = false;
-    print("Moving pen without touching surface first, assume non-touch mode.")
+    print("Device detected as desktop due to pointer move");
   }
   if (isTouchControl) return;
   updateInput(event);
@@ -277,24 +265,27 @@ function updateInput(event) {
     }
   }
 
-  // update touches/mouse
-  wasDown = penDown;
-  const wasFingersDown = fingersDown
-  fingersDown = 0;
-  penStarted = false;
-  //wiplog += event.type + event.changedTouches[0].identifier + " "
+  // process touch/pen/mouse events on the canvas
 
-  // first get the touches/mouse position
+  wasDown = penDown;
+  penStarted = false;
+  //print(event.type + event.changedTouches[0].identifier + " ");
+
+
+  // desktop device could have a pen pointer device or mouse, also hover
   if (isTouchControl === false) {
+
     if (tappedInMenu(event.clientX, event.clientY)) return;
     penLastX = penX;
     penLastY = penY;
     penX = event.clientX;
     penY = event.clientY;
 
+    // update pressure and angle
     if (event.pointerType === "pen") {
       if (event.pressure > 0) penPressure = event.pressure;
       penAngle = tiltToAngle(event.tiltX, event.tiltY);
+      // altitude, wip
     }
     
     if (startEventTypes.includes(event.type)) {
@@ -302,51 +293,35 @@ function updateInput(event) {
     } else if (endEventTypes.includes(event.type)) {
       penDown = false;
     }
-  } else if (isTouchControl) {
-    if (phoneMode) {
-      // count fingers. 1 finger is pen, anything else does nothing rn
-      ongoingTouches.forEach((touch) => {
-        fingersDown++;
-      });
-      if (fingersDown === 1) {
-        const touch = ongoingTouches[0];
+
+  } else {
+
+    // assume touch device without hover, look for stylus (apple pencil) pointer type
+
+    let containedPen = false;
+    ongoingTouches.forEach((touch) => {
+      if (tappedInMenu(touch.clientX, touch.clientY)) return;
+      if (touch.touchType === "stylus") {
+        // must be Pencil
         penLastX = penX;
         penLastY = penY;
         penX = touch.clientX;
         penY = touch.clientY;
-        penDown = true;
-      } else {
-        penDown = false;
+        containedPen = true;
+        penAngle = touch.azimuthAngle;
+        penAltitude = touch.altitudeAngle;
+        penPressure = touch.force;
       }
-    } else { // assume iPad with pencil
-      // find pencil and count other touches
-      // using touchType property
-      let containedPen = false;
-      ongoingTouches.forEach((touch) => {
-        if (tappedInMenu(touch.clientX, touch.clientY)) return;
-        if (touch.touchType !== "stylus") {
-          fingersDown++;
-          refAngle = undefined;
-        } else {
-          // must be Pencil
-          penLastX = penX;
-          penLastY = penY;
-          penX = touch.clientX;
-          penY = touch.clientY;
-          containedPen = true;
-          penAngle = touch.azimuthAngle;
-          penAltitude = touch.altitudeAngle;
-          penPressure = touch.force;
-        }
-      });
-      penDown = containedPen;
-    }
-    
+    });
+    penDown = containedPen;
+
   }
+    
+
+  if (event === undefined) return;
 
   // update state based on the result
 
-  if (event === undefined) return;
 
   // pen down
   if (startEventTypes.includes(event.type) && penDown) {
@@ -371,38 +346,9 @@ function updateInput(event) {
     });
   }
 
-  // tap
-  if (event.type === "touchstart" && !penDown) {
-    const newTouches = fingersDown - wasFingersDown ;
-    touchInterfaceState.onPage = newTouches + touchInterfaceState.onPage;
-    if (touchInterfaceState.onPage >= 4) touchInterfaceState.onPage = 0;
-
-    penStartX = undefined;
-    penStartY = undefined;
-    penStartAngle = undefined;
-    penStartPressure = undefined;
-    return;
-  }
-
   // pen lifted
   if (wasDown && !penDown) {
-    if (fingersDown === 0) {
-      if (phoneMode) {
-        phoneMenuMode = undefined;
-        // always close the menu if it was open
-        if (touchInterfaceState.onPage > 0) {
-          touchInterfaceState.onPage = 0;
-        } else {
-          // if it wasn't open, user was drawing normally
-          // if the distance travelled is short enough, undo the stroke and enter the menu
-          // as if it was just a tap
-          if (dist(penStartX, penStartY, penX, penY) < 10) {
-            touchInterfaceState.onPage = 1;
-          }
-        }
-      } 
-    }
-    // also leave edit mode
+    // leave edit mode
     if (editMode) {
       editMode = false;
       // don't even send this as a confirm to draw
@@ -414,26 +360,16 @@ function updateInput(event) {
     const penDownDuration = event.timeStamp - penStartTimeStamp;
     const penDownBounds = dist(penStartX, penStartY, penX, penY);
 
-    if (penDownDuration < 200 && penDownBounds < 20) {
+    // was drawing, but only short
+    if (touchInterfaceState.onPage === 0 && penDownDuration < 200 && penDownBounds < 20) {
       doAction("undo");
-      touchInterfaceState.onPage++;
-      if (touchInterfaceState.onPage >= 4) touchInterfaceState.onPage = 0;
-      print(touchInterfaceState.onPage, fingersDown)
-    } else {
-      // was actually dragging
-      if (fingersDown === 0) {
-        // always close menus after lifting the pen
-        touchInterfaceState.onPage = 0;
-      }
+      touchInterfaceState.onPage = 1;
+    } else if (touchInterfaceState.onPage > 0) {
+      touchInterfaceState.onPage = 0;
     }
 
     return;
   }
-
-  // last finger lifted
-  // if ((event.type === "touchend" && ongoingTouches.length === 0) || event.type === "touchcancel") {
-  //   return;
-  // }
 }
 
 function keyPressed() {
@@ -487,48 +423,42 @@ function keyReleased() {
 
 
 function inputMode() {
-  // phone
-  if (phoneMode) {
-    if (touchInterfaceState.onPage === 1) {
-      //editMode = true;
-      return "phoneMenu";
-    } else {
-      //editMode = false;
-      return "draw";
-    }
-  } 
-
   // desktop or tablet
+  if (touchInterfaceState.onPage === 1) {
+    return "gadgetSelect";
+  }
 
   //'1', luminance and chroma 
-  if (keyIsDown(49) || (touchInterfaceState.onPage === 1 && fingersDown === 0)) {
+  if (keyIsDown(49) || touchInterfaceState.onPage === 2) {
     return "lumAndChr";
   }
   //'2', hue
-  if (keyIsDown(50) || (touchInterfaceState.onPage === 2 && fingersDown === 0)) {
+  if (keyIsDown(50) || touchInterfaceState.onPage === 3) {
     return "hue";
   }
   //'3', size
-  if (keyIsDown(51) || (touchInterfaceState.onPage === 3 && fingersDown === 0)) {
+  if (keyIsDown(51) || touchInterfaceState.onPage === 4) {
     return "size";
   }
   //'4', eyedropper ... WIP, currently not on touch
-  if (keyIsDown(52)) {
+  if (keyIsDown(52) || touchInterfaceState.onPage === 5) {
     return "eyedropper";
   }
+  
+  // otherwise just
   return "draw";
 }
 
 function draw() {
 
-  const wasInMenu = (currentInputMode !== "draw" && currentInputMode !== "eyedropper");
+  const wasInMenu = (currentInputMode !== "draw");
   currentInputMode = inputMode();
 
   if (currentInputMode === "lumAndChr" 
     || currentInputMode === "hue" 
     || currentInputMode === "size" 
     || currentInputMode === "eyedropper"
-    || currentInputMode === "phoneMenu") { // menu opened
+    || currentInputMode === "gadgetSelect") { // menu opened
 
     // save the old brush values as a reference when opening a menu
     updateBrushReferenceFromInput();
@@ -538,7 +468,7 @@ function draw() {
     if (editMode) redrawLastStroke(newStrokeBuffer);
   }
 
-  if (currentInputMode === "draw" || currentInputMode === "eyedropper") {
+  if (currentInputMode === "draw") {
     // clear the reference values so they could be changed again when opening a menu
     clearBrushReference();
 
@@ -688,29 +618,26 @@ function drawInNewStrokeBuffer(buffer, startX, startY, startAngle, startPressure
 }
 
 
-// function adjustDeltaWithRotation(deltaX, deltaY, rotationAngle) {
-//   // Calculate the length of the hypotenuse (r) using Pythagorean theorem
-//   const hypotenuse = Math.sqrt(deltaX ** 2 + deltaY ** 2);
-
-//   // Calculate the current angle (theta) using arctangent
-//   const currentAngle = Math.atan2(deltaY, deltaX);
-
-//   // Add the rotation angle to the current angle
-//   const newAngle = currentAngle + rotationAngle;
-
-//   // Calculate the adjusted deltaX and deltaY using trigonometry
-//   const adjustedDeltaX = hypotenuse * Math.cos(newAngle);
-//   const adjustedDeltaY = hypotenuse * Math.sin(newAngle);
-
-//   return [adjustedDeltaX, adjustedDeltaY];
-// }
-
-
-
 function updateBrushSettingsFromInput(currentInputMode) {
   const penMode = (isTouchControl && penStartX !== undefined && penStartY !== undefined)
 
-  if (currentInputMode === "lumAndChr") {
+  if (currentInputMode === "gadgetSelect") {
+
+    // Get positions
+    let deltaX = penX - refX;
+    let deltaY = penY - refY;
+
+    if (Math.abs(deltaX) > 10 || Math.abs(deltaY) > 10) {
+      if (Math.abs(deltaX) > Math.abs(deltaY)) {
+        // horizontal
+        touchInterfaceState.onPage = (deltaX < 0) ? 2 : 4; 
+      } else {
+        // vertical
+        touchInterfaceState.onPage = (deltaY < 0) ? 3 : 5;
+      }  
+    }
+
+  } else if (currentInputMode === "lumAndChr") {
 
     // Get altitude and angle change
     // let deltaAngle = p5.Vector.fromAngle(refAngle).angleBetween(p5.Vector.fromAngle(penAngle));
@@ -771,55 +698,6 @@ function updateBrushSettingsFromInput(currentInputMode) {
 
     // replace brush with new colors
     [brushLuminance, brushChroma, brushHue] = oklchArray;
-
-  } else if (currentInputMode === "phoneMenu" && penDown) {
-
-    // get center
-    const centerX = constrain(refX, gadgetRadius, width - gadgetRadius);
-    const centerY = constrain(refY, gadgetRadius, height - gadgetRadius);
-
-    // Compute new angle based on that center
-    const angle = p5.Vector.fromAngle(0).angleBetween(createVector(penX-centerX, penY-centerY));
-
-    // if starting the rotation, set mode
-    if (phoneMenuMode === undefined) {
-      if (angle > HALF_PI) {
-        // bottom left
-        phoneMenuMode = "sat";
-      } else if (angle > 0) {
-        // bottom right
-        phoneMenuMode = "lum";
-      } else if (angle > -HALF_PI) {
-        //top right
-        phoneMenuMode = "var";
-      } else {
-        // top left
-        phoneMenuMode = "hue";
-      }
-    } else {
-      // calculate difference from last angle
-      const angleDelta = p5.Vector.fromAngle(phoneMenuLastAngle).angleBetween(p5.Vector.fromAngle(angle));
-
-      if (phoneMenuMode === "hue") {
-        phoneMenuHueAngle += angleDelta;
-        if (phoneMenuHueAngle >= TWO_PI) phoneMenuHueAngle -= TWO_PI;
-        if (phoneMenuHueAngle < 0) phoneMenuHueAngle += TWO_PI;
-        brushHue = degrees(phoneMenuHueAngle);
-      } else if (phoneMenuMode === "var") {
-        phoneMenuVarAngle += angleDelta;
-        phoneMenuVarAngle = constrain(phoneMenuVarAngle, 0, TWO_PI);
-        brushVar = degrees(phoneMenuVarAngle);
-      } else if (phoneMenuMode === "sat") {
-        phoneMenuSatAngle += angleDelta;
-        phoneMenuSatAngle = constrain(phoneMenuSatAngle, 0, TWO_PI);
-        brushChroma = (phoneMenuSatAngle/TWO_PI)*0.5;
-      } else if (phoneMenuMode === "lum") {
-        phoneMenuLumAngle += angleDelta;
-        phoneMenuLumAngle = constrain(phoneMenuLumAngle, 0, TWO_PI);
-        brushLuminance = phoneMenuLumAngle/TWO_PI;
-      } 
-    }
-    phoneMenuLastAngle = angle;
   }
 }
 
@@ -1094,7 +972,7 @@ function drawwithLasso(buffer, xa, ya, xb, yb, penRecording, size) {
 
 
 
-function redrawInterface(buffer, currentInputMode) {
+function redrawInterface(buffer, activeInputGadget) {
   if (buffer === undefined) return;
 
   // Clear the UI buffer
@@ -1114,20 +992,20 @@ function redrawInterface(buffer, currentInputMode) {
 
   // Background borders
   buffer.fill(bgHex);
-  if (phoneMode) {
+  // if (phoneMode) {
 
-  } else {
-    const borderH = height/8;
-    const borderW = width/8;
-    buffer.rect(0,              0, width, borderH);
-    buffer.rect(0, height-borderH, width, borderH);
-    buffer.rect(            0, 0, borderW, height);
-    buffer.rect(width-borderW, 0, borderW, height);
-  }
+  // } else {
+  //   const borderH = height/8;
+  //   const borderW = width/8;
+  //   buffer.rect(0,              0, width, borderH);
+  //   buffer.rect(0, height-borderH, width, borderH);
+  //   buffer.rect(            0, 0, borderW, height);
+  //   buffer.rect(width-borderW, 0, borderW, height);
+  // }
 
 
   // Unfinished brushstroke preview
-  if (penDown && (currentInputMode === "draw" || currentInputMode === "eyedropper") && !editMode) {
+  if (penDown && (activeInputGadget === "draw" || activeInputGadget === "eyedropper") && !editMode) {
     if (brushTool === "Round Line Tool") {
       buffer.stroke(brushHexWithHueVarSeed(penStartX * penStartY));
       drawWithLine(buffer, penStartX, penStartY, penX, penY, easedSize);
@@ -1219,81 +1097,16 @@ function redrawInterface(buffer, currentInputMode) {
   // top menu buttons
   buffer.textAlign(CENTER);
   buffer.fill(visHex);
-  if (!phoneMode) {
-    topButton("tools", 0);
-    topButton("undo U", 100*1);
-    topButton("edit E", 100*2);
-    topButton("clear C", width-100*2);
-    topButton("save S", width-100*1);
-  }
+
+  topButton("tools", 0);
+  topButton("undo U", 100*1);
+  topButton("edit E", 100*2);
+  topButton("clear C", width-100*2);
+  topButton("save S", width-100*1);
+  
   buffer.textAlign(LEFT);
 
-  // const debugText = deviceMode + " " + penDown + " start x " + penStartX + ",y " + penStartY + ", pen x" + penX + ",y " + penY + " a" + penAngle + " p" + penPressure
-  // const debugText = touchInterfaceState.onPage
-  // buffer.text(debugText, 110, 70);
-  
-  // if (devicemode === "notouch") {
-  //   buffer.text("1/2/3: Color/Size •  C:Clear with color", leftW, 30);
-  //   //buffer.text(penDown + "startX " + penStartX + " startY " + penStartY, leftW, 70);
-  // } else {
-  //   const textureText = (texture !== undefined) ? " (" + texture + " Texture)" : "";
-  //   buffer.text(brushTool + textureText, leftW, 30);
-  //   // buffer.text(wiplog, leftW, 70);
-  //   // buffer.text("Pencil down:" + penDown + " x" + penX + "y" + penY + " fingers:" + fingersDown, leftW, 30);
-  //   // buffer.text("Can decrease:" + fingerState.canDecreaseCount + " Peak:" + fingerState.peakCount, leftW, 70);
-  //   // buffer.text("startX " + penStartX + " startY " + penStartY, leftW, 70);
-  //   // // wip logging text
-  //   // ongoingTouches.forEach((touch, index) => {
-  //   //   if (touch !== undefined) {
-  //   //     buffer.text(
-  //   //       touch.clientX + " " + touch.clientY + 
-  //   //       " force:" + touch.force + 
-  //   //       " id:" + touch.identifier, 
-  //   //       leftW, 90 + index * 20
-  //   //     );
-  //   //     //buffer.text(touch.touchType + " " + touch.azimuthAngle ,leftW, 90 + index * 20);
-  //   //   }
-  //   // });
-  // }
 
-  // bottom left text
-  if (!phoneMode) {
-    if (currentInputMode === "lumAndChr"
-      || currentInputMode === "hue" 
-      || currentInputMode === "eyedropper") {
-
-      const newColorText = "okLCH:" + brushLuminance.toFixed(3) +
-      ", " + brushChroma.toFixed(3) +
-      ", " + brushHue.toFixed(1) +
-      "  noise:" + map(brushVar, 4, 600, 0, 100, true).toFixed(1) + "%";
-
-      buffer.text(newColorText, 20, height - 20);
-      
-      if (refLuminance !== undefined) {
-        buffer.fill(okhex(lessTextLum, min(bgChroma, 0.2), bgHue));
-
-        const refColorText = "okLCH:" + refLuminance.toFixed(3) +
-        ", " + refChroma.toFixed(3) +
-        ", " + refHue.toFixed(1) +
-        "  noise:" + map(refVar, 4, 600, 0, 100, true).toFixed(1) + "%";
-
-        buffer.text(refColorText, 20, height - 40);
-      }
-    } else if (currentInputMode === "size") {
-      buffer.text(easedSize.toFixed(1), 20, height - 20);
-    } else {
-      const controlsInfo = (isTouchControl !== false) ? "TAP 1/2/3 FINGERS, APPLE PENCIL TO DRAW" : "KEYS 1/2/3/4 TO ADJUST"
-      buffer.text(controlsInfo, 20, height - 20);
-    }
-  } else {
-    if (phoneMenuMode !== undefined) {
-      if (phoneMenuMode === "hue") buffer.text("Hue " + brushHue.toFixed(1)      , 120, 30);
-      if (phoneMenuMode === "sat") buffer.text("Chroma " + brushChroma.toFixed(3), 120, 30);
-      if (phoneMenuMode === "var") buffer.text("Noise " + map(brushVar, 4, 600, 0, 100, true).toFixed(1) + "%", 120, 30);
-      if (phoneMenuMode === "lum") buffer.text("Luminance " + brushLuminance.toFixed(3), 120, 30);
-    }
-  }
-  
   // draw the sliders at the top
   const sliderStart = width/2 - 300;
   drawGradientSlider(sliderStart, 0, 200, 60, [0.0, brushChroma, brushHue], [1.0, brushChroma, brushHue], brushLuminance)
@@ -1309,7 +1122,39 @@ function redrawInterface(buffer, currentInputMode) {
   }
   buffer.rect(sliderStart-60, 0, 60, 60);
   
-  drawEditedColor(55, sliderStart - 30, 30);
+  drawRoundColorExampleWithVariation(55, sliderStart - 30, 30);
+
+
+  // bottom left text
+  buffer.fill(visHex);
+
+  if (activeInputGadget === "lumAndChr"
+    || activeInputGadget === "hue" 
+    || activeInputGadget === "eyedropper") {
+
+    const newColorText = "okLCH:" + brushLuminance.toFixed(3) +
+    ", " + brushChroma.toFixed(3) +
+    ", " + brushHue.toFixed(1) +
+    "  noise:" + map(brushVar, 4, 600, 0, 100, true).toFixed(1) + "%";
+
+    buffer.text(newColorText, 20, height - 20);
+    
+    if (refLuminance !== undefined) {
+      buffer.fill(okhex(lessTextLum, min(bgChroma, 0.2), bgHue));
+
+      const refColorText = "okLCH:" + refLuminance.toFixed(3) +
+      ", " + refChroma.toFixed(3) +
+      ", " + refHue.toFixed(1) +
+      "  noise:" + map(refVar, 4, 600, 0, 100, true).toFixed(1) + "%";
+
+      buffer.text(refColorText, 20, height - 40);
+    }
+  } else if (activeInputGadget === "size") {
+    buffer.text(easedSize.toFixed(1), 20, height - 20);
+  } else {
+    const controlsInfo = (isTouchControl !== false) ? "APPLE PENCIL TO DRAW" : "KEYS 1/2/3/4 TO ADJUST"
+    buffer.text(controlsInfo, 20, height - 20);
+  }
 
   // draw the size indicator
   buffer.drawingContext.save();
@@ -1350,22 +1195,12 @@ function redrawInterface(buffer, currentInputMode) {
     buffer.noStroke();
   }
 
-  //wip
-  // buffer.fill("black");
-  // for (let i = 0; i < 20; i++) {
-  //   buffer.rect(200 + i * 40, 160 + 0, 30, 1)
-  //   buffer.rect(200 + i * 40, 160 + 30, 30, 1)
-  //   buffer.rect(200 + i * 40, 160 + 60, 30, 30)
-  //   buffer.rect(200 + i * 40, 160 + 120, 30, 1)
-  //   buffer.rect(200 + i * 40, 160 + 150, 30, 1)
-  // }
-
 
   // depending on input mode, draw the right gadget
-  drawGadgets();
+  drawActiveGadget();
 
   // draw the hover preview
-  if ((currentInputMode === "draw") && (isTouchControl === false) && !penDown && !editMode) {
+  if ((activeInputGadget === "draw") && (isTouchControl === false) && !penDown && !editMode) {
     // draw hover stamp at the pen position
     if (brushTool === "Stamp Tool") {
       drawBrushstroke(buffer, penX, penY, easedSize, penAngle, penPressure, texture);
@@ -1383,9 +1218,9 @@ function redrawInterface(buffer, currentInputMode) {
 
   // end of redrawInterface
 
-  function drawGadgets() {
+  function drawActiveGadget() {
 
-    if (currentInputMode === "eyedropper") {
+    if (activeInputGadget === "eyedropper") {
       buffer.fill(brushHex);
       const easedSize = easeInCirc(brushSize, 4, 600);
       drawStamp(buffer, penX, penY, easedSize, penAngle, penPressure, texture);
@@ -1398,11 +1233,34 @@ function redrawInterface(buffer, currentInputMode) {
     buffer.noStroke();
     buffer.fill(brushHex);
 
-    const sideDist = (phoneMode) ? gadgetRadius : gadgetRadius*2;
+    const sideDist = gadgetRadius; //(Math.max(width, height) > 4* gadgetRadius) ? gadgetRadius : gadgetRadius*0.5;
     const ankerX = constrain(refX, sideDist, width - sideDist);
     const ankerY = constrain(refY, sideDist, height - sideDist);
 
-    if (currentInputMode === "hue") {
+    if (activeInputGadget === "gadgetSelect") {
+
+      //left: LC, top: HV, right: eyedrop, bottom: eyedrop?
+
+      buffer.stroke(visHex);
+      buffer.strokeWeight(2);
+      buffer.line(ankerX-10, ankerY, ankerX+10, ankerY);
+      buffer.line(ankerX, ankerY-10, ankerX, ankerY+10);
+
+      buffer.textAlign(CENTER);
+      buffer.noStroke();
+
+      buffer.fill(bgHex+"A0");
+      buffer.ellipse(refX-40, refY   , 60, 60);
+      buffer.ellipse(refX+40, refY   , 60, 60);
+      buffer.ellipse(refX   , refY-40, 60, 60);
+      buffer.ellipse(refX   , refY+40, 60, 60);
+      buffer.fill(visHex);
+      buffer.text("LC", refX-40, refY   );
+      buffer.text("S",  refX+40, refY   );
+      buffer.text("H",  refX   , refY-40);
+      buffer.text("I",  refX   , refY+40);
+    
+    } else if (activeInputGadget === "hue") {
 
       // draw hue circle
       const hueLineWidth = 6; // same as stroke width
@@ -1427,10 +1285,10 @@ function redrawInterface(buffer, currentInputMode) {
 
       // Show color at reference position
       const currentColorSize = constrain(easeInCirc(brushSize, 4, 600), 8, gadgetRadius/3);
-      drawEditedColor(currentColorSize, ankerX, ankerY);
+      drawRoundColorExampleWithVariation(currentColorSize, ankerX, ankerY);
       drawCrosshair(currentColorSize, ankerX, ankerY);
 
-    } else if (currentInputMode === "lumAndChr") {
+    } else if (activeInputGadget === "lumAndChr") {
 
       const radius = gadgetRadius;
       buffer.push();
@@ -1459,9 +1317,9 @@ function redrawInterface(buffer, currentInputMode) {
 
       // Show color at reference position
       const currentColorSize = constrain(easeInCirc(brushSize, 4, 600), 8, gadgetRadius/3);
-      drawEditedColor(currentColorSize, ankerX, ankerY);
+      drawRoundColorExampleWithVariation(currentColorSize, ankerX, ankerY);
 
-    } else if (currentInputMode === "size") {
+    } else if (activeInputGadget === "size") {
 
       // scale
       const lineBaseY = ankerY - gadgetRadius;
@@ -1476,48 +1334,10 @@ function redrawInterface(buffer, currentInputMode) {
       const easedSize = easeInCirc(brushSize, 4, 600);
       drawStamp(buffer, ankerX, ankerY, easedSize, penAngle, penPressure, texture);
       drawCrosshair(easedSize, ankerX, ankerY);
-
-    } else if (currentInputMode === "phoneMenu") {
-      buffer.noFill();
-      // buffer.stroke(visHex);
-      // buffer.strokeWeight(2);
-      // buffer.ellipse(ankerX, ankerY, gadgetRadius*2-2);
-      buffer.strokeWeight(4);
-      if (phoneMenuMode === "hue") {
-        drawHueCircle(createVector(ankerX, ankerY), gadgetRadius, 36, brushLuminance, brushChroma, phoneMenuHueAngle);
-      } else {
-        const gapSize = radians(4);
-        const step = TWO_PI/8
-        buffer.stroke(okhex(0.0, 0.0, 0.0));
-        buffer.arc(ankerX, ankerY, gadgetRadius*2-2, gadgetRadius*2-2, 0*step+gapSize, 1*step);
-        buffer.stroke(okhex(1.0, 0.0, 0.0));
-        buffer.arc(ankerX, ankerY, gadgetRadius*2-2, gadgetRadius*2-2, 1*step, 2*step-gapSize);
-  
-        buffer.stroke(okhex(constrain(brushLuminance, 0.5, 1), 0.0, brushHue));
-        buffer.arc(ankerX, ankerY, gadgetRadius*2-2, gadgetRadius*2-2, 2*step+gapSize, 3*step);
-        buffer.stroke(okhex(constrain(brushLuminance, 0.5, 1), 0.4, brushHue));
-        buffer.arc(ankerX, ankerY, gadgetRadius*2-2, gadgetRadius*2-2, 3*step, 4*step-gapSize);
-  
-        buffer.stroke(okhex(constrain(brushLuminance, 0.5, 1), constrain(brushChroma, 0.3, 0.5), brushHue-20));
-        buffer.arc(ankerX, ankerY, gadgetRadius*2-2, gadgetRadius*2-2, 4*step+gapSize, 5*step);
-        buffer.stroke(okhex(constrain(brushLuminance, 0.5, 1), constrain(brushChroma, 0.3, 0.5), brushHue+20));
-        buffer.arc(ankerX, ankerY, gadgetRadius*2-2, gadgetRadius*2-2, 5*step, 6*step-gapSize);
-  
-        buffer.stroke(okhex(brushLuminance, 0.0, 0.0));
-        buffer.arc(ankerX, ankerY, gadgetRadius*2-2, gadgetRadius*2-2, 6*step+gapSize, 7*step);
-        buffer.stroke(okhex(brushLuminance, 0.0, 0.0));
-        buffer.arc(ankerX, ankerY, gadgetRadius*2-2, gadgetRadius*2-2, 7*step, 8*step-gapSize);
-  
-        buffer.stroke(visHex);
-        buffer.ellipse(ankerX, ankerY, 10);
-        buffer.strokeWeight(6);
-      }
     }
   }
 
-
-  // With color menus open, show the current color as a circle made out of arcs showing the hue variation
-  function drawEditedColor(size, x, y) {
+  function drawRoundColorExampleWithVariation(size, x, y) {
     buffer.fill(brushHex);
     buffer.ellipse(x, y, size);
 
