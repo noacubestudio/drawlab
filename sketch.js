@@ -287,7 +287,7 @@ function updateInput(event) {
     if (tappedInMenu(event.clientX, event.clientY)) return;
     if (menuState.startedEventOnMenu) {
       if (menuState.topSliderStartX !== undefined) {
-        menuState.topSliderDeltaX = menuState.topSliderStartX - touch.clientX;
+        menuState.topSliderDeltaX = event.clientX - menuState.topSliderStartX;
       }
       return;
     }
@@ -318,7 +318,7 @@ function updateInput(event) {
       if (tappedInMenu(touch.clientX, touch.clientY)) return;
       if (menuState.startedEventOnMenu) {
         if (menuState.topSliderStartX !== undefined) {
-          menuState.topSliderDeltaX = menuState.topSliderStartX - touch.clientX;
+          menuState.topSliderDeltaX = touch.clientX - menuState.topSliderStartX;
         }
         return;
       }
@@ -344,6 +344,9 @@ function updateInput(event) {
   // update state based on the result
 
   if (endEventTypes.includes(event.type)) {
+    // apply the color change
+    // clear reference
+    menuState.topSliderDeltaX = undefined;
     menuState.topSliderStartX = undefined;
     menuState.startedEventOnMenu = false;
   }
@@ -655,10 +658,10 @@ function updateBrushSettingsFromInput(currentInputMode) {
     if (Math.abs(deltaX) > 10 || Math.abs(deltaY) > 10) {
       if (Math.abs(deltaX) > Math.abs(deltaY)) {
         // horizontal
-        menuState.onPage = (deltaX < 0) ? 2 : 4; 
+        menuState.onPage = (deltaX < 0) ? 3 : 4;
       } else {
         // vertical
-        menuState.onPage = (deltaY < 0) ? 3 : 5;
+        menuState.onPage = (deltaY < 0) ? 5 : 2;
       }  
     }
 
@@ -1167,6 +1170,8 @@ function redrawInterface(buffer, activeInputGadget) {
 
       buffer.text(refColorText, width/2, 60 + 40);
     }
+  } else if (menuState.topSliderDeltaX !== undefined) {
+    buffer.text(menuState.topSliderDeltaX, width/2, 60 + 20);
   }
 
   buffer.textAlign(LEFT);
@@ -1272,18 +1277,19 @@ function redrawInterface(buffer, activeInputGadget) {
       buffer.line(ankerX, ankerY-10, ankerX, ankerY+10);
 
       buffer.textAlign(CENTER);
+      buffer.textStyle(BOLD);
       buffer.noStroke();
 
       buffer.fill(bgHex+"A0");
-      buffer.ellipse(refX-40, refY   , 60, 60);
-      buffer.ellipse(refX+40, refY   , 60, 60);
-      buffer.ellipse(refX   , refY-40, 60, 60);
-      buffer.ellipse(refX   , refY+40, 60, 60);
+      buffer.ellipse(refX-40, refY   , 56, 56);
+      buffer.ellipse(refX+40, refY   , 56, 56);
+      buffer.ellipse(refX   , refY-40, 56, 56);
+      buffer.ellipse(refX   , refY+40, 56, 56);
       buffer.fill(visHex);
-      buffer.text("LC", refX-40, refY   );
+      buffer.text("H", refX-40, refY   );
       buffer.text("S",  refX+40, refY   );
-      buffer.text("H",  refX   , refY-40);
-      buffer.text("I",  refX   , refY+40);
+      buffer.text("I",  refX   , refY-40);
+      buffer.text("LC",  refX   , refY+40);
     
     } else if (activeInputGadget === "hue") {
 
