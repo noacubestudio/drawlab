@@ -425,8 +425,10 @@ function updateInput(event) {
     const penDownDuration = event.timeStamp - pen.startTimeStamp;
     const penDownBounds = dist(pen.startX, pen.startY, pen.x, pen.y);
 
+    const didNotDraw = (penDownDuration < 200 && penDownBounds < 20) || (penDownBounds < 2);
+
     // was drawing, but only short
-    if (menuState.onPage === 0 && penDownDuration < 200 && penDownBounds < 20) {
+    if (menuState.onPage === 0 && didNotDraw) {
       doAction("undo");
       menuState.onPage = 1;
     } else if (menuState.onPage > 0) {
@@ -715,7 +717,7 @@ function updateBrushSettingsFromInput(currentInputMode) {
   } 
   
   if (!pen.isDown) return;
-  
+
   if (currentInputMode === "lumAndChr") {
 
     // Get altitude and angle change
