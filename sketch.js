@@ -1084,7 +1084,7 @@ function redrawInterface(buffer, activeInputGadget) {
   buffer.rect(0, 0, width, 60);
 
   // Unfinished brushstroke preview
-  if (pen.isDown && (activeInputGadget === "draw" || activeInputGadget === "eyedropper") && !editMode) {
+  if (pen.isDown && (activeInputGadget === "draw") && !editMode) {
     if (brushTool === "Round Line Tool") {
       buffer.stroke(brushHexWithHueVarSeed(pen.startX * pen.startY));
       drawWithLine(buffer, pen.startX, pen.startY, pen.x, pen.y, easedSize);
@@ -1321,7 +1321,7 @@ function redrawInterface(buffer, activeInputGadget) {
   drawActiveGadget();
 
   // draw the hover preview
-  if ((activeInputGadget === "draw") && (isTouchControl === false) && !pen.isDown && !editMode) {
+  if ((activeInputGadget === "draw") && (isTouchControl === false) && !pen.isDown && !editMode && !pointerDown) {
     // draw hover stamp at the pen position
     if (brushTool === "Stamp Tool") {
       drawBrushstroke(buffer, hover.x, hover.y, easedSize, hover.angle, undefined, texture);
