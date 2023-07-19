@@ -51,23 +51,33 @@ let varStrengths = [];
 
 // control
 let isTouchControl = undefined;
-
 let ongoingTouches = []; 
-let penX; 
-let penY;
-let penStartX;
-let penStartY;
-let penStartAngle;
-let penStartPressure;
-let penStartTimeStamp;
-let penLastX;
-let penLastY;
-let penStarted = false;
-let wasDown = false;
-let penDown = false;
-let penAngle = undefined;
-let penAltitude = undefined;
-let penPressure = undefined;
+let pointerDown = false;
+
+const pen = {
+  x: undefined,
+  y: undefined,
+  startX: undefined,
+  startY: undefined,
+  startAngle: undefined,
+  startPressure: undefined,
+  startTimeStamp: undefined,
+  lastX: undefined,
+  lastY: undefined,
+  started: false,
+  wasDown: false,
+  isDown: false,
+  angle: undefined,
+  altitude: undefined,
+  pressure: undefined
+};
+const hover = {
+  x: undefined,
+  y: undefined,
+  angle: undefined,
+  lastX: undefined,
+  lastY: undefined
+};
 
 // recorded brushstroke
 let currentInputMode;
@@ -77,6 +87,7 @@ let editMode = false;
 // touch control state
 const menuState = {
   onPage: 0,
+  hoverPage: null,
   lastGadgetPage: undefined,
   topSliderStartX: undefined,
   topSliderDeltaX: undefined,
@@ -99,10 +110,10 @@ function setup() {
   noLoop();
 
   
-  penX = width/2;
-  penY = height/2;
-  refX = penX;
-  refY = penY;
+  pen.x = width/2;
+  pen.y = height/2;
+  refX = pen.x;
+  refY = pen.y;
 
   // Create a graphics buffer for the painting and one for the last stroke
   paintingBuffer = createGraphics(width, height);
@@ -245,8 +256,8 @@ function updateInput(event) {
         brushTool = toolPresets[spot].brush;
         texture = toolPresets[spot].texture;
         if (editMode) {
-          penLastX = undefined;
-          penLastY = undefined;
+          pen.lastX = undefined;
+          pen.lastY = undefined;
           editMode = false;
           redrawLastStroke(newStrokeBuffer);
         }
@@ -278,37 +289,60 @@ function updateInput(event) {
 
   // process touch/pen/mouse events on the canvas
 
-  wasDown = penDown;
-  penStarted = false;
+  pen.wasDown = pen.isDown;
+  pen.started = false;
   //print(event.type + event.changedTouches[0].identifier + " ");
 
 
   // desktop device could have a pen pointer device or mouse, also hover
   if (isTouchControl === false) {
 
+    if (startEventTypes.includes(event.type)) {
+      pointerDown = true;
+    } else if (endEventTypes.includes(event.type)) {
+      pointerDown = false;
+    }
     if (tappedInMenu(event.clientX, event.clientY)) return;
-    if (menuState.startedEventOnMenu) {
+    if (menuState.startedEventOnMenu && pointerDown) {
       if (menuState.topSliderStartX !== undefined) {
         menuState.topSliderDeltaX = event.clientX - menuState.topSliderStartX;
       }
       return;
     }
-    penLastX = penX;
-    penLastY = penY;
-    penX = event.clientX;
-    penY = event.clientY;
 
-    // update pressure and angle
-    if (event.pointerType === "pen") {
-      if (event.pressure > 0) penPressure = event.pressure;
-      penAngle = tiltToAngle(event.tiltX, event.tiltY);
-      // altitude, wip
-    }
-    
     if (startEventTypes.includes(event.type)) {
-      penDown = true;
+      pen.isDown = true;
     } else if (endEventTypes.includes(event.type)) {
-      penDown = false;
+      pen.isDown = false;
+    }
+
+    pen.lastX = pen.x;
+    pen.lastY = pen.y;
+    
+    hover.lastX = hover.x;
+    hover.lastY = hover.y;
+    hover.x = undefined;
+    hover.y = undefined;
+
+    if (pen.isDown) {
+      pen.x = event.clientX;
+      pen.y = event.clientY;
+  
+      // update pressure and angle
+      if (event.pointerType === "pen") {
+        if (event.pressure > 0) pen.pressure = event.pressure;
+        pen.angle = tiltToAngle(event.tiltX, event.tiltY);
+        // altitude, wip
+      }
+    } else if (!pointerDown) {
+      hover.x = event.clientX;
+      hover.y = event.clientY;
+
+      if (event.pointerType === "pen") {
+        
+        hover.angle = tiltToAngle(event.tiltX, event.tiltY);
+        // altitude, wip
+      }
     }
 
   } else {
@@ -326,17 +360,17 @@ function updateInput(event) {
       }
       if (touch.touchType === "stylus") {
         // must be Pencil
-        penLastX = penX;
-        penLastY = penY;
-        penX = touch.clientX;
-        penY = touch.clientY;
+        pen.lastX = pen.x;
+        pen.lastY = pen.y;
+        pen.x = touch.clientX;
+        pen.y = touch.clientY;
         containedPen = true;
-        penAngle = touch.azimuthAngle;
-        penAltitude = touch.altitudeAngle;
-        penPressure = touch.force;
+        pen.angle = touch.azimuthAngle;
+        pen.altitude = touch.altitudeAngle;
+        pen.pressure = touch.force;
       }
     });
-    penDown = containedPen;
+    pen.isDown = containedPen;
 
   }
     
@@ -355,41 +389,41 @@ function updateInput(event) {
   }
 
   // pen down
-  if (startEventTypes.includes(event.type) && penDown) {
-    penStartX = penX;
-    penStartY = penY;
-    penStartAngle = penAngle;
-    penStartPressure = penPressure;
-    penStarted = true;
-    penStartTimeStamp = event.timeStamp;
+  if (startEventTypes.includes(event.type) && pen.isDown) {
+    pen.startX = pen.x;
+    pen.startY = pen.y;
+    pen.startAngle = pen.angle;
+    pen.startPressure = pen.pressure;
+    pen.started = true;
+    pen.startTimeStamp = event.timeStamp;
     if (!editMode && inputMode() === "draw") penRecording = [];
     return;
   }
 
   // record
-  if (penDown && !editMode && inputMode() === "draw") {
+  if (pen.isDown && !editMode && inputMode() === "draw") {
     penRecording.push({
-      x: penX,
-      y: penY,
-      angle: penAngle,
-      pressure: penPressure,
+      x: pen.x,
+      y: pen.y,
+      angle: pen.angle,
+      pressure: pen.pressure,
       event: event.type
     });
   }
 
   // pen lifted
-  if (wasDown && !penDown) {
+  if (pen.wasDown && !pen.isDown) {
     // leave edit mode
     if (editMode) {
       editMode = false;
       // don't even send this as a confirm to draw
-      wasDown = false;
+      pen.wasDown = false;
     }
-    penLastX = undefined;
-    penLastY = undefined;
+    pen.lastX = undefined;
+    pen.lastY = undefined;
 
-    const penDownDuration = event.timeStamp - penStartTimeStamp;
-    const penDownBounds = dist(penStartX, penStartY, penX, penY);
+    const penDownDuration = event.timeStamp - pen.startTimeStamp;
+    const penDownBounds = dist(pen.startX, pen.startY, pen.x, pen.y);
 
     // was drawing, but only short
     if (menuState.onPage === 0 && penDownDuration < 200 && penDownBounds < 20) {
@@ -457,7 +491,7 @@ function keyReleased() {
 function inputMode() {
   // desktop or tablet
   if (menuState.onPage === 1) {
-    return "gadgetSelect";
+    return "cloverMenu";
   }
 
   //'1', luminance and chroma 
@@ -490,7 +524,7 @@ function draw() {
     || currentInputMode === "hue" 
     || currentInputMode === "size" 
     || currentInputMode === "eyedropper"
-    || currentInputMode === "gadgetSelect") { // menu opened
+    || currentInputMode === "cloverMenu") { // menu opened
 
     // save the old brush values as a reference when opening a menu
     updateBrushReferenceFromInput();
@@ -506,24 +540,24 @@ function draw() {
 
     // start of brushstroke
     if (!editMode && !wasInMenu) {
-      if (penStarted) {
+      if (pen.started) {
         // don't draw on initial spot as a WIP pressure fix
         // commit the new stroke to the painting and clear the buffer
         paintingBuffer.image(newStrokeBuffer, 0, 0);
         newStrokeBuffer.clear();
       } else {
         // draw to the stroke buffer immediately
-        if ((brushTool === "Stamp Tool" || brushTool === "Fan Line Tool") && penDown) {
-          drawInNewStrokeBuffer(newStrokeBuffer, penStartX, penStartY, penStartAngle, undefined, penX, penY, penAngle, penPressure, penRecording)
+        if ((brushTool === "Stamp Tool" || brushTool === "Fan Line Tool") && pen.isDown) {
+          drawInNewStrokeBuffer(newStrokeBuffer, pen.startX, pen.startY, pen.startAngle, undefined, pen.x, pen.y, pen.angle, pen.pressure, penRecording)
 
-        } else if (!penDown && wasDown) {
+        } else if (!pen.isDown && pen.wasDown) {
           // drawn when pen lifted
-          drawInNewStrokeBuffer(newStrokeBuffer, penStartX, penStartY, penStartAngle, undefined, penX, penY, penAngle, penPressure, penRecording)
+          drawInNewStrokeBuffer(newStrokeBuffer, pen.startX, pen.startY, pen.startAngle, undefined, pen.x, pen.y, pen.angle, pen.pressure, penRecording)
         }
       }
-    } else if (editMode && penDown) {
-      const xDiff = penX-penLastX;
-      const yDiff = penY-penLastY;
+    } else if (editMode && pen.isDown) {
+      const xDiff = pen.x-pen.lastX;
+      const yDiff = pen.y-pen.lastY;
       redrawLastStroke(newStrokeBuffer, xDiff, yDiff);
     }
   }
@@ -551,20 +585,24 @@ function clearBrushReference() {
   refVar = undefined;
   refAlt = undefined;
   refAngle = undefined;
+  refHoverX = undefined;
+  refHoverY = undefined;
 }
 
 function updateBrushReferenceFromInput() {
   // starting position
-  if (refX === undefined) refX = penX;
-  if (refY === undefined) refY = penY;
-  if (refAlt === undefined) refAlt = penAltitude;
-  if (refAngle === undefined) refAngle = penAngle;
+  refX      ??= pen.x;
+  refY      ??= pen.y;
+  refAlt    ??= pen.altitude;
+  refAngle  ??= pen.angle;
+  refHoverX ??= hover.x;
+  refHoverY ??= hover.y;
   // starting brush settings
-  if (refHue === undefined) refHue = brushHue;
-  if (refChroma === undefined) refChroma = brushChroma;
-  if (refLuminance === undefined) refLuminance = brushLuminance;
-  if (refSize === undefined) refSize = brushSize;
-  if (refVar === undefined) refVar = brushVar;
+  refHue       ??= brushHue;
+  refChroma    ??= brushChroma;
+  refLuminance ??= brushLuminance;
+  refSize      ??= brushSize;
+  refVar       ??= brushVar;
 }
 
 function redrawLastStroke(buffer, xDiff, yDiff) {
@@ -651,27 +689,34 @@ function drawInNewStrokeBuffer(buffer, startX, startY, startAngle, startPressure
 
 
 function updateBrushSettingsFromInput(currentInputMode) {
-  const penMode = (isTouchControl && penStartX !== undefined && penStartY !== undefined)
 
-  if (currentInputMode === "gadgetSelect") {
+  const penMode = (pen.startX !== undefined && pen.startY !== undefined)
+
+  if (currentInputMode === "cloverMenu") {
+
+    const affectedPageType = (pen.isDown) ? "onPage" : "hoverPage";
 
     // Get positions
-    let deltaX = penX - refX;
-    let deltaY = penY - refY;
+    const deltaX = (pen.isDown ? pen.x : hover.x) - refX;
+    const deltaY = (pen.isDown ? pen.y : hover.y) - refY;
 
     if (Math.abs(deltaX) > 10 || Math.abs(deltaY) > 10) {
       if (Math.abs(deltaX) > Math.abs(deltaY)) {
         // horizontal
-        menuState.onPage = (deltaX < 0) ? 3 : 4;
+        menuState[affectedPageType] = (deltaX < 0) ? 3 : 4;
       } else {
         // vertical
-        menuState.onPage = (deltaY < 0) ? 5 : 2;
+        menuState[affectedPageType] = (deltaY < 0) ? 5 : 2;
       }  
     } else if ((Math.abs(deltaX) > 0 || Math.abs(deltaY) > 0) && menuState.lastGadgetPage > 1) {
-      menuState.onPage = menuState.lastGadgetPage;
+      menuState[affectedPageType] = menuState.lastGadgetPage;
     }
-
-  } else if (currentInputMode === "lumAndChr") {
+    return;
+  } 
+  
+  if (!pen.isDown) return;
+  
+  if (currentInputMode === "lumAndChr") {
 
     // Get altitude and angle change
     // let deltaAngle = p5.Vector.fromAngle(refAngle).angleBetween(p5.Vector.fromAngle(penAngle));
@@ -682,8 +727,8 @@ function updateBrushSettingsFromInput(currentInputMode) {
     // }
 
     // Get positions
-    let deltaX = penX - (penMode ? penStartX : refX);
-    let deltaY = penY - (penMode ? penStartY : refY);
+    let deltaX = pen.x - (penMode ? pen.startX : refX);
+    let deltaY = pen.y - (penMode ? pen.startY : refY);
 
     // in rotated space
     //let rotationAngle = radians(brushHue - refHue);
@@ -701,12 +746,12 @@ function updateBrushSettingsFromInput(currentInputMode) {
     // Compute circle center position from reference
     const startAngle = TWO_PI * (refHue / 360) - HALF_PI;
     const startRadius = gadgetRadius * (1 - refVar / 360);
-    const centerX = (penMode ? penStartX : refX) - cos(startAngle) * startRadius;
-    const centerY = (penMode ? penStartY : refY) - sin(startAngle) * startRadius;
+    const centerX = (penMode ? pen.startX : refX) - cos(startAngle) * startRadius;
+    const centerY = (penMode ? pen.startY : refY) - sin(startAngle) * startRadius;
 
     // Compute new angle and distance based on that center
-    const angle = atan2(penY - centerY, penX - centerX);
-    const radius = constrain(dist(penX, penY, centerX, centerY), 0, gadgetRadius);
+    const angle = atan2(pen.y - centerY, pen.x - centerX);
+    const radius = constrain(dist(pen.x, pen.y, centerX, centerY), 0, gadgetRadius);
 
     brushHue = (degrees(angle) + 90) % 360;
     brushVar = (1 - radius / gadgetRadius) * 360;
@@ -715,7 +760,7 @@ function updateBrushSettingsFromInput(currentInputMode) {
 
   } else if (currentInputMode === "size") {
 
-    const deltaY = penY - (penMode ? penStartY : refY);
+    const deltaY = pen.y - (penMode ? pen.startY : refY);
     const rangeY = gadgetRadius * 2;
 
     brushSize = map(-deltaY + rangeY * map(refSize, 4, 600, 0, 1), 0, rangeY, 4, 600, true);
@@ -724,7 +769,7 @@ function updateBrushSettingsFromInput(currentInputMode) {
     paintingBuffer.image(newStrokeBuffer, 0, 0);
     newStrokeBuffer.clear();
 
-    const colorArray = paintingBuffer.get(penX, penY);
+    const colorArray = paintingBuffer.get(pen.x, pen.y);
     const oklchArray = chroma(colorArray.slice(0,3)).oklch();
 
     // default to current hue if gray
@@ -757,6 +802,9 @@ function drawBrushstroke(buffer, x, y, size, angle, pressure, texture) {
 }
 
 function drawStamp(buffer, x, y, size, angle, pressure, texture) {
+
+  if (x === undefined || y === undefined) return;
+
   buffer.push();
   buffer.translate(x, y);
   buffer.rotate(-HALF_PI);
@@ -1034,21 +1082,21 @@ function redrawInterface(buffer, activeInputGadget) {
   buffer.rect(0, 0, width, 60);
 
   // Unfinished brushstroke preview
-  if (penDown && (activeInputGadget === "draw" || activeInputGadget === "eyedropper") && !editMode) {
+  if (pen.isDown && (activeInputGadget === "draw" || activeInputGadget === "eyedropper") && !editMode) {
     if (brushTool === "Round Line Tool") {
-      buffer.stroke(brushHexWithHueVarSeed(penStartX * penStartY));
-      drawWithLine(buffer, penStartX, penStartY, penX, penY, easedSize);
+      buffer.stroke(brushHexWithHueVarSeed(pen.startX * pen.startY));
+      drawWithLine(buffer, pen.startX, pen.startY, pen.x, pen.y, easedSize);
     } else if (brushTool === "Sharp Line Tool") { 
-      drawWithSharpLine(buffer, penStartX, penStartY, penStartAngle, penStartPressure, penX, penY, penAngle, penPressure, easedSize, texture);
+      drawWithSharpLine(buffer, pen.startX, pen.startY, pen.startAngle, pen.startPressure, pen.x, pen.y, pen.angle, pen.pressure, easedSize, texture);
     } else if (brushTool === "Triangle Tool") {
-      buffer.fill(brushHexWithHueVarSeed(penStartX * penStartY));
-      drawwithTriangle(buffer, penStartX, penStartY, penX, penY, penRecording, easedSize);
+      buffer.fill(brushHexWithHueVarSeed(pen.startX * pen.startY));
+      drawwithTriangle(buffer, pen.startX, pen.startY, pen.x, pen.y, penRecording, easedSize);
     } else if (brushTool === "Lasso Tool") {
-      buffer.fill(brushHexWithHueVarSeed(penStartX * penStartY));
-      drawwithLasso(buffer, penStartX, penStartY, penX, penY, penRecording, easedSize);
+      buffer.fill(brushHexWithHueVarSeed(pen.startX * pen.startY));
+      drawwithLasso(buffer, pen.startX, pen.startY, pen.x, pen.y, penRecording, easedSize);
     } else if (brushTool === "Mirror Tool") {
-      buffer.fill(brushHexWithHueVarSeed(penStartX * penStartY));
-      drawwithMirror(buffer, penStartX, penStartY, penX, penY, penRecording, easedSize);
+      buffer.fill(brushHexWithHueVarSeed(pen.startX * pen.startY));
+      drawwithMirror(buffer, pen.startX, pen.startY, pen.x, pen.y, penRecording, easedSize);
     }
   }
   
@@ -1074,13 +1122,13 @@ function redrawInterface(buffer, activeInputGadget) {
 
       if (menuBrushTool === "Stamp Tool") {
         for (let x = 0; x <= 40; x += 5) {
-          drawBrushstroke(buffer, x, 0, cornerPreviewBrushSize, penAngle, penPressure, menuTexture);
+          drawBrushstroke(buffer, x, 0, cornerPreviewBrushSize, pen.angle, pen.pressure, menuTexture);
         }
       } else if (menuBrushTool === "Round Line Tool" || menuBrushTool === "Fan Line Tool") {
         buffer.stroke(brushHex);
         drawWithLine(buffer, 0, 0, 40, 0, cornerPreviewBrushSize);
       } else if (menuBrushTool === "Sharp Line Tool") {
-        drawWithSharpLine(buffer, 0, 0, penStartAngle, penStartPressure, 40, 0, penAngle, penPressure, cornerPreviewBrushSize, menuTexture);
+        drawWithSharpLine(buffer, 0, 0, pen.startAngle, pen.startPressure, 40, 0, pen.angle, pen.pressure, cornerPreviewBrushSize, menuTexture);
       } else {
         buffer.stroke(brushHex);
         drawWithPlaceholder(buffer, 0, 0, 40, 0, cornerPreviewBrushSize);
@@ -1193,11 +1241,11 @@ function redrawInterface(buffer, activeInputGadget) {
       if (!isNaN(sectionValue)) brushVar = sectionValue;
     } else if (xFromLeftEdgeOfSliders < 260) {
       section = "luminance";
-      sectionValue = map(xFromLeftWithDelta, 60, 260, 0, 1.0);
+      sectionValue = map(xFromLeftWithDelta, 60, 260, 0, 1.0, true);
       brushLuminance = sectionValue;
     } else if (xFromLeftEdgeOfSliders < 460) {
       section = "chroma";
-      sectionValue = map(xFromLeftWithDelta, 260, 460, 0, 1.0);
+      sectionValue = map(xFromLeftWithDelta, 260, 460, 0, 1.0, true);
       brushChroma = sectionValue * 0.5;
     } else if (xFromLeftEdgeOfSliders < 660) {
       section = "hue";
@@ -1226,7 +1274,7 @@ function redrawInterface(buffer, activeInputGadget) {
   buffer.rect(sliderStart + 600, 0, 60, 60);
   buffer.drawingContext.clip();
   buffer.fill(okhex(brushLuminance, brushChroma, brushHue));
-  drawStamp(buffer, sliderStart + 630, 30, easedSize, penAngle, penPressure, texture);
+  drawStamp(buffer, sliderStart + 630, 30, easedSize, pen.angle, pen.pressure, texture);
   buffer.noFill();
   buffer.stroke(visHex);
   buffer.strokeWeight(1);
@@ -1271,17 +1319,17 @@ function redrawInterface(buffer, activeInputGadget) {
   drawActiveGadget();
 
   // draw the hover preview
-  if ((activeInputGadget === "draw") && (isTouchControl === false) && !penDown && !editMode) {
+  if ((activeInputGadget === "draw") && (isTouchControl === false) && !pen.isDown && !editMode) {
     // draw hover stamp at the pen position
     if (brushTool === "Stamp Tool") {
-      drawBrushstroke(buffer, penX, penY, easedSize, penAngle, penPressure, texture);
+      drawBrushstroke(buffer, hover.x, hover.y, easedSize, hover.angle, undefined, texture);
     } else if (brushTool === "Round Line Tool" || brushTool === "Fan Line Tool") {
-      drawCrosshair(easedSize, penX, penY);
-      buffer.stroke(brushHexWithHueVarSeed(penX * penY));
-      drawWithLine(buffer, penX, penY, penX, penY, easedSize)
+      drawCrosshair(easedSize, hover.x, hover.y);
+      buffer.stroke(brushHexWithHueVarSeed(hover.x * hover.y));
+      drawWithLine(buffer, hover.x, hover.y, hover.x, hover.y, easedSize)
     } else if (brushTool === "Sharp Line Tool") {
-      if (penLastX !== undefined && penLastY !== undefined) {
-        drawWithSharpLine(buffer, penLastX, penLastY, penAngle, penPressure, penX, penY, penAngle, penPressure, easedSize, texture);
+      if (hover.lastX !== undefined && hover.lastY !== undefined) {
+        drawWithSharpLine(buffer, hover.lastX, hover.lastY, hover.angle, undefined, hover.x, hover.y, hover.angle, undefined, easedSize, texture);
       }
     }
   }
@@ -1294,21 +1342,24 @@ function redrawInterface(buffer, activeInputGadget) {
     if (activeInputGadget === "eyedropper") {
       buffer.fill(brushHex);
       const easedSize = easeInCirc(brushSize, 4, 600);
-      drawStamp(buffer, penX, penY, easedSize, penAngle, penPressure, texture);
-      drawCrosshair(easedSize, penX, penY);
+      drawStamp(buffer, pen.x, pen.y, easedSize, pen.angle, pen.pressure, texture);
+      drawCrosshair(easedSize, pen.x, pen.y);
     }
 
     // draw the brush setting gadgets
-    if (refX === undefined || refY === undefined) return;
+    const useBaseX = (refHoverX !== undefined) ? refHoverX : refX;
+    const useBaseY = (refHoverY !== undefined) ? refHoverY : refY;
+
+    if (useBaseX === undefined || useBaseY === undefined) return;
 
     buffer.noStroke();
     buffer.fill(brushHex);
 
     const sideDist = gadgetRadius; //(Math.max(width, height) > 4* gadgetRadius) ? gadgetRadius : gadgetRadius*0.5;
-    const ankerX = constrain(refX, sideDist, width - sideDist);
-    const ankerY = constrain(refY, sideDist, height - sideDist);
+    const ankerX = constrain(useBaseX, sideDist, width - sideDist);
+    const ankerY = constrain(useBaseY, sideDist, height - sideDist);
 
-    if (activeInputGadget === "gadgetSelect") {
+    if (activeInputGadget === "cloverMenu") {
 
       buffer.stroke(visHex);
       buffer.strokeWeight(2);
@@ -1336,10 +1387,12 @@ function redrawInterface(buffer, activeInputGadget) {
         buffer.text(text, x+centerOffset*xDir, y+centerOffset*yDir);
       }
 
-      drawGadgetDirection(refX, refY, -1,  0, menuState.lastGadgetPage === 3, "H");
-      drawGadgetDirection(refX, refY,  1,  0, menuState.lastGadgetPage === 4, "S");
-      drawGadgetDirection(refX, refY,  0, -1, menuState.lastGadgetPage === 5, "I");
-      drawGadgetDirection(refX, refY,  0,  1, menuState.lastGadgetPage === 2, "LC");
+      const highlightedGadget = (menuState.hoverPage === null) ? menuState.lastGadgetPage : menuState.hoverPage;
+
+      drawGadgetDirection(refX, refY, -1,  0, highlightedGadget === 3, "H");
+      drawGadgetDirection(refX, refY,  1,  0, highlightedGadget === 4, "S");
+      drawGadgetDirection(refX, refY,  0, -1, highlightedGadget === 5, "I");
+      drawGadgetDirection(refX, refY,  0,  1, highlightedGadget === 2, "LC");
     
     } else if (activeInputGadget === "hue") {
 
@@ -1413,7 +1466,7 @@ function redrawInterface(buffer, activeInputGadget) {
 
       buffer.fill(brushHex);
       const easedSize = easeInCirc(brushSize, 4, 600);
-      drawStamp(buffer, ankerX, ankerY, easedSize, penAngle, penPressure, texture);
+      drawStamp(buffer, ankerX, ankerY, easedSize, pen.angle, pen.pressure, texture);
       drawCrosshair(easedSize, ankerX, ankerY);
     }
   }
