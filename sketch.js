@@ -720,21 +720,9 @@ function updateBrushSettingsFromInput(currentInputMode) {
 
   if (currentInputMode === "lumAndChr") {
 
-    // Get altitude and angle change
-    // let deltaAngle = p5.Vector.fromAngle(refAngle).angleBetween(p5.Vector.fromAngle(penAngle));
-    // if (!Number.isNaN(deltaAngle)) {
-    //   brushHue = (refHue + degrees(deltaAngle));
-    //   if (brushHue < 0) brushHue += 360;
-    //   if (brushHue > 360) brushHue -= 360;
-    // }
-
     // Get positions
     let deltaX = pen.x - (penMode ? pen.startX : refX);
     let deltaY = pen.y - (penMode ? pen.startY : refY);
-
-    // in rotated space
-    //let rotationAngle = radians(brushHue - refHue);
-    //[deltaX, deltaY] = adjustDeltaWithRotation(deltaX, deltaY, -rotationAngle);
 
     let rangeX = gadgetRadius * 2;
     let rangeY = gadgetRadius * 2;
@@ -745,20 +733,34 @@ function updateBrushSettingsFromInput(currentInputMode) {
 
   } else if (currentInputMode === "hue") { // '1', hue and hue variation
 
-    // Compute circle center position from reference
-    const startAngle = TWO_PI * (refHue / 360) - HALF_PI;
-    const startRadius = gadgetRadius * (1 - refVar / 360);
-    const centerX = (penMode ? pen.startX : refX) - cos(startAngle) * startRadius;
-    const centerY = (penMode ? pen.startY : refY) - sin(startAngle) * startRadius;
+    // Get positions
+    let deltaX = pen.x - (penMode ? pen.startX : refX);
+    let deltaY = pen.y - (penMode ? pen.startY : refY);
 
-    // Compute new angle and distance based on that center
-    const angle = atan2(pen.y - centerY, pen.x - centerX);
-    const radius = constrain(dist(pen.x, pen.y, centerX, centerY), 0, gadgetRadius);
+    let rangeX = gadgetRadius * 2;
+    let rangeY = gadgetRadius * 2;
 
-    brushHue = (degrees(angle) + 90) % 360;
-    brushVar = (1 - radius / gadgetRadius) * 360;
-
+    brushHue = map(deltaX + rangeX * (refHue / 360), 0, rangeX, 0, 360);
+    if (brushHue > 360) brushHue %= 360;
     if (brushHue < 0) brushHue += 360;
+
+    brushVar = map(-deltaY + rangeY * refVar/360, 0, rangeY, 0, 360, true);
+
+
+    // // Compute circle center position from reference
+    // const startAngle = TWO_PI * (refHue / 360) - HALF_PI;
+    // const startRadius = gadgetRadius * (1 - refVar / 360);
+    // const centerX = (penMode ? pen.startX : refX) - cos(startAngle) * startRadius;
+    // const centerY = (penMode ? pen.startY : refY) - sin(startAngle) * startRadius;
+
+    // // Compute new angle and distance based on that center
+    // const angle = atan2(pen.y - centerY, pen.x - centerX);
+    // const radius = constrain(dist(pen.x, pen.y, centerX, centerY), 0, gadgetRadius);
+
+    // brushHue = (degrees(angle) + 90) % 360;
+    // brushVar = (1 - radius / gadgetRadius) * 360;
+
+    // if (brushHue < 0) brushHue += 360;
 
   } else if (currentInputMode === "size") {
 
@@ -790,7 +792,7 @@ function drawBrushstroke(buffer, x, y, size, angle, pressure, texture) {
     const rainbow = okhex(
       brushLuminance*0.98,
       brushChroma,
-      brushHue + varStrengths[(x * y) % varStrengths.length] * easedHueVar()
+      brushHue + varStrengths[(x * y) % varStrengths.length] * easedHueVar(brushVar)
     );
     buffer.fill(rainbow);
     drawStamp(buffer, x, y, size*1.05, angle, pressure, texture);
@@ -855,7 +857,7 @@ function brushHexWithHueVarSeed(seed) {
   return okhex(
     brushLuminance,
     brushChroma,
-    brushHue + varStrengths[seed % varStrengths.length] * easedHueVar()
+    brushHue + varStrengths[seed % varStrengths.length] * easedHueVar(brushVar)
   );
 }
 
@@ -901,7 +903,7 @@ function drawWithSharpLine(buffer, startX, startY, startAngle, startPressure, en
       startEdgeVectorHigher = p5.Vector.fromAngle(startAngle, startEdgeOffset + startCircleSize);
       endEdgeVectorHigher   = p5.Vector.fromAngle(endAngle, endEdgeOffset + endCircleSize);
   
-      const rf = size * easedHueVar()/360 * 0.5;
+      const rf = size * easedHueVar(brushVar)/360 * 0.5;
 
       buffer.beginShape();
       buffer.vertex(startX + random(-rf,rf) + startEdgeVectorLower.x,  startY + random(-rf,rf) + startEdgeVectorLower.y);
@@ -924,7 +926,7 @@ function drawWithSharpLine(buffer, startX, startY, startAngle, startPressure, en
       startEdgeVectorHigher = p5.Vector.fromAngle(startAngle, higherSide*size);
       endEdgeVectorHigher   = p5.Vector.fromAngle(endAngle, higherSide*size);
   
-      const rf = size * easedHueVar()/360;
+      const rf = size * easedHueVar(brushVar)/360;
 
       buffer.beginShape();
       buffer.vertex(startX + startEdgeVectorLower.x  + random(-rf,rf), startY + random(-rf,rf) + startEdgeVectorLower.y);
@@ -1382,7 +1384,7 @@ function redrawInterface(buffer, activeInputGadget) {
           buffer.noStroke();
           buffer.fill(antiVisHex);
         } else {
-          buffer.fill(bgHex+"A0");
+          buffer.fill(antiVisHex+"C0");
         }
         buffer.ellipse(x+centerOffset*xDir, y+centerOffset*yDir, size, size);
         buffer.fill(visHex);
@@ -1398,31 +1400,38 @@ function redrawInterface(buffer, activeInputGadget) {
     
     } else if (activeInputGadget === "hue") {
 
-      // draw hue circle
-      const hueLineWidth = 6; // same as stroke width
+      const radius = gadgetRadius;
+      buffer.push();
+      buffer.translate(ankerX, ankerY);
 
-      // Compute circle center position from reference
-      const startAngle = TWO_PI * (brushHue / 360) - HALF_PI;
-      const startRadius = constrain(gadgetRadius * (1 - brushVar / 360), 0, gadgetRadius);
-      const centerX = ankerX - cos(startAngle) * startRadius;
-      const centerY = ankerY - sin(startAngle) * startRadius;
+      buffer.fill("black")
+      buffer.ellipse(0, 0, constrain(easeInCirc(brushSize, 4, 600), 8, gadgetRadius/3)+2)
 
-      // Draw center
-      buffer.fill(visHex);
-      buffer.noStroke();
-      buffer.ellipse(centerX, centerY, 20);
+      // var
+      buffer.stroke("black");
+      buffer.strokeWeight(8);
+      buffer.line(0, radius*2 * (-1 + brushVar/360), 0, radius*2 * brushVar/360);
 
-      // Draw hue circle around center
-      buffer.stroke(brushHex);
-      const outerLuminance = (brushLuminance > 0.5) ? brushLuminance - 0.3 : brushLuminance + 0.3;
-      drawHueCircle(createVector(centerX, centerY), gadgetRadius+hueLineWidth/2, 36, outerLuminance, 0.4, -HALF_PI);
-      drawHueCircle(createVector(centerX, centerY), gadgetRadius, 36, brushLuminance, brushChroma, -HALF_PI);
-      buffer.noStroke();
+      let startVarArr = [brushLuminance, brushChroma, brushHue, 360];
+      let endVarArr = [brushLuminance, brushChroma, brushHue, 0];
+      buffer.strokeWeight(6);
+      drawGradientLine(0, radius*2 * (-1 + brushVar/360), 0, radius*2 * brushVar/360, startVarArr, endVarArr);
+
+      // hue
+      buffer.stroke("black");
+      buffer.strokeWeight(8);
+      buffer.line(-radius, 0, radius, 0);
+
+      let startHueArr = [brushLuminance, brushChroma, 0 + brushHue - 180];
+      let endHueArr = [brushLuminance, brushChroma, 360 + brushHue - 180];
+      buffer.strokeWeight(6);
+      drawGradientLine(-radius, 0, radius, 0, startHueArr, endHueArr);
+
+      buffer.pop();
 
       // Show color at reference position
       const currentColorSize = constrain(easeInCirc(brushSize, 4, 600), 8, gadgetRadius/3);
       drawRoundColorExampleWithVariation(currentColorSize, ankerX, ankerY);
-      drawCrosshair(currentColorSize, ankerX, ankerY);
 
     } else if (activeInputGadget === "lumAndChr") {
 
@@ -1484,7 +1493,7 @@ function redrawInterface(buffer, activeInputGadget) {
       const varHex = okhex(
         brushLuminance,
         brushChroma,
-        brushHue + varStrengths[i] * easedHueVar()
+        brushHue + varStrengths[i] * easedHueVar(brushVar)
       );
       buffer.fill(varHex);
       buffer.arc(x, y, size, size, start, stop);
@@ -1513,7 +1522,10 @@ function redrawInterface(buffer, activeInputGadget) {
       lerp(startArr[1], endArr[1], colorLerpAmt),
       lerp(startArr[2], endArr[2], colorLerpAmt),
     ];
-    return chroma.oklch(mixedArr[0], mixedArr[1], mixedArr[2]);
+
+    const hueVar = (startArr[3] === undefined) ? 0 : varStrengths[Math.floor(128*colorLerpAmt)] * easedHueVar(lerp(startArr[3], endArr[3], colorLerpAmt));
+
+    return chroma.oklch(mixedArr[0], mixedArr[1], mixedArr[2] + hueVar);
   }
 
   function drawGradientLine(xStart, yStart, xEnd, yEnd, startArr, endArr) {
@@ -1588,7 +1600,9 @@ function easeOutCubic(x) {
   return 1 - Math.pow(1 - x, 3);
 }
 
-function easedHueVar() {
+function easedHueVar(brushVar) {
+
+  if (brushVar === undefined) return 0;
 
   // during eyedropper, vary the hue less
   const baseVar = brushVar * ((inputMode() === "eyedropper") ? 0.3 : 1);
