@@ -11,10 +11,10 @@ let bgChroma = 0.05;
 let bgLuminance = 0.9;
 
 const paintingState = {
-  width: 800,
-  height: 800,
-  x: () => Math.floor((width - paintingState.width)/2),
-  y: () => Math.floor((height - paintingState.height)/2)
+  width: () => Math.min(width, height)-150,
+  height: () => Math.min(width, height)-150,
+  x: () => Math.floor((width - paintingState.width())/2),
+  y: () => Math.floor((height - paintingState.height())/2)
 }
 
 // reference of previous brush settings for relative change
@@ -110,6 +110,8 @@ const editState = {
   lastY: undefined
 }
 
+let drawSliders = true;
+
 function setup() {
   cnv = createCanvas(windowWidth - 10, windowHeight - 10);
   newCanvasSize();
@@ -131,8 +133,8 @@ function setup() {
   refY = pen.y;
 
   // Create a graphics buffer for the painting and one for the last stroke
-  paintingBuffer = createGraphics(paintingState.width, paintingState.height);
-  newStrokeBuffer = createGraphics(paintingState.width, paintingState.height);
+  paintingBuffer = createGraphics(paintingState.width(), paintingState.height());
+  newStrokeBuffer = createGraphics(paintingState.width(), paintingState.height());
   if ((width * displayDensity()) > 3000) {
     paintingBuffer.pixelDensity(1);
     newStrokeBuffer.pixelDensity(1);
@@ -162,7 +164,9 @@ function windowResized() {
 function newCanvasSize() {
   const scrollBarMargin = (isTouchControl === false) ? 10 : 0;
   resizeCanvas(windowWidth - scrollBarMargin, windowHeight - 0);
+  //paintingBuffer.resizeCanvas(Math.min(width, height)-140, Math.min(width, height)-140);
   gadgetRadius = (width > 300) ? 120 : 60;
+  print("Canvas size now", width, height)
 }
 
 function newInterfaceSize() {
@@ -1244,21 +1248,26 @@ function redrawInterface(buffer, activeInputGadget) {
 
 
   // draw the sliders at the top
+  const drawSliders = (width > 1000);
   const sliderStart = width/2 - 300;
-  drawGradientSlider(sliderStart, 0, 200, 60, [0.0, brushChroma, brushHue], [1.0, brushChroma, brushHue], brushLuminance)
-  drawGradientSlider(sliderStart+200, 0, 200, 60, [brushLuminance, 0.0, brushHue], [brushLuminance, 0.5, brushHue], brushChroma*2)
-  drawGradientSlider(sliderStart+400, 0, 200, 60, [brushLuminance, brushChroma, 0], [brushLuminance, brushChroma, 360], brushHue/360)
-  if (refHue !== undefined) {
-    drawGradientSlider(sliderStart, 0, 200, 10, [0.0, refChroma, refHue], [1.0, refChroma, refHue], refLuminance)
-    drawGradientSlider(sliderStart+200, 0, 200, 10, [refLuminance, 0.0, refHue], [refLuminance, 0.5, refHue], refChroma*2)
-    drawGradientSlider(sliderStart+400, 0, 200, 10, [refLuminance, refChroma, 0], [refLuminance, refChroma, 360], refHue/360)
-    buffer.fill(okhex(refLuminance, refChroma, refHue));
-  } else {
-    buffer.fill(okhex(brushLuminance, brushChroma, brushHue));
+
+  if (drawSliders) {
+    drawGradientSlider(sliderStart, 0, 200, 60, [0.0, brushChroma, brushHue], [1.0, brushChroma, brushHue], brushLuminance)
+    drawGradientSlider(sliderStart+200, 0, 200, 60, [brushLuminance, 0.0, brushHue], [brushLuminance, 0.5, brushHue], brushChroma*2)
+    drawGradientSlider(sliderStart+400, 0, 200, 60, [brushLuminance, brushChroma, 0], [brushLuminance, brushChroma, 360], brushHue/360)
+    if (refHue !== undefined) {
+      drawGradientSlider(sliderStart, 0, 200, 10, [0.0, refChroma, refHue], [1.0, refChroma, refHue], refLuminance)
+      drawGradientSlider(sliderStart+200, 0, 200, 10, [refLuminance, 0.0, refHue], [refLuminance, 0.5, refHue], refChroma*2)
+      drawGradientSlider(sliderStart+400, 0, 200, 10, [refLuminance, refChroma, 0], [refLuminance, refChroma, 360], refHue/360)
+      buffer.fill(okhex(refLuminance, refChroma, refHue));
+    } else {
+      buffer.fill(okhex(brushLuminance, brushChroma, brushHue));
+    }
+    buffer.rect(sliderStart-60, 0, 60, 60);
+    
+    drawRoundColorExampleWithVariation(55, sliderStart - 30, 30);
   }
-  buffer.rect(sliderStart-60, 0, 60, 60);
-  
-  drawRoundColorExampleWithVariation(55, sliderStart - 30, 30);
+
 
   // bottom left/ top middle text
   buffer.fill(visHex);
@@ -1331,21 +1340,24 @@ function redrawInterface(buffer, activeInputGadget) {
   buffer.text(controlsInfo, 20, height - 20);
 
   // draw the size indicator
-  buffer.drawingContext.save();
-  buffer.fill(bgHex);
-  buffer.rect(sliderStart + 600, 0, 60, 60);
-  buffer.drawingContext.clip();
-  buffer.fill(okhex(brushLuminance, brushChroma, brushHue));
-  drawStamp(buffer, sliderStart + 630, 30, easedSize, pen.angle, pen.pressure, texture);
-  buffer.noFill();
-  buffer.stroke(visHex);
-  buffer.strokeWeight(1);
-  buffer.ellipse(sliderStart + 630, 30, easedSize, easedSize)
-  buffer.drawingContext.restore();
-  buffer.noStroke();
-  buffer.fill(visHex);
-  buffer.textSize(11);
-  buffer.text(Math.round(easedSize), sliderStart + 604, 10);
+  if (drawSliders) {
+    buffer.drawingContext.save();
+    buffer.fill(bgHex);
+    buffer.rect(sliderStart + 600, 0, 60, 60);
+    buffer.drawingContext.clip();
+    buffer.fill(okhex(brushLuminance, brushChroma, brushHue));
+    drawStamp(buffer, sliderStart + 630, 30, easedSize, pen.angle, pen.pressure, texture);
+    buffer.noFill();
+    buffer.stroke(visHex);
+    buffer.strokeWeight(1);
+    buffer.ellipse(sliderStart + 630, 30, easedSize, easedSize)
+    buffer.drawingContext.restore();
+    buffer.noStroke();
+    buffer.fill(visHex);
+    buffer.textSize(11);
+    buffer.text(Math.round(easedSize), sliderStart + 604, 10);
+  }
+
 
   //reset text size
   buffer.textSize((width < height) ? 13 : 16);
@@ -1388,7 +1400,7 @@ function redrawInterface(buffer, activeInputGadget) {
 
   // draw the hover preview
   if ((activeInputGadget === "draw") && (isTouchControl === false) && !pen.isDown && !editMode && !pointerDown
-    && hover.x > 0 && hover.x < paintingState.width && hover.y > 0 && hover.y < paintingState.height
+    && hover.x > 0 && hover.x < paintingState.width() && hover.y > 0 && hover.y < paintingState.height()
   ) {
 
     // change from canvas to screen space
