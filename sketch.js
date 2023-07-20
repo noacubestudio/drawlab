@@ -1578,15 +1578,22 @@ function redrawInterface(buffer, activeInputGadget) {
     } else if (activeInputGadget === "size") {
 
       // scale
-      const lineBaseY = refY - gadgetRadius;
+      const lineBaseY = ankerY - gadgetRadius;
       const lineAddY = gadgetRadius * 2 * map(brushSize, 4, 600, 0, 1);
       const lineTranslateY = lineBaseY + lineAddY;
 
       const posX = ankerX - 40;
+      const minDotSize = 4;
+      const maxDotSize = 20;
 
       buffer.fill(visHex);
-      buffer.ellipse(posX, lineTranslateY + gadgetRadius, 10);
-      buffer.ellipse(posX, lineTranslateY - gadgetRadius, 20);
+      buffer.ellipse(posX, lineTranslateY + gadgetRadius, minDotSize);
+      buffer.fill(visHex);
+      buffer.ellipse(posX, lineTranslateY + 0.5 * gadgetRadius, easeInCirc(lerp(minDotSize, maxDotSize, 0.25), minDotSize, maxDotSize));
+      buffer.ellipse(posX, lineTranslateY + 0.0 * gadgetRadius, easeInCirc(lerp(minDotSize, maxDotSize, 0.5), minDotSize, maxDotSize));
+      buffer.ellipse(posX, lineTranslateY - 0.5 * gadgetRadius, easeInCirc(lerp(minDotSize, maxDotSize, 0.75), minDotSize, maxDotSize));
+      buffer.fill(visHex);
+      buffer.ellipse(posX, lineTranslateY - gadgetRadius, maxDotSize);
 
       buffer.fill(brushHex);
       const easedSize = easeInCirc(brushSize, 4, 600);
