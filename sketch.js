@@ -1381,7 +1381,7 @@ function redrawInterface(buffer, activeInputGadget) {
       buffer.noStroke();
 
       function drawGadgetDirection(x, y, xDir, yDir, isActive, text) {
-        const size = 56;
+        const size = 54;
         const centerOffset = 40;
         if (isActive) {
           buffer.stroke(antiVisHex);
@@ -1394,7 +1394,42 @@ function redrawInterface(buffer, activeInputGadget) {
         }
         buffer.ellipse(x+centerOffset*xDir, y+centerOffset*yDir, size, size);
         buffer.fill(visHex);
-        buffer.text(text, x+centerOffset*xDir, y+centerOffset*yDir);
+
+        const posX = x+centerOffset*xDir;
+        const posY = y+centerOffset*yDir;
+        // icons or text
+        if (text === "H") {
+          buffer.strokeWeight(8);
+
+          let startVarArr = [brushLuminance, brushChroma, brushHue, 360];
+          let endVarArr = [brushLuminance, brushChroma, brushHue, 0];
+          drawGradientLine(posX, posY - size/3, posX, posY + size/3, startVarArr, endVarArr, size);
+
+          let startHueArr = [brushLuminance, brushChroma, 0 + refHue - 180];
+          let endHueArr = [brushLuminance, brushChroma, 360 + refHue - 180];
+          drawGradientLine(posX - size/3, posY, posX + size/3, posY, startHueArr, endHueArr, size);
+          
+          buffer.noStroke();
+
+        } else if (text === "LC") {
+          buffer.strokeWeight(8);
+
+          let startLumArr = [1.0, brushChroma, brushHue];
+          let endLumArr = [0.0, brushChroma, brushHue];
+          drawGradientLine(posX, posY - size/3, posX, posY + size/3, startLumArr, endLumArr, size);
+
+          let startChromaArr = [brushLuminance, 0.0, brushHue];
+          let endChromaArr = [brushLuminance, 0.5, brushHue];
+          drawGradientLine(posX - size/3, posY, posX + size/3, posY, startChromaArr, endChromaArr, size);
+          
+          buffer.noStroke();
+
+        } else {
+          buffer.textSize(22);
+          buffer.text(text, posX, posY);
+          //reset text size
+          buffer.textSize((width < height) ? 13 : 16);
+        }
       }
 
       const highlightedGadget = (menuState.hoverPage === null) ? menuState.lastGadgetPage : menuState.hoverPage;
@@ -1421,7 +1456,7 @@ function redrawInterface(buffer, activeInputGadget) {
       let startVarArr = [brushLuminance, brushChroma, brushHue, 360];
       let endVarArr = [brushLuminance, brushChroma, brushHue, 0];
       buffer.strokeWeight(6);
-      drawGradientLine(0, radius*2 * (-1 + brushVar/360), 0, radius*2 * brushVar/360, startVarArr, endVarArr);
+      drawGradientLine(0, radius*2 * (-1 + brushVar/360), 0, radius*2 * brushVar/360, startVarArr, endVarArr, gadgetRadius);
 
       // hue
       // always start centered since hue is a circle anyway
@@ -1435,7 +1470,7 @@ function redrawInterface(buffer, activeInputGadget) {
       let startHueArr = [brushLuminance, brushChroma, 0 + refHue - 180];
       let endHueArr = [brushLuminance, brushChroma, 360 + refHue - 180];
       buffer.strokeWeight(6);
-      drawGradientLine(radius*2 * (- deltaHue/360), 0, radius*2 * (1-deltaHue/360), 0, startHueArr, endHueArr);
+      drawGradientLine(radius*2 * (- deltaHue/360), 0, radius*2 * (1-deltaHue/360), 0, startHueArr, endHueArr, gadgetRadius);
 
       buffer.pop();
 
@@ -1458,7 +1493,7 @@ function redrawInterface(buffer, activeInputGadget) {
       buffer.strokeWeight(8);
       buffer.line(0, radius*2 * (-1 + brushLuminance), 0, radius*2 * brushLuminance);
       buffer.strokeWeight(6);
-      drawGradientLine(0, radius*2 * (-1 + brushLuminance), 0, radius*2 * brushLuminance, startLumArr, endLumArr);
+      drawGradientLine(0, radius*2 * (-1 + brushLuminance), 0, radius*2 * brushLuminance, startLumArr, endLumArr, gadgetRadius);
 
       let startChromaArr = [brushLuminance, 0.0, brushHue];
       let endChromaArr = [brushLuminance, 0.5, brushHue];
@@ -1466,7 +1501,7 @@ function redrawInterface(buffer, activeInputGadget) {
       buffer.strokeWeight(8);
       buffer.line(radius*2 * (- brushChroma*2), 0, radius*2 * (1-brushChroma*2), 0);
       buffer.strokeWeight(6);
-      drawGradientLine(radius*2 * (- brushChroma*2), 0, radius*2 * (1-brushChroma*2), 0, startChromaArr, endChromaArr);
+      drawGradientLine(radius*2 * (- brushChroma*2), 0, radius*2 * (1-brushChroma*2), 0, startChromaArr, endChromaArr, gadgetRadius);
       
       buffer.pop();
 
@@ -1540,8 +1575,8 @@ function redrawInterface(buffer, activeInputGadget) {
     return chroma.oklch(mixedArr[0], mixedArr[1], mixedArr[2] + hueVar);
   }
 
-  function drawGradientLine(xStart, yStart, xEnd, yEnd, startArr, endArr) {
-    const segments = Math.floor(gadgetRadius)/2;
+  function drawGradientLine(xStart, yStart, xEnd, yEnd, startArr, endArr, radius) {
+    const segments = Math.floor(radius)/2;
     let lastX = xStart;
     let lastY = yStart;
     for (let i = 1; i < segments + 1; i++) {
