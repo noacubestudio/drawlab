@@ -1741,7 +1741,7 @@ function easedHueVar(brushVar) {
   // for low chroma, use the no curve amount of hue variation (more intense)
   // for high chroma, use the curve (less intense)
   return lerp(
-    baseVar*1,
+    brushVar,
     easeInCirc(brushVar*0.5, 0, 360),
     easeOutCubic(brushChroma * 2)
   );
