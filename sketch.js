@@ -6,9 +6,16 @@ let interfaceBuffer;
 let newStrokeBuffer;
 
 // background color settings
-let bgHue = 0;
-let bgChroma = 0.0;
-let bgLuminance = 0.8;
+let bgHue = 300;
+let bgChroma = 0.05;
+let bgLuminance = 0.9;
+
+const paintingState = {
+  width: 800,
+  height: 800,
+  x: () => Math.floor((width - paintingState.width)/2),
+  y: () => Math.floor((height - paintingState.height)/2)
+}
 
 // reference of previous brush settings for relative change
 let refX;
@@ -91,9 +98,12 @@ const menuState = {
   lastGadgetPage: undefined,
   topSliderStartX: undefined,
   topSliderDeltaX: undefined,
-  startedEventOnMenu: false
+  startedEventOnMenu: false,
+  screenPointerX: null,
+  screenPointerY: null,
+  screenHoverX: undefined,
+  screenHoverY: undefined
 };
-
 
 function setup() {
   cnv = createCanvas(windowWidth - 10, windowHeight - 10);
@@ -116,14 +126,14 @@ function setup() {
   refY = pen.y;
 
   // Create a graphics buffer for the painting and one for the last stroke
-  paintingBuffer = createGraphics(width, height);
-  newStrokeBuffer = createGraphics(width, height);
+  paintingBuffer = createGraphics(paintingState.width, paintingState.height);
+  newStrokeBuffer = createGraphics(paintingState.width, paintingState.height);
   if ((width * displayDensity()) > 3000) {
     paintingBuffer.pixelDensity(1);
     newStrokeBuffer.pixelDensity(1);
   }
   paintingBuffer.background(okhex(bgLuminance, bgChroma, bgHue));
-  document.body.style.backgroundColor = okhex(bgLuminance*0.9, bgChroma*0.5, bgHue);
+  document.body.style.backgroundColor = okhex(bgLuminance*0.9, Math.max(bgChroma, 0.2), bgHue);
 
   // Create a graphics buffer for the indicator
   interfaceBuffer = createGraphics(width, height);
@@ -325,8 +335,10 @@ function updateInput(event) {
     hover.y = undefined;
 
     if (pen.isDown) {
-      pen.x = event.clientX;
-      pen.y = event.clientY;
+      menuState.screenPointerX = event.clientX;
+      menuState.screenPointerY = event.clientY;
+      pen.x = event.clientX - paintingState.x();
+      pen.y = event.clientY - paintingState.y();
   
       // update pressure and angle
       if (event.pointerType === "pen") {
@@ -335,9 +347,10 @@ function updateInput(event) {
         // altitude, wip
       }
     } else if (!pointerDown) {
-      hover.x = event.clientX;
-      hover.y = event.clientY;
-
+      menuState.screenHoverX = event.clientX;
+      menuState.screenHoverY = event.clientY;
+      hover.x = event.clientX - paintingState.x();
+      hover.y = event.clientY - paintingState.y();
       if (event.pointerType === "pen") {
         
         hover.angle = tiltToAngle(event.tiltX, event.tiltY);
@@ -362,8 +375,10 @@ function updateInput(event) {
         // must be Pencil
         pen.lastX = pen.x;
         pen.lastY = pen.y;
-        pen.x = touch.clientX;
-        pen.y = touch.clientY;
+        menuState.screenPointerX = touch.clientX;
+        menuState.screenPointerY = touch.clientY;
+        pen.x = touch.clientX - paintingState.x();
+        pen.y = touch.clientY - paintingState.y();
         containedPen = true;
         pen.angle = touch.azimuthAngle;
         pen.altitude = touch.altitudeAngle;
@@ -472,7 +487,7 @@ function doAction(action) {
     editMode = false;
 
     paintingBuffer.background(okhex(bgLuminance, bgChroma, bgHue));
-    document.body.style.backgroundColor = okhex(bgLuminance*0.9, bgChroma*0.5, bgHue);
+    document.body.style.backgroundColor = okhex(bgLuminance*0.9, Math.max(bgChroma, 0.2), bgHue);
 
   } else if (action === "save") {
 
@@ -518,6 +533,8 @@ function inputMode() {
 }
 
 function draw() {
+
+  background(okhex(bgLuminance*0.9, Math.max(bgChroma, 0.2), bgHue));
 
   const wasInMenu = (currentInputMode !== "draw");
   currentInputMode = inputMode();
@@ -568,10 +585,10 @@ function draw() {
   redrawInterface(interfaceBuffer, currentInputMode); 
 
   // draw the painting buffer
-  if (paintingBuffer !== undefined) image(paintingBuffer, 0, 0);
+  if (paintingBuffer !== undefined) image(paintingBuffer, paintingState.x(), paintingState.y());
 
   // draw the last brushstroke buffer
-  if (newStrokeBuffer !== undefined) image(newStrokeBuffer, 0, 0);
+  if (newStrokeBuffer !== undefined) image(newStrokeBuffer, paintingState.x(), paintingState.y());
 
   // draw the indicator buffer in the top left corner
   if (interfaceBuffer !== undefined) image(interfaceBuffer, 0, 0);
@@ -589,6 +606,10 @@ function clearBrushReference() {
   refAngle = undefined;
   refHoverX = undefined;
   refHoverY = undefined;
+  refScreenPointerX = undefined;
+  refScreenPointerY = undefined;
+  refScreenHoverX = undefined;
+  refScreenHoverY = undefined;
 }
 
 function updateBrushReferenceFromInput() {
@@ -599,6 +620,10 @@ function updateBrushReferenceFromInput() {
   refAngle  ??= pen.angle;
   refHoverX ??= hover.x;
   refHoverY ??= hover.y;
+  refScreenPointerX ??= menuState.screenPointerX;
+  refScreenPointerY ??= menuState.screenPointerY;
+  refScreenHoverX ??= menuState.screenHoverX;
+  refScreenHoverY ??= menuState.screenHoverY;
   // starting brush settings
   refHue       ??= brushHue;
   refChroma    ??= brushChroma;
@@ -1069,7 +1094,7 @@ function redrawInterface(buffer, activeInputGadget) {
   buffer.clear();
 
   // Interface Colors
-  const bgHex = okhex(bgLuminance*0.9, bgChroma*0.5, bgHue);
+  const bgHex = okhex(bgLuminance*0.9, Math.max(bgChroma, 0.2), bgHue);
   const visibleTextLum = constrain(bgLuminance + (bgLuminance > 0.5 ? -0.4 : 0.4), 0, 1.0);
   const lessTextLum = constrain(bgLuminance + (bgLuminance > 0.5 ? -0.25 : 0.25), 0, 1.0);
   const visHex = okhex(visibleTextLum, min(bgChroma, 0.2), bgHue);
@@ -1087,6 +1112,11 @@ function redrawInterface(buffer, activeInputGadget) {
 
   // Unfinished brushstroke preview
   if (pen.isDown && (activeInputGadget === "draw") && !editMode) {
+
+    // change from canvas to screen space
+    buffer.push();
+    buffer.translate(paintingState.x(), paintingState.y());
+
     if (brushTool === "Round Line Tool") {
       buffer.stroke(brushHexWithHueVarSeed(pen.startX * pen.startY));
       drawWithLine(buffer, pen.startX, pen.startY, pen.x, pen.y, easedSize);
@@ -1102,6 +1132,8 @@ function redrawInterface(buffer, activeInputGadget) {
       buffer.fill(brushHexWithHueVarSeed(pen.startX * pen.startY));
       drawwithMirror(buffer, pen.startX, pen.startY, pen.x, pen.y, penRecording, easedSize);
     }
+
+    buffer.pop();
   }
   
   // MENUS
@@ -1329,7 +1361,14 @@ function redrawInterface(buffer, activeInputGadget) {
   drawActiveGadget();
 
   // draw the hover preview
-  if ((activeInputGadget === "draw") && (isTouchControl === false) && !pen.isDown && !editMode && !pointerDown) {
+  if ((activeInputGadget === "draw") && (isTouchControl === false) && !pen.isDown && !editMode && !pointerDown
+    && hover.x > 0 && hover.x < paintingState.width && hover.y > 0 && hover.y < paintingState.height
+  ) {
+
+    // change from canvas to screen space
+    buffer.push();
+    buffer.translate(paintingState.x(), paintingState.y());
+
     // draw hover stamp at the pen position
     if (brushTool === "Stamp Tool") {
       drawBrushstroke(buffer, hover.x, hover.y, easedSize, hover.angle, undefined, texture);
@@ -1342,6 +1381,7 @@ function redrawInterface(buffer, activeInputGadget) {
         drawWithSharpLine(buffer, hover.lastX, hover.lastY, hover.angle, undefined, hover.x, hover.y, hover.angle, undefined, easedSize, texture);
       }
     }
+    buffer.pop();
   }
 
 
@@ -1357,8 +1397,8 @@ function redrawInterface(buffer, activeInputGadget) {
     }
 
     // draw the brush setting gadgets
-    const useBaseX = (refHoverX !== undefined) ? refHoverX : refX;
-    const useBaseY = (refHoverY !== undefined) ? refHoverY : refY;
+    const useBaseX = (refScreenHoverX !== undefined) ? refScreenHoverX : refScreenPointerX;
+    const useBaseY = (refScreenHoverY !== undefined) ? refScreenHoverY : refScreenPointerY;
 
     if (useBaseX === undefined || useBaseY === undefined) return;
 
@@ -1434,10 +1474,10 @@ function redrawInterface(buffer, activeInputGadget) {
 
       const highlightedGadget = (menuState.hoverPage === null) ? menuState.lastGadgetPage : menuState.hoverPage;
 
-      drawGadgetDirection(refX, refY, -1,  0, highlightedGadget === 4, "S");
-      drawGadgetDirection(refX, refY,  1,  0, highlightedGadget === 3, "H");
-      drawGadgetDirection(refX, refY,  0, -1, highlightedGadget === 5, "I");
-      drawGadgetDirection(refX, refY,  0,  1, highlightedGadget === 2, "LC");
+      drawGadgetDirection(useBaseX, useBaseY, -1,  0, highlightedGadget === 4, "S");
+      drawGadgetDirection(useBaseX, useBaseY,  1,  0, highlightedGadget === 3, "H");
+      drawGadgetDirection(useBaseX, useBaseY,  0, -1, highlightedGadget === 5, "I");
+      drawGadgetDirection(useBaseX, useBaseY,  0,  1, highlightedGadget === 2, "LC");
     
     } else if (activeInputGadget === "hue") {
 
