@@ -1430,8 +1430,10 @@ function redrawInterface(buffer, activeInputGadget) {
     if (activeInputGadget === "eyedropper") {
       buffer.fill(brushHex);
       const easedSize = easeInCirc(brushSize, 4, 600);
-      drawStamp(buffer, pen.x, pen.y, easedSize, pen.angle, pen.pressure, texture);
-      drawCrosshair(easedSize, pen.x, pen.y);
+      const screenX = (!pen.isDown) ? menuState.screenHoverX : menuState.screenPointerX;
+      const screenY = (!pen.isDown) ? menuState.screenHoverY : menuState.screenPointerY;
+      if (pen.isDown) drawStamp(buffer, screenX, screenY, easedSize, pen.angle, pen.pressure, texture);
+      drawCrosshair(easedSize, screenX, screenY);
     }
 
     // draw the brush setting gadgets
@@ -1736,14 +1738,11 @@ function easedHueVar(brushVar) {
 
   if (brushVar === undefined) return 0;
 
-  // during eyedropper, vary the hue less
-  const baseVar = brushVar * ((inputMode() === "eyedropper") ? 0.3 : 1);
-
   // for low chroma, use the no curve amount of hue variation (more intense)
   // for high chroma, use the curve (less intense)
   return lerp(
     baseVar*1,
-    easeInCirc(baseVar*0.5, 0, 360),
+    easeInCirc(brushVar*0.5, 0, 360),
     easeOutCubic(brushChroma * 2)
   );
 }
