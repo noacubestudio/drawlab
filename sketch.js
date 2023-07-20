@@ -705,7 +705,7 @@ function updateBrushSettingsFromInput(currentInputMode) {
     if (Math.abs(deltaX) > 10 || Math.abs(deltaY) > 10) {
       if (Math.abs(deltaX) > Math.abs(deltaY)) {
         // horizontal
-        menuState[affectedPageType] = (deltaX < 0) ? 3 : 4;
+        menuState[affectedPageType] = (deltaX < 0) ? 4 : 3;
       } else {
         // vertical
         menuState[affectedPageType] = (deltaY < 0) ? 5 : 2;
@@ -1393,8 +1393,8 @@ function redrawInterface(buffer, activeInputGadget) {
 
       const highlightedGadget = (menuState.hoverPage === null) ? menuState.lastGadgetPage : menuState.hoverPage;
 
-      drawGadgetDirection(refX, refY, -1,  0, highlightedGadget === 3, "H");
-      drawGadgetDirection(refX, refY,  1,  0, highlightedGadget === 4, "S");
+      drawGadgetDirection(refX, refY, -1,  0, highlightedGadget === 4, "S");
+      drawGadgetDirection(refX, refY,  1,  0, highlightedGadget === 3, "H");
       drawGadgetDirection(refX, refY,  0, -1, highlightedGadget === 5, "I");
       drawGadgetDirection(refX, refY,  0,  1, highlightedGadget === 2, "LC");
     
@@ -1418,14 +1418,18 @@ function redrawInterface(buffer, activeInputGadget) {
       drawGradientLine(0, radius*2 * (-1 + brushVar/360), 0, radius*2 * brushVar/360, startVarArr, endVarArr);
 
       // hue
+      // always start centered since hue is a circle anyway
       buffer.stroke("black");
       buffer.strokeWeight(8);
-      buffer.line(-radius, 0, radius, 0);
+      let deltaHue = brushHue - refHue + 180;
+      if (deltaHue < 0) deltaHue += 360;
+      if (deltaHue > 360) deltaHue % 360;
+      buffer.line(radius*2 * (- deltaHue/360), 0, radius*2 * (1-deltaHue/360), 0);
 
-      let startHueArr = [brushLuminance, brushChroma, 0 + brushHue - 180];
-      let endHueArr = [brushLuminance, brushChroma, 360 + brushHue - 180];
+      let startHueArr = [brushLuminance, brushChroma, 0 + refHue - 180];
+      let endHueArr = [brushLuminance, brushChroma, 360 + refHue - 180];
       buffer.strokeWeight(6);
-      drawGradientLine(-radius, 0, radius, 0, startHueArr, endHueArr);
+      drawGradientLine(radius*2 * (- deltaHue/360), 0, radius*2 * (1-deltaHue/360), 0, startHueArr, endHueArr);
 
       buffer.pop();
 
@@ -1467,18 +1471,20 @@ function redrawInterface(buffer, activeInputGadget) {
     } else if (activeInputGadget === "size") {
 
       // scale
-      const lineBaseY = ankerY - gadgetRadius;
+      const lineBaseY = refY - gadgetRadius;
       const lineAddY = gadgetRadius * 2 * map(brushSize, 4, 600, 0, 1);
       const lineTranslateY = lineBaseY + lineAddY;
 
+      const posX = ankerX - 40;
+
       buffer.fill(visHex);
-      buffer.ellipse(ankerX, lineTranslateY + gadgetRadius, 10);
-      buffer.ellipse(ankerX, lineTranslateY - gadgetRadius, 20);
+      buffer.ellipse(posX, lineTranslateY + gadgetRadius, 10);
+      buffer.ellipse(posX, lineTranslateY - gadgetRadius, 20);
 
       buffer.fill(brushHex);
       const easedSize = easeInCirc(brushSize, 4, 600);
-      drawStamp(buffer, ankerX, ankerY, easedSize, pen.angle, pen.pressure, texture);
-      drawCrosshair(easedSize, ankerX, ankerY);
+      drawStamp(buffer, posX, ankerY, easedSize, pen.angle, pen.pressure, texture);
+      drawCrosshair(easedSize, posX, ankerY);
     }
   }
 
