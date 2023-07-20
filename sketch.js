@@ -140,7 +140,7 @@ function setup() {
     newStrokeBuffer.pixelDensity(1);
   }
   paintingBuffer.background(okhex(bgLuminance, bgChroma, bgHue));
-  document.body.style.backgroundColor = okhex(bgLuminance*0.9, Math.max(bgChroma, 0.1), bgHue);
+  document.body.style.backgroundColor = okhex(bgLuminance*0.9, Math.min(bgChroma, 0.1), bgHue);
 
   // Create a graphics buffer for the indicator
   interfaceBuffer = createGraphics(width, height);
@@ -502,11 +502,12 @@ function doAction(action) {
     editMode = false;
 
     paintingBuffer.background(okhex(bgLuminance, bgChroma, bgHue));
-    document.body.style.backgroundColor = okhex(bgLuminance*0.9, Math.max(bgChroma, 0.1), bgHue);
+    document.body.style.backgroundColor = okhex(bgLuminance*0.9, Math.min(bgChroma, 0.1), bgHue);
 
   } else if (action === "save") {
 
-    saveCanvas(paintingBuffer, "drawlab-canvas", "png");
+    const timestamp = new Date().toLocaleString().replace(/[-:T.]/g, "-").replace(/, /g, "_");
+    saveCanvas(paintingBuffer, "drawlab-canvas_" + timestamp, "png");
 
   } else if (action === "edit") {
 
@@ -548,7 +549,7 @@ function inputMode() {
 
 function draw() {
 
-  background(okhex(bgLuminance*0.9, Math.max(bgChroma, 0.1), bgHue));
+  background(okhex(bgLuminance*0.9, Math.min(bgChroma, 0.1), bgHue));
 
   const wasInMenu = (currentInputMode !== "draw");
   currentInputMode = inputMode();
@@ -1118,7 +1119,7 @@ function redrawInterface(buffer, activeInputGadget) {
   buffer.clear();
 
   // Interface Colors
-  const bgHex = okhex(bgLuminance*0.9, Math.max(bgChroma, 0.1), bgHue);
+  const bgHex = okhex(bgLuminance*0.9, Math.min(bgChroma, 0.1), bgHue);
   const visibleTextLum = constrain(bgLuminance + (bgLuminance > 0.5 ? -0.4 : 0.4), 0, 1.0);
   const lessTextLum = constrain(bgLuminance + (bgLuminance > 0.5 ? -0.25 : 0.25), 0, 1.0);
   const visHex = okhex(visibleTextLum, min(bgChroma, 0.2), bgHue);
