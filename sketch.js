@@ -105,6 +105,11 @@ const menuState = {
   screenHoverY: undefined
 };
 
+const editState = {
+  lastX: undefined,
+  lastY: undefined
+}
+
 function setup() {
   cnv = createCanvas(windowWidth - 10, windowHeight - 10);
   newCanvasSize();
@@ -133,7 +138,7 @@ function setup() {
     newStrokeBuffer.pixelDensity(1);
   }
   paintingBuffer.background(okhex(bgLuminance, bgChroma, bgHue));
-  document.body.style.backgroundColor = okhex(bgLuminance*0.9, Math.max(bgChroma, 0.2), bgHue);
+  document.body.style.backgroundColor = okhex(bgLuminance*0.9, Math.max(bgChroma, 0.1), bgHue);
 
   // Create a graphics buffer for the indicator
   interfaceBuffer = createGraphics(width, height);
@@ -428,12 +433,7 @@ function updateInput(event) {
 
   // pen lifted
   if (pen.wasDown && !pen.isDown) {
-    // leave edit mode
-    if (editMode) {
-      editMode = false;
-      // don't even send this as a confirm to draw
-      pen.wasDown = false;
-    }
+
     pen.lastX = undefined;
     pen.lastY = undefined;
 
@@ -444,11 +444,22 @@ function updateInput(event) {
 
     // was drawing, but only short
     if (menuState.onPage === 0 && didNotDraw) {
-      doAction("undo");
+
+      if (!editMode) {
+        doAction("undo");
+      }
+      
       menuState.onPage = 1;
     } else if (menuState.onPage > 0) {
       if (menuState.onPage > 1) menuState.lastGadgetPage = menuState.onPage;
       menuState.onPage = 0;
+    }
+    
+    if (!didNotDraw && editMode) {
+      // leave edit mode
+      // don't even send this as a confirm to draw
+      editMode = false;
+      pen.wasDown = false;
     }
 
     return;
@@ -487,7 +498,7 @@ function doAction(action) {
     editMode = false;
 
     paintingBuffer.background(okhex(bgLuminance, bgChroma, bgHue));
-    document.body.style.backgroundColor = okhex(bgLuminance*0.9, Math.max(bgChroma, 0.2), bgHue);
+    document.body.style.backgroundColor = okhex(bgLuminance*0.9, Math.max(bgChroma, 0.1), bgHue);
 
   } else if (action === "save") {
 
@@ -496,7 +507,6 @@ function doAction(action) {
   } else if (action === "edit") {
 
     editMode = !editMode;
-    
   }
 }
 
@@ -534,7 +544,7 @@ function inputMode() {
 
 function draw() {
 
-  background(okhex(bgLuminance*0.9, Math.max(bgChroma, 0.2), bgHue));
+  background(okhex(bgLuminance*0.9, Math.max(bgChroma, 0.1), bgHue));
 
   const wasInMenu = (currentInputMode !== "draw");
   currentInputMode = inputMode();
@@ -575,9 +585,19 @@ function draw() {
         }
       }
     } else if (editMode && pen.isDown) {
-      const xDiff = pen.x-pen.lastX;
-      const yDiff = pen.y-pen.lastY;
-      redrawLastStroke(newStrokeBuffer, xDiff, yDiff);
+      editState.lastX ??= pen.x;
+      editState.lastY ??= pen.y;
+
+      const deltaX = pen.x-editState.lastX;
+      const deltaY = pen.y-editState.lastY;
+
+      editState.lastX = pen.x;
+      editState.lastY = pen.y;
+
+      redrawLastStroke(newStrokeBuffer, deltaX, deltaY);
+    } else if (editMode) {
+      editState.lastX = undefined;
+      editState.lastY = undefined;
     }
   }
 
@@ -1094,11 +1114,11 @@ function redrawInterface(buffer, activeInputGadget) {
   buffer.clear();
 
   // Interface Colors
-  const bgHex = okhex(bgLuminance*0.9, Math.max(bgChroma, 0.2), bgHue);
+  const bgHex = okhex(bgLuminance*0.9, Math.max(bgChroma, 0.1), bgHue);
   const visibleTextLum = constrain(bgLuminance + (bgLuminance > 0.5 ? -0.4 : 0.4), 0, 1.0);
   const lessTextLum = constrain(bgLuminance + (bgLuminance > 0.5 ? -0.25 : 0.25), 0, 1.0);
   const visHex = okhex(visibleTextLum, min(bgChroma, 0.2), bgHue);
-  const antiVisHex = okhex(constrain(0.5+(-visibleTextLum+0.5)*4, 0, 1.0), min(bgChroma, 0.2), bgHue);
+  const antiVisHex = okhex(constrain(0.5+(-visibleTextLum/2+0.5)*4, 0, 1.0), min(bgChroma, 0.2), bgHue);
 
   const brushHex = okhex(brushLuminance, brushChroma, brushHue);
   const visibleTextOnBrushLum = constrain(brushLuminance + (brushLuminance > 0.5 ? -0.6 : 0.6), 0, 1.0);
@@ -1334,6 +1354,10 @@ function redrawInterface(buffer, activeInputGadget) {
 
   // draw rectangle around stroke being edited
   if (editMode && penRecording.length > 0) {
+    // change from canvas to screen space
+    buffer.push();
+    buffer.translate(paintingState.x(), paintingState.y());
+
     const margin = (["Triangle Tool", "Lasso Tool", "Mirror Tool"].includes(brushTool)) ? 0 : easedSize*0.5;
     const xmin = penRecording.reduce((a, b) => Math.min(a, b.x),  Infinity) - margin;
     const xmax = penRecording.reduce((a, b) => Math.max(a, b.x), -Infinity) + margin;
@@ -1354,6 +1378,8 @@ function redrawInterface(buffer, activeInputGadget) {
     buffer.line(xmax, ymin, xmax, ymax);
     buffer.strokeWeight(6);
     buffer.noStroke();
+
+    buffer.pop();
   }
 
 
