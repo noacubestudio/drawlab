@@ -538,7 +538,7 @@ function draw() {
 
   if (currentInputMode === "draw") {
     // clear the reference values so they could be changed again when opening a menu
-    clearBrushReference();
+    if (menuState.startedEventOnMenu !== true) clearBrushReference();
 
     // start of brushstroke
     if (!editMode && !wasInMenu) {
@@ -1238,33 +1238,39 @@ function redrawInterface(buffer, activeInputGadget) {
     const xFromLeftWithDelta = xFromLeftEdgeOfSliders + menuState.topSliderDeltaX;
     let section = undefined;
     let sectionValue = undefined;
-    
+    let sectionValueText = "";
+
     if (xFromLeftEdgeOfSliders < 60) {
       section = "var";
-      sectionValue = constrain(refVar + menuState.topSliderDeltaX * 0.2, 0, 360);
+      sectionValue = constrain(refVar + menuState.topSliderDeltaX * 0.5, 0, 360);
       if (!isNaN(sectionValue)) brushVar = sectionValue;
+      sectionValueText = Math.floor(brushVar);
     } else if (xFromLeftEdgeOfSliders < 260) {
       section = "luminance";
       sectionValue = map(xFromLeftWithDelta, 60, 260, 0, 1.0, true);
       brushLuminance = sectionValue;
+      sectionValueText = Math.floor(brushLuminance * 100) + "%";
     } else if (xFromLeftEdgeOfSliders < 460) {
       section = "chroma";
       sectionValue = map(xFromLeftWithDelta, 260, 460, 0, 1.0, true);
       brushChroma = sectionValue * 0.5;
+      sectionValueText = Math.floor(brushChroma * 200) + "%";
     } else if (xFromLeftEdgeOfSliders < 660) {
       section = "hue";
       sectionValue = map(xFromLeftWithDelta, 460, 660, 0, 1.0);
       if (sectionValue > 1) sectionValue %= 1;
-      if (sectionValue < 0) sectionValue = 360-(Math.abs(sectionValue) % 1);
+      if (sectionValue < 0) sectionValue = 1-(Math.abs(sectionValue) % 1);
       brushHue = sectionValue * 360;
+      sectionValueText = Math.floor(brushHue);
     } else {
       section = "size";
-      sectionValue = constrain(refSize + menuState.topSliderDeltaX * 0.2, 4, 600);
+      sectionValue = constrain(refSize + menuState.topSliderDeltaX * 0.5, 4, 600);
       if (!isNaN(sectionValue)) brushSize = sectionValue;
+      sectionValueText = Math.round(easedSize);
     }
 
     buffer.textAlign(CENTER);
-    buffer.text(section + ": " + sectionValue, width/2, 60 + 20);
+    buffer.text(section + ": " + sectionValueText, width/2, 60 + 20);
   }
 
   buffer.textAlign(LEFT);
