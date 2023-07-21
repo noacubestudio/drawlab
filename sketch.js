@@ -14,7 +14,8 @@ const paintingState = {
   width: () => Math.min(width, height)-150,
   height: () => Math.min(width, height)-150,
   x: () => Math.floor((width - paintingState.width())/2),
-  y: () => Math.floor((height - paintingState.height())/2)
+  y: () => Math.floor((height - paintingState.height())/2),
+  containsNewStroke: undefined
 }
 
 // reference of previous brush settings for relative change
@@ -488,6 +489,7 @@ function doAction(action) {
   if (action === "undo") {
 
     newStrokeBuffer.clear();
+    paintingState.containsNewStroke = true;
     penRecording = [];
     editMode = false;
 
@@ -507,12 +509,23 @@ function doAction(action) {
   } else if (action === "save") {
 
     const timestamp = new Date().toLocaleString().replace(/[-:T.]/g, "-").replace(/, /g, "_");
+    
+    // commit the new stroke to the painting and clear the buffer
+    addLastStrokeToPainting();
+    
     saveCanvas(paintingBuffer, "drawlab-canvas_" + timestamp, "png");
 
   } else if (action === "edit") {
 
     editMode = !editMode;
   }
+}
+
+function addLastStrokeToPainting() {
+  // commit the new stroke to the painting and clear the buffer
+  paintingBuffer.image(newStrokeBuffer, 0, 0);
+  newStrokeBuffer.clear();
+  paintingState.containsNewStroke = true;
 }
 
 function keyReleased() {
@@ -575,10 +588,10 @@ function draw() {
     // start of brushstroke
     if (!editMode && !wasInMenu) {
       if (pen.started) {
+        
+        addLastStrokeToPainting();
+
         // don't draw on initial spot as a WIP pressure fix
-        // commit the new stroke to the painting and clear the buffer
-        paintingBuffer.image(newStrokeBuffer, 0, 0);
-        newStrokeBuffer.clear();
       } else {
         // draw to the stroke buffer immediately
         if ((brushTool === "Stamp Tool" || brushTool === "Fan Line Tool") && pen.isDown) {
@@ -697,6 +710,8 @@ function redrawLastStroke(buffer, xDiff, yDiff) {
 function drawInNewStrokeBuffer(buffer, startX, startY, startAngle, startPressure, endX, endY, endAngle, endPressure, recording) {
   if (buffer === undefined) return;
 
+  // drawing in the new stroke buffer, which has to be added to canvas later
+  paintingState.containsNewStroke = false;
   const easedSize = easeInCirc(brushSize, 4, 600);
 
   if (brushTool === "Stamp Tool") {
@@ -1217,20 +1232,20 @@ function redrawInterface(buffer, activeInputGadget) {
   }
 
 
-  function topButton(text, x) {
+  function topButton(text, x, condition) {
     if (x === 0) {
       //buffer.stroke(brushHex);
       //buffer.strokeWeight(3);
       buffer.fill(onBrushHex);
     } else {
-      buffer.fill(visHex);
+      if (condition === false) {
+        buffer.fill(visHex+"50");
+      } else {
+        buffer.fill(visHex);
+      }
+      
     }
     buffer.text(text, x, 0, 100, 60);
-    // buffer.stroke(visHex);
-    // buffer.strokeWeight(1);
-    // buffer.line(x+10, 60, x+90, 60)
-    // buffer.noStroke();
-    // buffer.strokeWeight(6);
   }
 
   // top menu buttons
@@ -1239,7 +1254,7 @@ function redrawInterface(buffer, activeInputGadget) {
   buffer.fill(visHex);
 
   topButton("tools", 0);
-  topButton("undo U", 100*1);
+  topButton("undo U", 100*1, !paintingState.containsNewStroke);
   topButton("edit E", 100*2);
   topButton("clear C", width-100*2);
   topButton("save S", width-100*1);
