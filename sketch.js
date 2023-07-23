@@ -167,7 +167,7 @@ function newCanvasSize() {
   resizeCanvas(windowWidth - scrollBarMargin, windowHeight - 0);
   //paintingBuffer.resizeCanvas(Math.min(width, height)-140, Math.min(width, height)-140);
   gadgetRadius = (width > 300) ? 120 : 60;
-  print("Canvas size now", width, height)
+  print("Window size now", width, height, "Canvas size", paintingState.width(), paintingState.height());
 }
 
 function newInterfaceSize() {
@@ -738,7 +738,7 @@ function drawInNewStrokeBuffer(buffer, startX, startY, startAngle, startPressure
 
     // one color variation for each line instance
     buffer.fill(brushHexWithHueVarSeed(startX * startY));
-    drawwithTriangle(buffer, startX, startY, endX, endY, recording, easedSize);
+    drawWithPolygon(buffer, startX, startY, endX, endY, recording, 3);
 
   } else if (brushTool === "Lasso Tool") {
 
@@ -857,7 +857,7 @@ function drawBrushstroke(buffer, x, y, size, angle, pressure, texture) {
     const rainbow = okhex(
       brushLuminance*0.98,
       brushChroma,
-      brushHue + varStrengths[(x * y) % varStrengths.length] * easedHueVar(brushVar)
+      brushHue + varStrengths[Math.abs(x * y) % varStrengths.length] * easedHueVar(brushVar)
     );
     buffer.fill(rainbow);
     drawStamp(buffer, x, y, size*1.05, angle, pressure, texture);
@@ -1018,44 +1018,59 @@ function drawWithPlaceholder(buffer, xa, ya, xb, yb, size) {
 }
 
 
-function drawwithTriangle(buffer, xa, ya, xb, yb, penRecording, size) {
+function drawWithPolygon(buffer, xa, ya, xb, yb, penRecording, sidesCount) {
   if (xa === undefined || ya === undefined || xb === undefined || yb === undefined) return;
+
   buffer.noStroke();
 
   buffer.push();
   buffer.translate(xa, ya);
-  //const angle = p5.Vector.angleBetween(createVector(xb-xa, yb-ya), createVector(1, 0));
-  //buffer.rotate(-angle);
-  //const length = dist(xa, ya, xb, yb);
 
-  if (penRecording !== undefined && penRecording.length > 2) {
+  if (penRecording !== undefined && penRecording.length >= sidesCount) {
 
-    let highestDist = 0;
-    let furthestX = undefined;
-    let furthestY = undefined;
+    const foundPoints = [{x: xa, y:ya, index:0}, {x: xb, y: yb, index: penRecording.length-1}];
     
-    penRecording.forEach((point, index) => { 
-      if (index > 0 && index < penRecording.length-1) {
-        // const angle = p5.Vector.angleBetween(createVector(xb-xa, yb-ya), createVector(point.x-xa, point.y-ya));
-        // const hypo = dist(xa, ya, point.x, point.y);
-        // const alti = sin(angle)*hypo;
-        // nDist = min(nDist, alti);
-        // pDist = max(pDist, alti);
-        const totalDist = dist(point.x, point.y, xa, ya) + dist(point.x, point.y, xb, yb)
-        if (totalDist > highestDist) {
-          highestDist = totalDist
-          furthestX = point.x
-          furthestY = point.y
+    for (let foundNum = foundPoints.length-1; foundNum < sidesCount; foundNum++) {
+
+      let highestDist = 0;
+      let furthestX = undefined;
+      let furthestY = undefined;
+      let furthestIndex = undefined;
+
+      penRecording.forEach((point, index) => { 
+        if (index > 0 && index < penRecording.length-1) {
+  
+          const totalDist = foundPoints.reduce((sum, foundpoint) => {
+            return sum + dist(foundpoint.x, foundpoint.y, point.x, point.y);
+          }, 0);
+          //print(totalDist, sidesCount, foundNum);
+          if (totalDist > highestDist) {
+            highestDist = totalDist;
+            furthestX = point.x;
+            furthestY = point.y;
+            furthestIndex = index;
+          }
         }
-      }
-    });
-    //print(nDist, pDist)
+      });
+
+      foundPoints.push({x: furthestX, y: furthestY, index: furthestIndex});
+    }
+
+    foundPoints.sort((a, b) => a.index - b.index);
+    print(foundPoints.reduce((text, point) => {return text + ", " + point.index}, ""))
+    
     buffer.beginShape();
     buffer.vertex(0,0);
-    buffer.vertex(furthestX-xa, furthestY-ya);
+    for(let drawNum = 2; drawNum < foundPoints.length; drawNum++) {
+      buffer.vertex(foundPoints[drawNum].x-xa, foundPoints[drawNum].y-ya);
+    }
+    
     buffer.vertex(xb-xa, yb-ya);
     buffer.endShape();
+
   } else {
+    
+    // not enough points, just assume triangle as fallback
     buffer.beginShape();
     buffer.vertex(0,0);
     buffer.vertex((xb-xa)*0.5, (xb-xa)*0.3);
@@ -1064,6 +1079,50 @@ function drawwithTriangle(buffer, xa, ya, xb, yb, penRecording, size) {
   }
 
   buffer.pop();
+}
+
+function simplifyPath(points, epsilon) {
+  let dmax = 0;
+  let index = 0;
+
+  for (let i = 1; i < points.length - 1; i++) {
+    const d = dist(points[i].x, points[i].y, points[0].x, points[0].y);
+
+    if (d > dmax) {
+      index = i;
+      dmax = d;
+    }
+  }
+
+  if (dmax > epsilon) {
+    const recResults1 = simplifyPath(points.slice(0, index + 1), epsilon);
+    const recResults2 = simplifyPath(points.slice(index), epsilon);
+    return recResults1.slice(0, recResults1.length - 1).concat(recResults2);
+  } else {
+    return [points[0], points[points.length - 1]];
+  }
+}
+
+function drawSimplifiedLasso(buffer, xa, ya, xb, yb, penRecording, size) {
+  buffer.noStroke();
+
+  if (penRecording.length <= 2) return;
+  const simplifiedPath = simplifyPath(penRecording, 20.0);
+  print(penRecording.length, simplifiedPath.length)
+
+  // buffer.push();
+  // buffer.translate(xa, ya);
+  if (simplifiedPath !== undefined && simplifiedPath.length > 2) {
+    buffer.beginShape();
+    buffer.curveVertex(xa, ya);
+    simplifiedPath.forEach((point) => { 
+      buffer.curveVertex(point.x, point.y);
+    });
+    buffer.curveVertex(xb, yb);
+    buffer.endShape();
+  }
+
+  // buffer.pop();
 }
 
 function drawwithMirror(buffer, xa, ya, xb, yb, penRecording, size) {
@@ -1164,7 +1223,7 @@ function redrawInterface(buffer, activeInputGadget) {
       drawWithSharpLine(buffer, pen.startX, pen.startY, pen.startAngle, pen.startPressure, pen.x, pen.y, pen.angle, pen.pressure, easedSize, texture);
     } else if (brushTool === "Triangle Tool") {
       buffer.fill(brushHexWithHueVarSeed(pen.startX * pen.startY));
-      drawwithTriangle(buffer, pen.startX, pen.startY, pen.x, pen.y, penRecording, easedSize);
+      drawWithPolygon(buffer, pen.startX, pen.startY, pen.x, pen.y, penRecording, 3);
     } else if (brushTool === "Lasso Tool") {
       buffer.fill(brushHexWithHueVarSeed(pen.startX * pen.startY));
       drawwithLasso(buffer, pen.startX, pen.startY, pen.x, pen.y, penRecording, easedSize);
