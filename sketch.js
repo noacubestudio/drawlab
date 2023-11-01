@@ -113,6 +113,13 @@ const editState = {
 
 let drawSliders = true;
 
+let fontRegular; let fontItalic; let fontMedium;
+function preload() {
+  fontRegular = loadFont('assets/IBMPlexSans-Regular.ttf');
+  fontItalic = loadFont('assets/IBMPlexSans-Italic.ttf');
+  fontMedium = loadFont('assets/IBMPlexSans-Medium.ttf');
+}
+
 function setup() {
   cnv = createCanvas(windowWidth - 10, windowHeight - 10);
   newCanvasSize();
@@ -146,7 +153,7 @@ function setup() {
   // Create a graphics buffer for the indicator
   interfaceBuffer = createGraphics(width, height);
   interfaceBuffer.strokeWeight(6);
-  interfaceBuffer.textFont("monospace");
+  interfaceBuffer.textFont(fontRegular, 'IBM Plex Sans', 'sans-serif');
   interfaceBuffer.textAlign(LEFT, CENTER);
   newInterfaceSize();
 
@@ -920,7 +927,7 @@ function drawStamp(buffer, x, y, size, angle, pressure, texture) {
 
 function brushHexWithHueVarSeed(seed) {
   return okhex(
-    brushLuminance,
+    brushLuminance + varStrengths[seed % varStrengths.length] * (easedHueVar(brushVar) / 360) * 0.5,
     brushChroma,
     brushHue + varStrengths[seed % varStrengths.length] * easedHueVar(brushVar)
   );
@@ -1276,14 +1283,14 @@ function redrawInterface(buffer, activeInputGadget) {
       buffer.textAlign(CENTER);
       if (brushTool === menuBrushTool && texture === menuTexture) {
         buffer.fill(visHex);
-        buffer.textStyle(ITALIC);
+        buffer.textFont(fontItalic);
       } else {
         buffer.stroke(brushHex);
         buffer.strokeWeight(3);
         buffer.fill(onBrushHex);
       }
-      buffer.text(menuName, 0, 0 + 60*spotY, 100, 60);
-      buffer.textStyle(NORMAL);
+      buffer.text(menuName, 0, 0 + 60*spotY, 100, 60 - 6);
+      buffer.textFont(fontRegular);
       buffer.noStroke();
       buffer.strokeWeight(6);
     }
@@ -1304,22 +1311,22 @@ function redrawInterface(buffer, activeInputGadget) {
       }
       
     }
-    buffer.text(text, x, 0, 100, 60);
+    buffer.text(text, x, 0, 100, 60 - 6);
   }
 
   // top menu buttons
   buffer.textAlign(CENTER);
-  buffer.textStyle(BOLD);
+  buffer.textFont(fontMedium);
   buffer.fill(visHex);
 
   topButton("tools", 0);
-  topButton("undo U", 100*1, !paintingState.containsNewStroke);
-  topButton("edit E", 100*2);
-  topButton("clear C", width-100*2);
-  topButton("save S", width-100*1);
+  topButton("undo", 100*1, !paintingState.containsNewStroke);
+  topButton("edit", 100*2);
+  topButton("clear", width-100*2);
+  topButton("save", width-100*1);
   
   buffer.textAlign(LEFT);
-  buffer.textStyle(NORMAL);
+  buffer.textFont(fontRegular);
 
 
   // draw the sliders at the top
@@ -1357,7 +1364,7 @@ function redrawInterface(buffer, activeInputGadget) {
     "  noise:" + map(brushVar, 4, 600, 0, 100, true).toFixed(1) + "%";
 
     buffer.textAlign(CENTER);
-    buffer.text(newColorText, width/2, 60 + 20);
+    buffer.text(newColorText, width/2, 60 + 20 - 6);
     
     if (refLuminance !== undefined) {
       buffer.fill(okhex(lessTextLum, min(bgChroma, 0.2), bgHue));
@@ -1367,7 +1374,7 @@ function redrawInterface(buffer, activeInputGadget) {
       ", " + refHue.toFixed(1) +
       "  noise:" + map(refVar, 4, 600, 0, 100, true).toFixed(1) + "%";
 
-      buffer.text(refColorText, width/2, 60 + 40);
+      buffer.text(refColorText, width/2, 60 + 40 - 6);
     }
   } else if (menuState.topSliderDeltaX !== undefined) {
     const xFromLeftEdgeOfSliders = menuState.topSliderStartX + 360 - width/2;
@@ -1406,13 +1413,13 @@ function redrawInterface(buffer, activeInputGadget) {
     }
 
     buffer.textAlign(CENTER);
-    buffer.text(section + ": " + sectionValueText, width/2, 60 + 20);
+    buffer.text(section + ": " + sectionValueText, width/2, 60 + 20 - 6);
   }
 
   buffer.textAlign(LEFT);
   buffer.fill(visHex);
   const controlsInfo = (isTouchControl !== false) ? "(ignore touch draw: on)" : "KEYS 1/2/3/4 TO ADJUST"
-  buffer.text(controlsInfo, 20, height - 20);
+  buffer.text(controlsInfo, 20, height - 20 - 12);
 
   // draw the size indicator
   if (drawSliders) {
@@ -1430,7 +1437,7 @@ function redrawInterface(buffer, activeInputGadget) {
     buffer.noStroke();
     buffer.fill(visHex);
     buffer.textSize(11);
-    buffer.text(Math.round(easedSize), sliderStart + 604, 10);
+    buffer.text(Math.round(easedSize), sliderStart + 604, 10- 2);
   }
 
 
@@ -1526,10 +1533,10 @@ function redrawInterface(buffer, activeInputGadget) {
 
     if (activeInputGadget === "cloverMenu") {
 
-      buffer.stroke(visHex);
-      buffer.strokeWeight(2);
-      buffer.line(ankerX-10, ankerY, ankerX+10, ankerY);
-      buffer.line(ankerX, ankerY-10, ankerX, ankerY+10);
+      // buffer.stroke(visHex);
+      // buffer.strokeWeight(2);
+      // buffer.line(ankerX-10, ankerY, ankerX+10, ankerY);
+      // buffer.line(ankerX, ankerY-10, ankerX, ankerY+10);
 
       buffer.textAlign(CENTER);
       buffer.textStyle(BOLD);
@@ -1581,7 +1588,7 @@ function redrawInterface(buffer, activeInputGadget) {
 
         } else {
           buffer.textSize(22);
-          buffer.text(text, posX, posY);
+          buffer.text(text, posX, posY - 4);
           //reset text size
           buffer.textSize((width < height) ? 13 : 16);
         }
