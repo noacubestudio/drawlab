@@ -34,8 +34,9 @@ let gadgetRadius; // based on canvas size
 // menu
 let toolPresets = [
   {brush: "Brush Tool", texture: "Regular", menuName: "Brush"},
-  {brush: "Stamp Tool", texture: "Rounded", menuName: "Round S"},
-  {brush: "Stamp Tool", texture: "Rake", menuName: "Rake S"},
+  {brush: "Brush Tool", texture: "Rake", menuName: "Rake"},
+  {brush: "Stamp Tool", texture: "Rounded", menuName: "Stamp"},
+  //{brush: "Stamp Tool", texture: "Rake", menuName: "Rake S"},
   // {brush: "Sharp Line Tool", texture: "Regular", menuName: "Sharp L"},
   // {brush: "Sharp Line Tool", texture: "Rake", menuName: "Rake L"},
   // {brush: "Round Line Tool", texture: undefined, menuName: "Round L"},
@@ -74,6 +75,7 @@ const pen = {
   lastX: undefined,
   lastY: undefined,
   lastAngle: undefined,
+  lastPressure: undefined,
   started: false,
   wasDown: false,
   isDown: false,
@@ -348,6 +350,7 @@ function updateInput(event) {
     pen.lastX = pen.x;
     pen.lastY = pen.y;
     pen.lastAngle = pen.angle;
+    pen.lastPressure = pen.pressure;
     
     hover.lastX = hover.x;
     hover.lastY = hover.y;
@@ -396,6 +399,7 @@ function updateInput(event) {
         pen.lastX = pen.x;
         pen.lastY = pen.y;
         pen.lastAngle = pen.angle;
+        pen.lastPressure = pen.pressure;
         menuState.screenPointerX = touch.clientX;
         menuState.screenPointerY = touch.clientY;
         pen.x = touch.clientX - paintingState.x();
@@ -606,14 +610,14 @@ function draw() {
       } else {
         // draw to the stroke buffer immediately
         if ((brushTool === "Stamp Tool" || brushTool === "Fan Line Tool") && pen.isDown) {
-          drawInNewStrokeBuffer(newStrokeBuffer, pen.startX, pen.startY, pen.startAngle, undefined, pen.x, pen.y, pen.angle, pen.pressure, penRecording)
+          drawInNewStrokeBuffer(newStrokeBuffer, pen.startX, pen.startY, pen.startAngle, pen.startPressure, pen.x, pen.y, pen.angle, pen.pressure, penRecording)
 
         } else if (brushTool === "Brush Tool") {
-          drawInNewStrokeBuffer(newStrokeBuffer, pen.lastX, pen.lastY, pen.lastAngle, undefined, pen.x, pen.y, pen.angle, pen.pressure, penRecording)
+          drawInNewStrokeBuffer(newStrokeBuffer, pen.lastX, pen.lastY, pen.lastAngle, pen.lastPressure, pen.x, pen.y, pen.angle, pen.pressure, penRecording)
 
         } else if (!pen.isDown && pen.wasDown) {
           // drawn when pen lifted
-          drawInNewStrokeBuffer(newStrokeBuffer, pen.startX, pen.startY, pen.startAngle, undefined, pen.x, pen.y, pen.angle, pen.pressure, penRecording)
+          drawInNewStrokeBuffer(newStrokeBuffer, pen.startX, pen.startY, pen.startAngle, pen.startPressure, pen.x, pen.y, pen.angle, pen.pressure, penRecording)
         }
       }
     } else if (editMode && pen.isDown) {
@@ -966,82 +970,65 @@ function drawWithSharpLine(buffer, startX, startY, startAngle, startPressure, en
   startAngle ??= p5.Vector.angleBetween(createVector(0, -1), createVector(endX-startX, endY-startY));
     endAngle ??= p5.Vector.angleBetween(createVector(0, -1), createVector(endX-startX, endY-startY));
 
+    endPressure ??= startPressure;
+  startPressure ??= 0.2;
+    endPressure ??= 0.2;
+
+  const avgPressure = (startPressure + endPressure) / 2;
+
+
   buffer.noStroke();
 
-  if (texture === "Rake") {
-    // if the brush size is small relative to the painting size, use less circles, if it's big use more
-    const steps = Math.floor(map(size, 4, 300, 3, 24));
-    const startGapSize = 0.6 // (startPressure !== undefined) ? map(startPressure, 0.0, 0.2, 3.0, 0.0, true) : 1.0;
-    const   endGapSize = 1.4 // (  endPressure !== undefined) ? map(  endPressure, 0.0, 0.2, 3.0, 0.0, true) : 1.0;
+  const steps = map(size, 10, 300, 10, 200);
+  for (let i = 0; i < steps; i++) {
 
-    // calculate the actual sizes
-    const startCircleSize = size / ((steps-1)*startGapSize + steps);
-    const   endCircleSize = size / ((steps-1)*  endGapSize + steps);
+    const drawStep = (texture !== "Rake" || i % 3 == 0 || i == steps-1)
 
-    for (let i = 0; i < steps; i++) {
-      const brushHex = brushHexWithHueVarSeed(startX + startY + i);
-      buffer.fill(brushHex);
-  
-      const startEdgeOffset = size * -0.5 + (i) * (startGapSize*startCircleSize + startCircleSize);
-      const endEdgeOffset   = size * -0.5 + (i) * (  endGapSize*  endCircleSize +   endCircleSize);
-  
-      startEdgeVectorLower  = p5.Vector.fromAngle(startAngle, startEdgeOffset);
-      endEdgeVectorLower    = p5.Vector.fromAngle(endAngle, endEdgeOffset);
-      startEdgeVectorHigher = p5.Vector.fromAngle(startAngle, startEdgeOffset + startCircleSize);
-      endEdgeVectorHigher   = p5.Vector.fromAngle(endAngle, endEdgeOffset + endCircleSize);
-  
-      const rf = size * easedHueVar(brushVar)/360 * 0.5;
-
-      buffer.beginShape();
-      randomizedVertex(buffer, startX + startEdgeVectorLower.x , startY + startEdgeVectorLower.y , rf);
-      randomizedVertex(buffer, startX + startEdgeVectorHigher.x, startY + startEdgeVectorHigher.y, rf);
-      randomizedVertex(buffer, endX   + endEdgeVectorHigher.x  , endY   + endEdgeVectorHigher.y  , rf);
-      randomizedVertex(buffer, endX   + endEdgeVectorLower.x   , endY   + endEdgeVectorLower.y   , rf);
-      buffer.endShape();
-    }
-  } else {
-    const steps = map(size, 20, 300, 40, 200);
-    for (let i = 0; i < steps; i++) {
-
+    if (drawStep) {
       const lowerSide = i/steps - 0.5;
       const higherSide = (i+1)/steps - 0.5;
   
-      const rf = 0//(i !== 0 && i !== steps-1) ? 0.2 * size * easedHueVar(brushVar)/360 : 0;
+      const rf = (i !== 0 && i !== steps-1) ? 0.1 * size * easedHueVar(brushVar)/360 : 0;
 
       const lerpPart = varStrengths[Math.floor(i + ((startX !== undefined) ? startX + startY : 0)) % varStrengths.length] ?? 0.5;
       const middleX = lerp(startX, endX, lerpPart);
       const middleY = lerp(startY, endY, lerpPart);
 
-      startEdgeVectorLower  = p5.Vector.fromAngle(startAngle, lowerSide*size);
-      startEdgeVectorHigher = p5.Vector.fromAngle(startAngle, higherSide*size);
+      startEdgeVectorLower  = p5.Vector.fromAngle(startAngle, lowerSide*size*map(startPressure, 0, 0.3, 0.3, 2.0, true));
+      startEdgeVectorHigher = p5.Vector.fromAngle(startAngle, higherSide*size*map(startPressure, 0, 0.3, 0.3, 2.0, true));
 
-      endEdgeVectorLower    = p5.Vector.fromAngle(endAngle, lowerSide*size);
-      endEdgeVectorHigher   = p5.Vector.fromAngle(endAngle, higherSide*size);
+      endEdgeVectorLower    = p5.Vector.fromAngle(endAngle, lowerSide*size*map(endPressure, 0, 0.3, 0.3, 2.0, true));
+      endEdgeVectorHigher   = p5.Vector.fromAngle(endAngle, higherSide*size*map(endPressure, 0, 0.3, 0.3, 2.0, true));
 
       let avgAngle = lerp(startAngle, endAngle, lerpPart);
-      midEdgeVectorLower    = p5.Vector.fromAngle(avgAngle, lowerSide*size);
-      midEdgeVectorHigher   = p5.Vector.fromAngle(avgAngle, higherSide*size);
+      midEdgeVectorLower    = p5.Vector.fromAngle(avgAngle, lowerSide*size*map(avgPressure, 0, 0.3, 0.3, 2.0, true));
+      midEdgeVectorHigher   = p5.Vector.fromAngle(avgAngle, higherSide*size*map(avgPressure, 0, 0.3, 0.3, 2.0, true));
 
-      
-      const brushHex = brushHexWithHueVarSeed(i + randomID + startX * startY);
-      buffer.fill(brushHex);
 
-      buffer.beginShape();
-      randomizedVertex(buffer, startX, startEdgeVectorLower.x , startY, startEdgeVectorLower.y , rf);
-      randomizedVertex(buffer, startX, startEdgeVectorHigher.x, startY, startEdgeVectorHigher.y, rf);
-      randomizedVertex(buffer, middleX, midEdgeVectorHigher.x, middleY, midEdgeVectorHigher.y, rf);
-      randomizedVertex(buffer, middleX, midEdgeVectorLower.x, middleY, midEdgeVectorLower.y, rf);
-      buffer.endShape();
+      if (varStrengths[startX * startY * i % (varStrengths.length-1)] < startPressure * 4) {
+        const brushHex = brushHexWithHueVarSeed(i + randomID + startX * startY);
+        buffer.fill(brushHex);
+  
+        buffer.beginShape();
+        randomizedVertex(buffer, startX, startEdgeVectorLower.x , startY, startEdgeVectorLower.y , rf);
+        randomizedVertex(buffer, startX, startEdgeVectorHigher.x, startY, startEdgeVectorHigher.y, rf);
+        randomizedVertex(buffer, middleX, midEdgeVectorHigher.x, middleY, midEdgeVectorHigher.y, rf);
+        randomizedVertex(buffer, middleX, midEdgeVectorLower.x, middleY, midEdgeVectorLower.y, rf);
+        buffer.endShape();
+      }
 
-      const brushHex2 = brushHexWithHueVarSeed(i + randomID + endX * endY );
-      buffer.fill(brushHex2);
+      if (varStrengths[endX * endY * i % (varStrengths.length-1)] < endPressure * 4) {
+        const brushHex2 = brushHexWithHueVarSeed(i + randomID + endX * endY );
+        buffer.fill(brushHex2);
+  
+        buffer.beginShape();
+        randomizedVertex(buffer, middleX,midEdgeVectorLower.x, middleY, midEdgeVectorLower.y, rf);
+        randomizedVertex(buffer, middleX,midEdgeVectorHigher.x, middleY, midEdgeVectorHigher.y, rf);
+        randomizedVertex(buffer, endX  , endEdgeVectorHigher.x  , endY  , endEdgeVectorHigher.y  , rf);
+        randomizedVertex(buffer, endX  , endEdgeVectorLower.x   , endY  , endEdgeVectorLower.y   , rf);
+        buffer.endShape();
+      }
 
-      buffer.beginShape();
-      randomizedVertex(buffer, middleX,midEdgeVectorLower.x, middleY, midEdgeVectorLower.y, rf);
-      randomizedVertex(buffer, middleX,midEdgeVectorHigher.x, middleY, midEdgeVectorHigher.y, rf);
-      randomizedVertex(buffer, endX  , endEdgeVectorHigher.x  , endY  , endEdgeVectorHigher.y  , rf);
-      randomizedVertex(buffer, endX  , endEdgeVectorLower.x   , endY  , endEdgeVectorLower.y   , rf);
-      buffer.endShape();
     }
   }
 
