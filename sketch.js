@@ -155,7 +155,7 @@ function setup() {
   // Create a graphics buffer for the indicator
   interfaceBuffer = createGraphics(width, height);
   interfaceBuffer.strokeWeight(6);
-  interfaceBuffer.textFont(fontRegular, 'IBM Plex Sans', 'sans-serif');
+  interfaceBuffer.textFont(fontRegular);
   interfaceBuffer.textAlign(LEFT, CENTER);
   newInterfaceSize();
 
@@ -712,6 +712,13 @@ function redrawLastStroke(buffer, xDiff, yDiff) {
     penRecording.forEach((point) => {
       drawInNewStrokeBuffer(buffer, recStartX, recStartY, recStartAngle, recStartPressure, point.x, point.y, point.angle, point.pressure, penRecording)
     });
+  } else if (brushTool === "Brush Tool"){
+    penRecording.forEach((point, index) => {
+      const lastPoint = penRecording[index - 1];
+      if (lastPoint !== undefined) { 
+        drawInNewStrokeBuffer(buffer, lastPoint.x, lastPoint.y, lastPoint.angle, lastPoint.pressure, point.x, point.y, point.angle, point.pressure, penRecording)
+      }
+    });
   } else {
     const recEndX = penRecording[penRecording.length-1].x;
     const recEndY = penRecording[penRecording.length-1].y;
@@ -1001,7 +1008,7 @@ function drawWithSharpLine(buffer, startX, startY, startAngle, startPressure, en
   
       const rf = 0//(i !== 0 && i !== steps-1) ? 0.2 * size * easedHueVar(brushVar)/360 : 0;
 
-      const lerpPart = varStrengths[Math.floor(i + ((startX !== undefined) ? startX + startY : 0)) % varStrengths.length];
+      const lerpPart = varStrengths[Math.floor(i + ((startX !== undefined) ? startX + startY : 0)) % varStrengths.length] ?? 0.5;
       const middleX = lerp(startX, endX, lerpPart);
       const middleY = lerp(startY, endY, lerpPart);
 
