@@ -33,13 +33,14 @@ let gadgetRadius; // based on canvas size
 
 // menu
 let toolPresets = [
+  {brush: "Brush Tool", texture: "Regular", menuName: "Brush"},
   {brush: "Stamp Tool", texture: "Rounded", menuName: "Round S"},
   {brush: "Stamp Tool", texture: "Rake", menuName: "Rake S"},
-  {brush: "Sharp Line Tool", texture: "Regular", menuName: "Sharp L"},
-  {brush: "Sharp Line Tool", texture: "Rake", menuName: "Rake L"},
-  {brush: "Round Line Tool", texture: undefined, menuName: "Round L"},
-  {brush: "Fan Line Tool", texture: undefined, menuName: "Fan"},
-  {brush: "Triangle Tool", texture: undefined, menuName: "Triangle"},
+  // {brush: "Sharp Line Tool", texture: "Regular", menuName: "Sharp L"},
+  // {brush: "Sharp Line Tool", texture: "Rake", menuName: "Rake L"},
+  // {brush: "Round Line Tool", texture: undefined, menuName: "Round L"},
+  // {brush: "Fan Line Tool", texture: undefined, menuName: "Fan"},
+  // {brush: "Triangle Tool", texture: undefined, menuName: "Triangle"},
   {brush: "Lasso Tool", texture: undefined, menuName: "Lasso"},
   {brush: "Mirror Tool", texture: undefined, menuName: "Mirror"},
 ];
@@ -47,14 +48,14 @@ let toolMenuOpened = false;
 
 // current brush settings for drawing
 let brushHue = 300;
-let brushVar = 80;
+let brushVar = 160;
 let brushChroma = 0.15;
 let brushLuminance = 0.7;
 let brushSize = 200;
 let brushTool = toolPresets[0].brush;
 let texture = toolPresets[0].texture;
 
-// save 128 random 0-1 values here for consistent noise that stays between redraws
+// save 256 random 0-1 values here for consistent noise that stays between redraws
 let varStrengths = [];
 
 // control
@@ -72,6 +73,7 @@ const pen = {
   startTimeStamp: undefined,
   lastX: undefined,
   lastY: undefined,
+  lastAngle: undefined,
   started: false,
   wasDown: false,
   isDown: false,
@@ -158,7 +160,7 @@ function setup() {
   newInterfaceSize();
 
   // new random noise
-  varStrengths = Array.from({ length: 128 }, () => random(-1, 1));
+  varStrengths = Array.from({ length: 256 }, () => random(-1, 1));
   
   draw();
 }
@@ -345,6 +347,7 @@ function updateInput(event) {
 
     pen.lastX = pen.x;
     pen.lastY = pen.y;
+    pen.lastAngle = pen.angle;
     
     hover.lastX = hover.x;
     hover.lastY = hover.y;
@@ -392,6 +395,7 @@ function updateInput(event) {
         // must be Pencil
         pen.lastX = pen.x;
         pen.lastY = pen.y;
+        pen.lastAngle = pen.angle;
         menuState.screenPointerX = touch.clientX;
         menuState.screenPointerY = touch.clientY;
         pen.x = touch.clientX - paintingState.x();
@@ -604,6 +608,9 @@ function draw() {
         if ((brushTool === "Stamp Tool" || brushTool === "Fan Line Tool") && pen.isDown) {
           drawInNewStrokeBuffer(newStrokeBuffer, pen.startX, pen.startY, pen.startAngle, undefined, pen.x, pen.y, pen.angle, pen.pressure, penRecording)
 
+        } else if (brushTool === "Brush Tool") {
+          drawInNewStrokeBuffer(newStrokeBuffer, pen.lastX, pen.lastY, pen.lastAngle, undefined, pen.x, pen.y, pen.angle, pen.pressure, penRecording)
+
         } else if (!pen.isDown && pen.wasDown) {
           // drawn when pen lifted
           drawInNewStrokeBuffer(newStrokeBuffer, pen.startX, pen.startY, pen.startAngle, undefined, pen.x, pen.y, pen.angle, pen.pressure, penRecording)
@@ -737,9 +744,9 @@ function drawInNewStrokeBuffer(buffer, startX, startY, startAngle, startPressure
     buffer.stroke(brushHexWithHueVarSeed(startX * startY));
     drawWithLine(buffer, startX, startY, endX, endY, easedSize);
 
-  } else if (brushTool === "Sharp Line Tool") {
-
-    drawWithSharpLine(buffer, startX, startY, startAngle, startPressure, endX, endY, endAngle, endPressure, easedSize, texture);
+  } else if (brushTool === "Sharp Line Tool" || brushTool === "Brush Tool") {
+    const randomID = (recording.length > 0) ? Math.floor(recording[0].x) : 0;
+    drawWithSharpLine(buffer, startX, startY, startAngle, startPressure, endX, endY, endAngle, endPressure, easedSize, texture, randomID);
 
   } else if (brushTool === "Triangle Tool") {
 
@@ -927,9 +934,9 @@ function drawStamp(buffer, x, y, size, angle, pressure, texture) {
 
 function brushHexWithHueVarSeed(seed) {
   return okhex(
-    brushLuminance + varStrengths[seed % varStrengths.length] * (easedHueVar(brushVar) / 360) * 0.5,
+    brushLuminance + varStrengths[seed % varStrengths.length] * (easedLumaVar(brushVar)),
     brushChroma,
-    brushHue + varStrengths[seed % varStrengths.length] * easedHueVar(brushVar)
+    brushHue + varStrengths[(seed * 2) % varStrengths.length] * easedHueVar(brushVar)
   );
 }
 
@@ -945,8 +952,9 @@ function drawWithLine(buffer, xa, ya, xb, yb, size) {
 }
 
 
-function drawWithSharpLine(buffer, startX, startY, startAngle, startPressure, endX, endY, endAngle, endPressure, size, texture) {
+function drawWithSharpLine(buffer, startX, startY, startAngle, startPressure, endX, endY, endAngle, endPressure, size, texture, randomID) {
   if (startX === undefined || startY === undefined || endX === undefined || endY === undefined) return;
+  if (startX === endX && startY === endY) return;
 
   startAngle ??= p5.Vector.angleBetween(createVector(0, -1), createVector(endX-startX, endY-startY));
     endAngle ??= p5.Vector.angleBetween(createVector(0, -1), createVector(endX-startX, endY-startY));
@@ -978,35 +986,63 @@ function drawWithSharpLine(buffer, startX, startY, startAngle, startPressure, en
       const rf = size * easedHueVar(brushVar)/360 * 0.5;
 
       buffer.beginShape();
-      buffer.vertex(startX + random(-rf,rf) + startEdgeVectorLower.x,  startY + random(-rf,rf) + startEdgeVectorLower.y);
-      buffer.vertex(startX + random(-rf,rf) + startEdgeVectorHigher.x, startY + random(-rf,rf) + startEdgeVectorHigher.y);
-      buffer.vertex(endX   + random(-rf,rf) + endEdgeVectorHigher.x,   endY   + random(-rf,rf) + endEdgeVectorHigher.y);
-      buffer.vertex(endX   + random(-rf,rf) + endEdgeVectorLower.x,    endY   + random(-rf,rf) + endEdgeVectorLower.y);
+      randomizedVertex(buffer, startX + startEdgeVectorLower.x , startY + startEdgeVectorLower.y , rf);
+      randomizedVertex(buffer, startX + startEdgeVectorHigher.x, startY + startEdgeVectorHigher.y, rf);
+      randomizedVertex(buffer, endX   + endEdgeVectorHigher.x  , endY   + endEdgeVectorHigher.y  , rf);
+      randomizedVertex(buffer, endX   + endEdgeVectorLower.x   , endY   + endEdgeVectorLower.y   , rf);
       buffer.endShape();
     }
   } else {
-    const steps = map(size, 4, 300, 5, 36);
+    const steps = map(size, 20, 300, 40, 200);
     for (let i = 0; i < steps; i++) {
-      const brushHex = brushHexWithHueVarSeed(startX + startY + i);
-      buffer.fill(brushHex);
+
+      const lowerSide = i/steps - 0.5;
+      const higherSide = (i+1)/steps - 0.5;
   
-      const lowerSide = (i/steps) - 0.5;
-      const higherSide = ((i === 0) ? 1 : (i+1)/steps) - 0.5;
-  
+      const rf = 0//(i !== 0 && i !== steps-1) ? 0.2 * size * easedHueVar(brushVar)/360 : 0;
+
+      const lerpPart = varStrengths[Math.floor(i + ((startX !== undefined) ? startX + startY : 0)) % varStrengths.length];
+      const middleX = lerp(startX, endX, lerpPart);
+      const middleY = lerp(startY, endY, lerpPart);
+
       startEdgeVectorLower  = p5.Vector.fromAngle(startAngle, lowerSide*size);
-      endEdgeVectorLower    = p5.Vector.fromAngle(endAngle, lowerSide*size);
       startEdgeVectorHigher = p5.Vector.fromAngle(startAngle, higherSide*size);
+
+      endEdgeVectorLower    = p5.Vector.fromAngle(endAngle, lowerSide*size);
       endEdgeVectorHigher   = p5.Vector.fromAngle(endAngle, higherSide*size);
-  
-      const rf = size * easedHueVar(brushVar)/360;
+
+      let avgAngle = lerp(startAngle, endAngle, lerpPart);
+      midEdgeVectorLower    = p5.Vector.fromAngle(avgAngle, lowerSide*size);
+      midEdgeVectorHigher   = p5.Vector.fromAngle(avgAngle, higherSide*size);
+
+      
+      const brushHex = brushHexWithHueVarSeed(i + randomID + startX * startY);
+      buffer.fill(brushHex);
 
       buffer.beginShape();
-      buffer.vertex(startX + startEdgeVectorLower.x  + random(-rf,rf), startY + random(-rf,rf) + startEdgeVectorLower.y);
-      buffer.vertex(startX + startEdgeVectorHigher.x + random(-rf,rf), startY + random(-rf,rf) + startEdgeVectorHigher.y);
-      buffer.vertex(endX   + endEdgeVectorHigher.x   + random(-rf,rf), endY   + random(-rf,rf) + endEdgeVectorHigher.y);
-      buffer.vertex(endX   + endEdgeVectorLower.x    + random(-rf,rf), endY   + random(-rf,rf) + endEdgeVectorLower.y);
+      randomizedVertex(buffer, startX, startEdgeVectorLower.x , startY, startEdgeVectorLower.y , rf);
+      randomizedVertex(buffer, startX, startEdgeVectorHigher.x, startY, startEdgeVectorHigher.y, rf);
+      randomizedVertex(buffer, middleX, midEdgeVectorHigher.x, middleY, midEdgeVectorHigher.y, rf);
+      randomizedVertex(buffer, middleX, midEdgeVectorLower.x, middleY, midEdgeVectorLower.y, rf);
+      buffer.endShape();
+
+      const brushHex2 = brushHexWithHueVarSeed(i + randomID + endX * endY );
+      buffer.fill(brushHex2);
+
+      buffer.beginShape();
+      randomizedVertex(buffer, middleX,midEdgeVectorLower.x, middleY, midEdgeVectorLower.y, rf);
+      randomizedVertex(buffer, middleX,midEdgeVectorHigher.x, middleY, midEdgeVectorHigher.y, rf);
+      randomizedVertex(buffer, endX  , endEdgeVectorHigher.x  , endY  , endEdgeVectorHigher.y  , rf);
+      randomizedVertex(buffer, endX  , endEdgeVectorLower.x   , endY  , endEdgeVectorLower.y   , rf);
       buffer.endShape();
     }
+  }
+
+  function randomizedVertex(buffer, x, xOff, y, yOff, randomFactor) {
+    buffer.vertex(
+      x + xOff + varStrengths[Math.floor(x) % varStrengths.length] * randomFactor, 
+      y + yOff + varStrengths[Math.floor(y) % varStrengths.length] * randomFactor
+    );
   }
 }
 
@@ -1269,8 +1305,8 @@ function redrawInterface(buffer, activeInputGadget) {
       } else if (menuBrushTool === "Round Line Tool" || menuBrushTool === "Fan Line Tool") {
         buffer.stroke(brushHex);
         drawWithLine(buffer, 0, 0, 40, 0, cornerPreviewBrushSize);
-      } else if (menuBrushTool === "Sharp Line Tool") {
-        drawWithSharpLine(buffer, 0, 0, pen.startAngle, pen.startPressure, 40, 0, pen.angle, pen.pressure, cornerPreviewBrushSize, menuTexture);
+      } else if (menuBrushTool === "Sharp Line Tool" || menuBrushTool === "Brush Tool") {
+        drawWithSharpLine(buffer, 0, 0, pen.startAngle, pen.startPressure, 40, 0, pen.angle, pen.pressure, cornerPreviewBrushSize, menuTexture, 0);
       } else {
         buffer.stroke(brushHex);
         drawWithPlaceholder(buffer, 0, 0, 40, 0, cornerPreviewBrushSize);
@@ -1444,8 +1480,6 @@ function redrawInterface(buffer, activeInputGadget) {
   //reset text size
   buffer.textSize((width < height) ? 13 : 16);
 
-  
-
   // draw rectangle around stroke being edited
   if (editMode && penRecording.length > 0) {
     // change from canvas to screen space
@@ -1496,9 +1530,9 @@ function redrawInterface(buffer, activeInputGadget) {
       drawCrosshair(easedSize, hover.x, hover.y);
       buffer.stroke(brushHexWithHueVarSeed(hover.x * hover.y));
       drawWithLine(buffer, hover.x, hover.y, hover.x, hover.y, easedSize)
-    } else if (brushTool === "Sharp Line Tool") {
+    } else if (brushTool === "Sharp Line Tool" || brushTool === "Brush Tool") {
       if (hover.lastX !== undefined && hover.lastY !== undefined) {
-        drawWithSharpLine(buffer, hover.lastX, hover.lastY, hover.angle, undefined, hover.x, hover.y, hover.angle, undefined, easedSize, texture);
+        drawWithSharpLine(buffer, hover.lastX, hover.lastY, hover.angle, undefined, hover.x, hover.y, hover.angle, undefined, easedSize, texture, 0);
       }
     }
     buffer.pop();
@@ -1827,6 +1861,18 @@ function easedHueVar(brushVar) {
     easeInCirc(brushVar*0.5, 0, 360),
     easeOutCubic(brushChroma * 2)
   );
+}
+
+function easedLumaVar(lumaVar) {
+  if (lumaVar === undefined) return 0;
+  lumaVar /= 360;
+
+  return lerp(easeInCirc(lumaVar), lumaVar, 0.3);
+  // lerp(
+  //   lumaVar,
+  //   easeInCirc(lumaVar),
+  //   easeOutCubic(brushLuminance)
+  // );
 }
 
 function tiltToAngle(tiltX, tiltY) {
