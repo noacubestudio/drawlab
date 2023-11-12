@@ -262,7 +262,7 @@ function handlePointerMoveEvent(event) {
     isTouchControl = false;
     newCanvasSize();
     newInterfaceSize();
-    print("Device detected as desktop due to pointer move");
+    print("Device detected as desktop due to pen move");
   }
   if (isTouchControl) return;
   updateInput(event);
@@ -318,6 +318,8 @@ function updateInput(event) {
     }
   }
 
+  if (!isTouchControl && ["touchstart", "touchmove", "touchend"].includes(event.type)) return;
+
   // process touch/pen/mouse events on the canvas
 
   pen.wasDown = pen.isDown;
@@ -333,6 +335,7 @@ function updateInput(event) {
     } else if (endEventTypes.includes(event.type)) {
       pointerDown = false;
     }
+
     if (tappedInMenu(event.clientX, event.clientY)) return;
     if (menuState.startedEventOnMenu && pointerDown) {
       if (menuState.topSliderStartX !== undefined) {
