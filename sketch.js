@@ -8,7 +8,7 @@ let newStrokeBuffer;
 // background color settings
 let bgHue = 0.6;
 let bgChroma = 0.1;
-let bgLuminance = 0.9;
+let bgLuminance = 0.15;
 
 const paintingState = {
   width: () => Math.min(width, height)-150,
@@ -50,8 +50,8 @@ let gadgetRadius; // based on canvas size
 // current brush settings for drawing
 let brushHue = 0.6;
 let brushColorVar = 0.5;
-let brushSaturation = 0.7;
-let brushLuminance = 0.3;
+let brushSaturation = 0.6;
+let brushLuminance = 0.7;
 let brushSize = 200;
 let brushTool = toolPresets[0].brush;
 let texture = toolPresets[0].texture;
@@ -1377,7 +1377,7 @@ function redrawInterface(buffer, activeInputGadget) {
     } else {
       buffer.fill(componentsToHex(brushLuminance, brushSaturation, brushHue));
     }
-    buffer.rect(sliderStart-60, 0, 60, 60);
+    // buffer.rect(sliderStart-60, 0, 60, 60);
     
     drawRoundColorExampleWithVariation(55, sliderStart - 30, 30);
   }
@@ -1471,7 +1471,8 @@ function redrawInterface(buffer, activeInputGadget) {
     buffer.noStroke();
     buffer.fill(visHex);
     buffer.textSize(11);
-    buffer.text(Math.round(easedSize), sliderStart + 604, 10- 2);
+    buffer.textAlign(CENTER);
+    buffer.text(Math.round(easedSize), sliderStart + 600 + 30, 10 + 18);
   }
 
 
@@ -1780,19 +1781,25 @@ function redrawInterface(buffer, activeInputGadget) {
   }
 
   function drawGradientSlider(x, y, width, height, startArr, endArr, sliderPercent) {
-    const segments = 100;
+    const segments = width;
     const currentSegment = Math.round(segments * sliderPercent);
 
     for (let i = 0; i < segments; i++) {
       const colorLerpAmt = (i + 0.5) / segments;
       const mixedOkLCH = lerpedComponentsToHex(startArr, endArr, colorLerpAmt);
+
+      const curvedHeight = height * Math.min((1 - Math.abs((i/segments)-0.5) * 2) * 6, 1) ** 0.12
   
       buffer.fill(mixedOkLCH);
-      buffer.rect(x + (i/segments) * width, y, width/segments, height);
+      buffer.rect(x + (i/segments) * width, y, width/segments, curvedHeight);
 
       if (i === currentSegment) {
-        buffer.fill("white");
-        buffer.rect(x + (i/segments) * width, y, width/segments, height);
+        buffer.fill("#ffffffc0");
+        buffer.rect(x + (i/segments) * width, y, width/segments, curvedHeight);
+      }
+      if (i+1 === currentSegment) {
+        buffer.fill("#000000c0");
+        buffer.rect(x + (i/segments) * width, y, width/segments, curvedHeight);
       }
     }
   }
