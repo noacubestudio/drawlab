@@ -1402,7 +1402,7 @@ function redrawInterface(buffer, activeInputGadget) {
 
     if (xFromLeftEdgeOfSliders < 60) {
       section = "var";
-      sectionValue = constrain(refVar + menuState.topSliderDeltaX * 0.5, 0, 1);
+      sectionValue = constrain(refVar + menuState.topSliderDeltaX * 0.002, 0, 1);
       if (!isNaN(sectionValue)) brushColorVar = sectionValue;
       sectionValueText = Math.floor(brushColorVar * 100) + "%";
     } else if (xFromLeftEdgeOfSliders < 260) {
@@ -1627,27 +1627,28 @@ function redrawInterface(buffer, activeInputGadget) {
 
       // var
       buffer.stroke("black");
-      buffer.strokeWeight(12);
+      buffer.strokeWeight(16);
       buffer.line(0, radius*2 * (brushColorVar - 1), 0, radius*2 * brushColorVar);
 
       let startVarArr = [brushLuminance, brushSaturation, brushHue, 1.0];
       let endVarArr   = [brushLuminance, brushSaturation, brushHue, 0.0];
-      buffer.strokeWeight(10);
+      buffer.strokeWeight(14);
       drawGradientLine(0, radius*2 * (brushColorVar - 1), 0, radius*2 * brushColorVar, startVarArr, endVarArr, gadgetRadius);
 
       // hue
-      // always start centered since hue is a circle anyway
+      // stay centered since hue is a circle anyway
       buffer.stroke("black");
-      buffer.strokeWeight(12);
-      let deltaHue = brushHue - refHue + 0.5;
-      if (deltaHue < 0) deltaHue += 1.0;
-      if (deltaHue > 1) deltaHue % 1;
-      buffer.line(radius*2 * -deltaHue, 0, radius*2 * (1-deltaHue), 0);
+      buffer.strokeWeight(16);
+      // let deltaHue = brushHue - refHue;
+      // if (deltaHue < 0) deltaHue += 1.0;
+      // if (deltaHue > 1) deltaHue % 1;
+      // deltaHue += 0.5;
+      buffer.line(radius*2 * -0.5, 0, radius*2 * (1-0.5), 0);
 
-      let startHueArr = [brushLuminance, brushSaturation, 0 + refHue - 0.5];
-      let endHueArr   = [brushLuminance, brushSaturation, 1 + refHue - 0.5];
-      buffer.strokeWeight(10);
-      drawGradientLine(radius*2 * -deltaHue, 0, radius*2 * (1-deltaHue), 0, startHueArr, endHueArr, gadgetRadius);
+      let startHueArr = [brushLuminance, brushSaturation, brushHue - 0.5];
+      let endHueArr   = [brushLuminance, brushSaturation, brushHue + 0.5];
+      buffer.strokeWeight(14);
+      drawGradientLine(radius*2 * -0.5, 0, radius*2 * (1-0.5), 0, startHueArr, endHueArr, gadgetRadius);
 
       buffer.pop();
 
@@ -1667,17 +1668,17 @@ function redrawInterface(buffer, activeInputGadget) {
       let startLumArr = [1.0, brushSaturation, brushHue];
       let endLumArr   = [0.0, brushSaturation, brushHue];
       buffer.stroke("black");
-      buffer.strokeWeight(12);
+      buffer.strokeWeight(16);
       buffer.line(0, radius*2 * (-1 + brushLuminance), 0, radius*2 * brushLuminance);
-      buffer.strokeWeight(10);
+      buffer.strokeWeight(14);
       drawGradientLine(0, radius*2 * (-1 + brushLuminance), 0, radius*2 * brushLuminance, startLumArr, endLumArr, gadgetRadius);
 
       let startChromaArr = [brushLuminance, 0.0, brushHue];
       let endChromaArr   = [brushLuminance, 1.0, brushHue];
       buffer.stroke("black");
-      buffer.strokeWeight(12);
+      buffer.strokeWeight(16);
       buffer.line(radius*2 * -brushSaturation, 0, radius*2 * (1-brushSaturation), 0);
-      buffer.strokeWeight(10);
+      buffer.strokeWeight(14);
       drawGradientLine(radius*2 * -brushSaturation, 0, radius*2 * (1-brushSaturation), 0, startChromaArr, endChromaArr, gadgetRadius);
       
       buffer.pop();
@@ -1717,7 +1718,7 @@ function redrawInterface(buffer, activeInputGadget) {
     buffer.fill(brushHex);
     buffer.ellipse(x, y, size);
 
-    const varSegments = 32;
+    const varSegments = 48;
     for (let i = 0; i < varSegments; i++) {
       const start = (TWO_PI / varSegments) * i;
       const stop = start + TWO_PI / varSegments; 
