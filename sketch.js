@@ -991,7 +991,7 @@ function drawWithConnection(buffer, startX, startY, startAngle, startPressure, e
       midEdgeVectorHigher   = p5.Vector.fromAngle(avgAngle, higherSide*size*map(avgPressure, 0, 0.3, 0.3, 2.0, true));
 
 
-      if (noiseValues256[Math.abs(startX * startY) * i] < startPressure * 4) {
+      if (noiseValues256[Math.abs(startX * startY) * i % noiseValues256.length] < startPressure * 4) {
         const brushHex = currentBrushToHex(i + randomID + Math.abs(startX * startY));
         buffer.fill(brushHex);
   
@@ -1003,7 +1003,7 @@ function drawWithConnection(buffer, startX, startY, startAngle, startPressure, e
         buffer.endShape();
       }
 
-      if (noiseValues256[endX * endY * i % (noiseValues256.length-1)] < endPressure * 4) {
+      if (noiseValues256[Math.abs(endX * endY) * i % noiseValues256.length] < endPressure * 4) {
         const brushHex2 = currentBrushToHex(i + randomID + endX * endY );
         buffer.fill(brushHex2);
   
