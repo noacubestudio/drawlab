@@ -44,7 +44,7 @@ let toolPresets = [
   {brush: "Lasso Tool", texture: undefined, menuName: "Lasso"},
   {brush: "Mirror Tool", texture: undefined, menuName: "Mirror"},
 ];
-let toolMenuOpened = false;
+
 let gadgetRadius; // based on canvas size
 
 // current brush settings for drawing
@@ -157,7 +157,7 @@ function setup() {
   // Create a graphics buffer for the indicator
   interfaceBuffer = createGraphics(width, height);
   interfaceBuffer.strokeWeight(6);
-  interfaceBuffer.textFont(fontRegular);
+  interfaceBuffer.textFont(fontMedium);
   interfaceBuffer.textAlign(LEFT, CENTER);
   newInterfaceSize();
 
@@ -275,13 +275,13 @@ function updateInput(event) {
   const endEventTypes = ["pointerup", "pointercancel", "touchend", "touchcancel"];
 
   // menu first
-  const menuW = 100;
-  const menuH = 60 + ((toolMenuOpened) ? 60 * toolPresets.length : 0);
+  const menuW = 80;
+  const menuH = 60 + ((inputMode() === "cloverMenu") ? 60 * toolPresets.length : 0);
   
   function tappedInMenu(x, y) {
     if (!startEventTypes.includes(event.type)) return;
 
-    if (x < menuW && y < menuH) {
+    if (x < menuW && y < menuH && y > 60) {
       const spot = Math.floor(y/60) - 1;
       if (spot >= 0) {
         brushTool = toolPresets[spot].brush;
@@ -292,8 +292,6 @@ function updateInput(event) {
           editMode = false;
           redrawLastStroke(newStrokeBuffer);
         }
-      } else {
-        toolMenuOpened = !toolMenuOpened;
       }
       menuState.startedEventOnMenu = true;
       return true;
@@ -301,9 +299,9 @@ function updateInput(event) {
 
     // anything besides tools menu
     if (y < 60) {
-      if (x > menuW && x < menuW*2) {
+      if (x > menuW*0 && x < menuW*1) {
         doAction("undo");
-      } else if (x > menuW*2 && x < menuW*3) {
+      } else if (x > menuW*1 && x < menuW*2) {
         doAction("edit");
       } else if (x > width-menuW*1 && x < width-menuW*0) {
         doAction("save");
@@ -1281,7 +1279,7 @@ function redrawInterface(buffer, activeInputGadget) {
   buffer.noStroke();
   displayTool(brushTool, texture, 0, 0)
 
-  if (toolMenuOpened) {
+  if (inputMode() === "cloverMenu") {
     toolPresets.forEach((tool, index) => {
       displayTool(tool.brush, tool.texture, 0, index+1, tool.menuName);
     });
@@ -1290,9 +1288,9 @@ function redrawInterface(buffer, activeInputGadget) {
   function displayTool(menuBrushTool, menuTexture, spotX, spotY, menuName) {
 
     buffer.push();
-    buffer.translate(30 + 100*spotX, 30 + 60*spotY);
+    buffer.translate(30 + 80*spotX, 30 + 60*spotY);
 
-    if (spotY === 0 || (brushTool !== menuBrushTool || texture !== menuTexture)) {
+    if (spotY !== 0) {
       // draw example
       if (menuBrushTool === "Stamp Tool") {
         for (let x = 0; x <= 40; x += 5) {
@@ -1313,16 +1311,14 @@ function redrawInterface(buffer, activeInputGadget) {
 
     if (spotY > 0) {
       buffer.textAlign(CENTER);
+      buffer.stroke(brushHex);
+      buffer.strokeWeight(3);
+      buffer.fill(onBrushHex);
       if (brushTool === menuBrushTool && texture === menuTexture) {
-        buffer.fill(visHex);
-        buffer.textFont(fontItalic);
-      } else {
-        buffer.stroke(brushHex);
-        buffer.strokeWeight(3);
-        buffer.fill(onBrushHex);
+        
       }
-      buffer.text(menuName, 0, 0 + 60*spotY, 100, 60 - 6);
-      buffer.textFont(fontRegular);
+      buffer.text(menuName, 0, 0 + 60*spotY, 80, 60 - 6);
+      buffer.textFont(fontMedium);
       buffer.noStroke();
       buffer.strokeWeight(6);
     }
@@ -1331,19 +1327,15 @@ function redrawInterface(buffer, activeInputGadget) {
 
 
   function topButton(text, x, condition) {
-    if (x === 0) {
-      //buffer.stroke(brushHex);
-      //buffer.strokeWeight(3);
-      buffer.fill(onBrushHex);
+
+    buffer.fill(visHex+"30");
+    buffer.rect(x+3, 0, topButtonWidth-6, 60, 0, 0, 20, 20)
+    if (condition === false) {
+      buffer.fill(visHex+"50");
     } else {
-      if (condition === false) {
-        buffer.fill(visHex+"50");
-      } else {
-        buffer.fill(visHex);
-      }
-      
+      buffer.fill(visHex);
     }
-    buffer.text(text, x, 0, 100, 60 - 6);
+    buffer.text(text, x, 0, topButtonWidth, 60 - 8);
   }
 
   // top menu buttons
@@ -1351,18 +1343,19 @@ function redrawInterface(buffer, activeInputGadget) {
   buffer.textFont(fontMedium);
   buffer.fill(visHex);
 
-  topButton("tools", 0);
-  topButton("undo", 100*1, !paintingState.containsNewStroke);
-  topButton("edit", 100*2);
-  topButton("clear", width-100*2);
-  topButton("save", width-100*1);
+  const topButtonWidth = 80;
+  // topButton("tools", 0);
+  topButton("undo", topButtonWidth*0, !paintingState.containsNewStroke);
+  topButton("edit", topButtonWidth*1);
+  topButton("clear", width-topButtonWidth*2);
+  topButton("save", width-topButtonWidth*1);
   
   buffer.textAlign(LEFT);
-  buffer.textFont(fontRegular);
+  buffer.textFont(fontMedium);
 
 
   // draw the sliders at the top
-  const drawSliders = (width > 1000);
+  const drawSliders = (width > 980);
   const sliderStart = width/2 - 300;
 
   if (drawSliders) {
