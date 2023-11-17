@@ -850,8 +850,25 @@ function updateBrushSettingsFromInput(currentInputMode) {
     paintingBuffer.image(newStrokeBuffer, 0, 0);
     newStrokeBuffer.clear();
 
-    const colorArray = paintingBuffer.get(pen.x, pen.y);
-    const okhslArray = srgb_to_okhsl(colorArray[0], colorArray[1], colorArray[2]);
+    // go through a few pixels
+    const addRadiusPx = 2;
+    const colorsArr = [];
+    for (x = -addRadiusPx; x <= addRadiusPx; x++) {
+      for (y = -addRadiusPx; y <= addRadiusPx; y++) {
+        const rgbaColor = paintingBuffer.get(pen.x + x, pen.y + y);
+        if (rgbaColor[3] !==0) colorsArr.push(rgbaColor);
+      }
+    }
+    if (colorsArr.length === 0) return;
+
+    let sumRed = 0; let sumGreen = 0; let sumBlue = 0;
+    for (const rgb of colorsArr) {
+      sumRed += rgb[0];
+      sumGreen += rgb[1];
+      sumBlue += rgb[2];
+    }
+    const avgColor = [sumRed / colorsArr.length, sumGreen / colorsArr.length, sumBlue / colorsArr.length];
+    const okhslArray = srgb_to_okhsl(avgColor[0], avgColor[1], avgColor[2]);
 
     // default to current hue if gray
     if (okhslArray[1] < 0.01) okhslArray[2] = brushHue;
