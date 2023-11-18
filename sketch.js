@@ -1231,20 +1231,17 @@ function redrawInterface(buffer, activeInputGadget) {
   buffer.clear();
 
   // Interface Colors
-  const bgHex = componentsToHex(bgLuminance*0.9, Math.min(bgChroma, 0.1), bgHue);
-  const visibleTextLum = constrain(bgLuminance + (bgLuminance > 0.5 ? -0.4 : 0.4), 0, 1.0);
-  const lessTextLum = constrain(bgLuminance + (bgLuminance > 0.5 ? -0.25 : 0.25), 0, 1.0);
-  const visHex = componentsToHex(visibleTextLum, min(bgChroma, 0.2), bgHue);
-  const antiVisHex = componentsToHex(constrain(0.5+(-visibleTextLum/2+0.5)*4, 0, 1.0), min(bgChroma, 0.2), bgHue);
+  const bg_hex_color   = componentsToHex(bgLuminance*0.9, Math.min(bgChroma, 0.1), bgHue);
+  const text_hex_color = componentsToHex(lerp(bgLuminance, (bgLuminance>0.5) ? 0:1, 0.7), Math.min(bgChroma, 0.2), bgHue);
+  const anti_hex_color = componentsToHex(lerp(bgLuminance, (bgLuminance>0.5) ? 1:0, 0.7), Math.min(bgChroma, 0.2), bgHue);
 
-  const brushHex = componentsToHex(brushLuminance, brushSaturation, brushHue);
-  const visibleTextOnBrushLum = constrain(brushLuminance + (brushLuminance > 0.5 ? -0.6 : 0.6), 0, 1.0);
-  const onBrushHex = componentsToHex(visibleTextOnBrushLum, brushSaturation*0.5, brushHue);
-  const refHex = componentsToHex(refLuminance, refSaturation, refHue);
-  const easedSize = easeInCirc(brushSize, 4, 600);
+  const brush_hex_color = componentsToHex(brushLuminance, brushSaturation, brushHue);
+  const anti_brush_hex_color = componentsToHex(lerp(brushLuminance, (brushLuminance>0.5) ? 0:1, 0.7), brushSaturation*0.3, brushHue);
+  
+  const brushSizeWithEasing = easeInCirc(brushSize, 4, 600);
 
   // Background borders
-  buffer.fill(bgHex);
+  buffer.fill(bg_hex_color);
   buffer.rect(0, 0, width, 60);
 
   // Unfinished brushstroke preview
@@ -1256,18 +1253,18 @@ function redrawInterface(buffer, activeInputGadget) {
 
     if (brushTool === "Round Line Tool") {
       buffer.stroke(currentBrushToHex(pen.startX * pen.startY));
-      drawWithLine(buffer, pen.startX, pen.startY, pen.x, pen.y, easedSize);
+      drawWithLine(buffer, pen.startX, pen.startY, pen.x, pen.y, brushSizeWithEasing);
     } else if (brushTool === "Sharp Line Tool") { 
-      drawWithConnection(buffer, pen.startX, pen.startY, pen.startAngle, pen.startPressure, pen.x, pen.y, pen.angle, pen.pressure, easedSize, texture);
+      drawWithConnection(buffer, pen.startX, pen.startY, pen.startAngle, pen.startPressure, pen.x, pen.y, pen.angle, pen.pressure, brushSizeWithEasing, texture);
     } else if (brushTool === "Triangle Tool") {
       buffer.fill(currentBrushToHex(pen.startX * pen.startY));
       drawWithPolygon(buffer, pen.startX, pen.startY, pen.x, pen.y, penRecording, 3);
     } else if (brushTool === "Lasso Tool") {
       buffer.fill(currentBrushToHex(pen.startX * pen.startY));
-      drawwithLasso(buffer, pen.startX, pen.startY, pen.x, pen.y, penRecording, easedSize);
+      drawwithLasso(buffer, pen.startX, pen.startY, pen.x, pen.y, penRecording, brushSizeWithEasing);
     } else if (brushTool === "Mirror Tool") {
       buffer.fill(currentBrushToHex(pen.startX * pen.startY));
-      drawwithMirror(buffer, pen.startX, pen.startY, pen.x, pen.y, penRecording, easedSize);
+      drawwithMirror(buffer, pen.startX, pen.startY, pen.x, pen.y, penRecording, brushSizeWithEasing);
     }
 
     buffer.pop();
@@ -1275,7 +1272,7 @@ function redrawInterface(buffer, activeInputGadget) {
   
   // MENUS
   // Corner brush preview
-  const cornerPreviewBrushSize = constrain(easedSize, 8, gadgetRadius/3);
+  const cornerPreviewBrushSize = constrain(brushSizeWithEasing, 8, gadgetRadius/3);
   buffer.noStroke();
   displayTool(brushTool, texture, 0, 0)
 
@@ -1297,12 +1294,12 @@ function redrawInterface(buffer, activeInputGadget) {
           drawBrushstroke(buffer, x, 0, cornerPreviewBrushSize, pen.angle, pen.pressure, menuTexture);
         }
       } else if (menuBrushTool === "Round Line Tool" || menuBrushTool === "Fan Line Tool") {
-        buffer.stroke(brushHex);
+        buffer.stroke(brush_hex_color);
         drawWithLine(buffer, 0, 0, 40, 0, cornerPreviewBrushSize);
       } else if (menuBrushTool === "Sharp Line Tool" || menuBrushTool === "Brush Tool") {
         drawWithConnection(buffer, -20, 0, pen.startAngle, pen.startPressure, 60, 0, pen.angle, pen.pressure, cornerPreviewBrushSize, menuTexture, 0);
       } else {
-        buffer.stroke(brushHex);
+        buffer.stroke(brush_hex_color);
         drawWithPlaceholder(buffer, 0, 0, 40, 0, cornerPreviewBrushSize);
       }
     }
@@ -1311,9 +1308,9 @@ function redrawInterface(buffer, activeInputGadget) {
 
     if (spotY > 0) {
       buffer.textAlign(CENTER);
-      buffer.stroke(brushHex);
+      buffer.stroke(brush_hex_color);
       buffer.strokeWeight(3);
-      buffer.fill(onBrushHex);
+      buffer.fill(anti_brush_hex_color);
       if (brushTool === menuBrushTool && texture === menuTexture) {
         
       }
@@ -1326,30 +1323,26 @@ function redrawInterface(buffer, activeInputGadget) {
   }
 
 
-  function topButton(text, x, condition) {
+  function topButton(text, x, textColor) {
 
-    buffer.fill(visHex+"30");
+    buffer.fill(anti_hex_color+"90");
     buffer.rect(x+3, 0, topButtonWidth-6, 60, 0, 0, 20, 20)
-    if (condition === false) {
-      buffer.fill(visHex+"50");
-    } else {
-      buffer.fill(visHex);
-    }
+    buffer.fill(textColor)
     buffer.text(text, x, 0, topButtonWidth, 60 - 8);
   }
 
   // top menu buttons
   buffer.textAlign(CENTER);
   buffer.textFont(fontMedium);
-  buffer.fill(visHex);
 
   const topButtonWidth = 80;
-  // topButton("tools", 0);
-  topButton("undo", topButtonWidth*0, !paintingState.containsNewStroke);
-  topButton("edit", topButtonWidth*1);
-  topButton("clear", width-topButtonWidth*2);
-  topButton("save", width-topButtonWidth*1);
+
+  topButton("undo" , topButtonWidth*0, paintingState.containsNewStroke ? text_hex_color+"50" : text_hex_color);
+  topButton("edit" , topButtonWidth*1, text_hex_color);
+  topButton("clear", width-topButtonWidth*2, componentsToHex(lerp(bgLuminance, (bgLuminance>0.5) ? 0:1, 0.7), 0.7, 0.1));
+  topButton("save" , width-topButtonWidth*1, text_hex_color);
   
+  buffer.fill(text_hex_color);
   buffer.textAlign(LEFT);
   buffer.textFont(fontMedium);
 
@@ -1377,33 +1370,37 @@ function redrawInterface(buffer, activeInputGadget) {
 
 
   // bottom left/ top middle text
-  buffer.fill(visHex);
+  buffer.fill(text_hex_color);
 
-  if (activeInputGadget === "lumAndChr"
-    || activeInputGadget === "hue" 
-    || activeInputGadget === "eyedropper") {
+  // if (activeInputGadget === "lumAndChr"
+  //   || activeInputGadget === "hue" 
+  //   || activeInputGadget === "eyedropper") {
 
-    const newColorText = "okHSL:" + 
-      brushHue.toFixed(3) + ", " + 
-      brushSaturation.toFixed(3) + ", " + 
-      brushLuminance.toFixed(3) + "  noise:" + 
-      brushColorVar.toFixed(3) + "";
+  //   const newColorText = "okHSL:" + 
+  //     brushHue.toFixed(3) + ", " + 
+  //     brushSaturation.toFixed(3) + ", " + 
+  //     brushLuminance.toFixed(3) + "  noise:" + 
+  //     brushColorVar.toFixed(3) + "";
 
-    buffer.textAlign(CENTER);
-    buffer.text(newColorText, width/2, 60 + 20 - 6);
+  //   buffer.textAlign(CENTER);
+  //   buffer.text(newColorText, width/2, 60 + 20 - 6);
     
-    if (refLuminance !== undefined) {
-      buffer.fill(componentsToHex(lessTextLum, min(bgChroma, 0.2), bgHue));
+  //   if (refLuminance !== undefined) {
+  //     buffer.fill(componentsToHex(lessTextLum, min(bgChroma, 0.2), bgHue));
 
-      const refColorText = "okHSL:" + 
-        refHue.toFixed(3) + ", " + 
-        refSaturation.toFixed(3) + ", " + 
-        refLuminance.toFixed(3) + "  noise:" + 
-        refVar.toFixed(3) + "";
+  //     const refColorText = "okHSL:" + 
+  //       refHue.toFixed(3) + ", " + 
+  //       refSaturation.toFixed(3) + ", " + 
+  //       refLuminance.toFixed(3) + "  noise:" + 
+  //       refVar.toFixed(3) + "";
 
-      buffer.text(refColorText, width/2, 60 + 40 - 6);
-    }
-  } else if (menuState.topSliderDeltaX !== undefined) {
+  //     buffer.text(refColorText, width/2, 60 + 40 - 6);
+  //   }
+  // } 
+
+
+  // set new values
+  if (menuState.topSliderDeltaX !== undefined) {
     const xFromLeftEdgeOfSliders = menuState.topSliderStartX + 360 - width/2;
     const xFromLeftWithDelta = xFromLeftEdgeOfSliders + menuState.topSliderDeltaX;
     let section = undefined;
@@ -1421,7 +1418,7 @@ function redrawInterface(buffer, activeInputGadget) {
       brushLuminance = sectionValue;
       sectionValueText = Math.floor(brushLuminance * 100) + "%";
     } else if (xFromLeftEdgeOfSliders < 460) {
-      section = "chroma";
+      section = "saturation";
       sectionValue = map(xFromLeftWithDelta, 260, 460, 0, 1.0, true);
       brushSaturation = sectionValue;
       sectionValueText = Math.floor(brushSaturation * 100) + "%";
@@ -1436,36 +1433,45 @@ function redrawInterface(buffer, activeInputGadget) {
       section = "size";
       sectionValue = constrain(refSize + menuState.topSliderDeltaX * 0.5, 4, 600);
       if (!isNaN(sectionValue)) brushSize = sectionValue;
-      sectionValueText = Math.round(easedSize);
+      sectionValueText = Math.round(brushSizeWithEasing);
     }
 
     buffer.textAlign(CENTER);
-    buffer.text(section + ": " + sectionValueText, width/2, 60 + 20 - 6);
+    const textContent = section + ": " + sectionValueText;
+    const textPos = {
+      x: menuState.topSliderStartX + menuState.topSliderDeltaX,
+      y: 60 + 14
+    }
+    let bbox = fontMedium.textBounds(textContent, textPos.x, textPos.y);
+    buffer.fill(anti_hex_color+"90");
+    buffer.rect(bbox.x - bbox.w/2 - 13, bbox.y + bbox.h/2 - 4, bbox.w+26, bbox.h+12, 20);
+    buffer.fill(text_hex_color);
+    buffer.text(textContent, textPos.x, textPos.y);
   }
 
   buffer.textAlign(LEFT);
-  buffer.fill(visHex);
+  buffer.fill(text_hex_color);
   const controlsInfo = (isTouchControl !== false) ? "(ignore touch draw: on)" : "KEYS 1/2/3/4 TO ADJUST"
   buffer.text(controlsInfo, 20, height - 20 - 12);
 
   // draw the size indicator
   if (drawSliders) {
     buffer.drawingContext.save();
-    buffer.fill(bgHex);
+    buffer.fill(bg_hex_color);
     buffer.rect(sliderStart + 600, 0, 60, 60);
     buffer.drawingContext.clip();
     buffer.fill(componentsToHex(brushLuminance, brushSaturation, brushHue));
-    drawStamp(buffer, sliderStart + 630, 30, easedSize, pen.angle, pen.pressure, texture);
+    drawStamp(buffer, sliderStart + 630, 30, brushSizeWithEasing, pen.angle, pen.pressure, texture);
     buffer.noFill();
-    buffer.stroke(visHex);
+    buffer.stroke(text_hex_color);
     buffer.strokeWeight(1);
-    buffer.ellipse(sliderStart + 630, 30, easedSize, easedSize)
+    buffer.ellipse(sliderStart + 630, 30, brushSizeWithEasing, brushSizeWithEasing)
     buffer.drawingContext.restore();
     buffer.noStroke();
-    buffer.fill(visHex);
+    buffer.fill(text_hex_color);
     buffer.textSize(11);
     buffer.textAlign(CENTER);
-    buffer.text(Math.round(easedSize), sliderStart + 600 + 30, 10 + 18);
+    buffer.text(Math.round(brushSizeWithEasing), sliderStart + 600 + 30, 10 + 18);
   }
 
 
@@ -1478,7 +1484,7 @@ function redrawInterface(buffer, activeInputGadget) {
     buffer.push();
     buffer.translate(paintingState.x(), paintingState.y());
 
-    const margin = (["Triangle Tool", "Lasso Tool", "Mirror Tool"].includes(brushTool)) ? 0 : easedSize*0.5;
+    const margin = (["Triangle Tool", "Lasso Tool", "Mirror Tool"].includes(brushTool)) ? 0 : brushSizeWithEasing*0.5;
     const xmin = penRecording.reduce((a, b) => Math.min(a, b.x),  Infinity) - margin;
     const xmax = penRecording.reduce((a, b) => Math.max(a, b.x), -Infinity) + margin;
     const ymin = penRecording.reduce((a, b) => Math.min(a, b.y),  Infinity) - margin;
@@ -1490,7 +1496,7 @@ function redrawInterface(buffer, activeInputGadget) {
     buffer.line(xmin, ymin, xmin, ymax);
     buffer.line(xmin, ymax, xmax, ymax);
     buffer.line(xmax, ymin, xmax, ymax);
-    buffer.stroke(visHex);
+    buffer.stroke(text_hex_color);
     buffer.strokeWeight(1);
     buffer.line(xmin, ymin, xmax, ymin);
     buffer.line(xmin, ymin, xmin, ymax);
@@ -1517,14 +1523,14 @@ function redrawInterface(buffer, activeInputGadget) {
 
     // draw hover stamp at the pen position
     if (brushTool === "Stamp Tool") {
-      drawBrushstroke(buffer, hover.x, hover.y, easedSize, hover.angle, undefined, texture);
+      drawBrushstroke(buffer, hover.x, hover.y, brushSizeWithEasing, hover.angle, undefined, texture);
     } else if (brushTool === "Round Line Tool" || brushTool === "Fan Line Tool") {
-      drawCrosshair(easedSize, hover.x, hover.y);
+      drawCrosshair(brushSizeWithEasing, hover.x, hover.y);
       buffer.stroke(currentBrushToHex(hover.x * hover.y));
-      drawWithLine(buffer, hover.x, hover.y, hover.x, hover.y, easedSize)
+      drawWithLine(buffer, hover.x, hover.y, hover.x, hover.y, brushSizeWithEasing)
     } else if (brushTool === "Sharp Line Tool" || brushTool === "Brush Tool") {
       if (hover.lastX !== undefined && hover.lastY !== undefined) {
-        drawWithConnection(buffer, hover.lastX, hover.lastY, hover.angle, undefined, hover.x, hover.y, hover.angle, undefined, easedSize, texture, 0);
+        drawWithConnection(buffer, hover.lastX, hover.lastY, hover.angle, undefined, hover.x, hover.y, hover.angle, undefined, brushSizeWithEasing, texture, 0);
       }
     }
     buffer.pop();
@@ -1536,7 +1542,7 @@ function redrawInterface(buffer, activeInputGadget) {
   function drawActiveGadget() {
 
     if (activeInputGadget === "eyedropper") {
-      buffer.fill(brushHex);
+      buffer.fill(brush_hex_color);
       const easedSize = easeInCirc(brushSize, 4, 600);
       const screenX = (!pen.isDown) ? menuState.screenHoverX : menuState.screenPointerX;
       const screenY = (!pen.isDown) ? menuState.screenHoverY : menuState.screenPointerY;
@@ -1551,7 +1557,7 @@ function redrawInterface(buffer, activeInputGadget) {
     if (useBaseX === undefined || useBaseY === undefined) return;
 
     buffer.noStroke();
-    buffer.fill(brushHex);
+    buffer.fill(brush_hex_color);
 
     const sideDist = gadgetRadius; //(Math.max(width, height) > 4* gadgetRadius) ? gadgetRadius : gadgetRadius*0.5;
     const ankerX = constrain(useBaseX, sideDist, width - sideDist);
@@ -1572,16 +1578,16 @@ function redrawInterface(buffer, activeInputGadget) {
         const size = 54;
         const centerOffset = 40;
         if (isActive) {
-          buffer.stroke(antiVisHex);
+          buffer.stroke(anti_hex_color);
           buffer.strokeWeight(20);
           buffer.line(x, y, x+centerOffset*xDir, y+centerOffset*yDir)
           buffer.noStroke();
-          buffer.fill(antiVisHex);
+          buffer.fill(anti_hex_color);
         } else {
-          buffer.fill(antiVisHex+"C0");
+          buffer.fill(anti_hex_color+"C0");
         }
         buffer.ellipse(x+centerOffset*xDir, y+centerOffset*yDir, size, size);
-        buffer.fill(visHex);
+        buffer.fill(text_hex_color);
 
         const posX = x+centerOffset*xDir;
         const posY = y+centerOffset*yDir;
@@ -1709,16 +1715,16 @@ function redrawInterface(buffer, activeInputGadget) {
       const minDotSize = 4;
       const maxDotSize = 20;
 
-      buffer.fill(visHex);
+      buffer.fill(text_hex_color);
       buffer.ellipse(posX, lineTranslateY + gadgetRadius, minDotSize);
-      buffer.fill(visHex);
+      buffer.fill(text_hex_color);
       buffer.ellipse(posX, lineTranslateY + 0.5 * gadgetRadius, easeInCirc(lerp(minDotSize, maxDotSize, 0.25), minDotSize, maxDotSize));
       buffer.ellipse(posX, lineTranslateY + 0.0 * gadgetRadius, easeInCirc(lerp(minDotSize, maxDotSize, 0.5), minDotSize, maxDotSize));
       buffer.ellipse(posX, lineTranslateY - 0.5 * gadgetRadius, easeInCirc(lerp(minDotSize, maxDotSize, 0.75), minDotSize, maxDotSize));
-      buffer.fill(visHex);
+      buffer.fill(text_hex_color);
       buffer.ellipse(posX, lineTranslateY - gadgetRadius, maxDotSize);
 
-      buffer.fill(brushHex);
+      buffer.fill(brush_hex_color);
       const easedSize = easeInCirc(brushSize, 4, 600);
       drawStamp(buffer, posX, ankerY, easedSize, pen.angle, pen.pressure, texture);
       drawCrosshair(easedSize, posX, ankerY);
@@ -1726,7 +1732,7 @@ function redrawInterface(buffer, activeInputGadget) {
   }
 
   function drawRoundColorExampleWithVariation(size, x, y) {
-    buffer.fill(brushHex);
+    buffer.fill(brush_hex_color);
     buffer.ellipse(x, y, size);
 
     const varSegments = 48;
