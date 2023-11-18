@@ -15,7 +15,6 @@ const paintingState = {
   height: () => Math.min(width, height)-150,
   x: () => Math.floor((width - paintingState.width())/2),
   y: () => Math.floor((height - paintingState.height())/2),
-  containsNewStroke: undefined
 }
 
 // reference of previous brush settings for relative change
@@ -461,11 +460,12 @@ function updateInput(event) {
     const penDownDuration = event.timeStamp - pen.startTimeStamp;
     const penDownBounds = dist(pen.startX, pen.startY, pen.x, pen.y);
 
-    const didNotDraw = (penDownDuration < 200 && penDownBounds < 20) || (penDownBounds < 2);
+    const didNotDraw = (penDownDuration < 200 && penDownBounds < 20) || (penDownDuration < 400 && penDownBounds < 2);
 
     // was drawing, but only short
     if (inputMode() === 'draw' && didNotDraw) {
 
+      // this currently eats the undo. maybe bad...
       if (!editMode) {
         doAction("undo");
       }
@@ -505,7 +505,6 @@ function doAction(action) {
   if (action === "undo") {
 
     newStrokeBuffer.clear();
-    paintingState.containsNewStroke = true;
     penRecording = [];
     editMode = false;
 
@@ -542,7 +541,6 @@ function addLastStrokeToPainting() {
   // commit the new stroke to the painting and clear the buffer
   paintingBuffer.image(newStrokeBuffer, 0, 0);
   newStrokeBuffer.clear();
-  paintingState.containsNewStroke = true;
 }
 
 function keyReleased() {
@@ -739,7 +737,6 @@ function drawInNewStrokeBuffer(buffer, startX, startY, startAngle, startPressure
   if (buffer === undefined) return;
 
   // drawing in the new stroke buffer, which has to be added to canvas later
-  paintingState.containsNewStroke = false;
   const easedSize = easeInCirc(brushSize, 4, 600);
 
   if (brushTool === "Stamp Tool") {
@@ -1021,7 +1018,7 @@ function drawWithConnection(buffer, startX, startY, startAngle, startPressure, e
       }
 
       if (noiseValues256[Math.abs(endX * endY) * i % noiseValues256.length] < endPressure * 4) {
-        const brushHex2 = currentBrushToHex(i + randomID + endX * endY );
+        const brushHex2 = currentBrushToHex(i + randomID + Math.abs(endX * endY) );
         buffer.fill(brushHex2);
   
         buffer.beginShape();
@@ -1339,7 +1336,7 @@ function redrawInterface(buffer, activeInputGadget) {
 
   const topButtonWidth = 80;
 
-  topButton("undo" , topButtonWidth*0, paintingState.containsNewStroke || penRecording.length === 0 ? text_hex_color+"50" : text_hex_color);
+  topButton("undo" , topButtonWidth*0, penRecording.length === 0 ? text_hex_color+"50" : text_hex_color);
   topButton("edit" , topButtonWidth*1, editMode || penRecording.length === 0 ? text_hex_color+"50" : text_hex_color);
   topButton("clear", width-topButtonWidth*2, componentsToHex(lerp(bgLuminance, (bgLuminance>0.5) ? 0:1, 0.7), 0.7, 0.1));
   topButton("save" , width-topButtonWidth*1, text_hex_color);
@@ -1643,8 +1640,8 @@ function redrawInterface(buffer, activeInputGadget) {
       buffer.pop();
 
       // Show color at reference position
-      const currentColorSize = constrain(easeInCirc(brushSize, 4, 600), 8, gadgetRadius/3);
-      drawRoundColorExampleWithVariation(currentColorSize, ankerX, ankerY);
+      //const currentColorSize = constrain(easeInCirc(brushSize, 4, 600), 8, gadgetRadius/3);
+      drawRoundColorExampleWithVariation(40, ankerX, ankerY);
 
     } else if (activeInputGadget === "lumAndChr") {
 
@@ -1674,8 +1671,8 @@ function redrawInterface(buffer, activeInputGadget) {
       buffer.pop();
 
       // Show color at reference position
-      const currentColorSize = constrain(easeInCirc(brushSize, 4, 600), 8, gadgetRadius/3);
-      drawRoundColorExampleWithVariation(currentColorSize, ankerX, ankerY);
+      //const currentColorSize = constrain(easeInCirc(brushSize, 4, 600), 8, gadgetRadius/3);
+      drawRoundColorExampleWithVariation(40, ankerX, ankerY);
 
     } else if (activeInputGadget === "size") {
 
