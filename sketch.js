@@ -293,6 +293,7 @@ function updateInput(event) {
         }
       }
       menuState.startedEventOnMenu = true;
+      menuState.onPage = 0;
       return true;
     }
 
@@ -1433,8 +1434,9 @@ function redrawInterface(buffer, activeInputGadget) {
     buffer.drawingContext.clip();
     //buffer.fill(componentsToHex(brushLuminance, brushSaturation, brushHue));
     //drawStamp(buffer, sliderStart + 630, 30, brushSizeWithEasing, pen.angle, pen.pressure, texture);
-    buffer.fill(text_hex_color+"30");
+    buffer.fill(text_hex_color+"60");
     buffer.ellipse(sliderStart + 630, 30, brushSizeWithEasing, brushSizeWithEasing)
+    buffer.fill(anti_hex_color+"40");
     buffer.ellipse(sliderStart + 630, 30, brushSizeWithEasing*0.66, brushSizeWithEasing*0.66)
     buffer.ellipse(sliderStart + 630, 30, brushSizeWithEasing*0.33, brushSizeWithEasing*0.33)
     buffer.drawingContext.restore();
