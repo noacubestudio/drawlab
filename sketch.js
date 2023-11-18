@@ -534,6 +534,7 @@ function doAction(action) {
   } else if (action === "edit") {
 
     editMode = !editMode;
+    if (penRecording[0] === undefined) editMode = false;
   }
 }
 
@@ -691,6 +692,7 @@ function updateBrushReferenceFromInput() {
 
 function redrawLastStroke(buffer, xDiff, yDiff) {
   if (buffer === undefined) return;
+  if (penRecording[0] === undefined) return;
   const easedSize = easeInCirc(brushSize, 4, 600);
 
   // move recording
@@ -1337,8 +1339,8 @@ function redrawInterface(buffer, activeInputGadget) {
 
   const topButtonWidth = 80;
 
-  topButton("undo" , topButtonWidth*0, paintingState.containsNewStroke ? text_hex_color+"50" : text_hex_color);
-  topButton("edit" , topButtonWidth*1, text_hex_color);
+  topButton("undo" , topButtonWidth*0, paintingState.containsNewStroke || penRecording.length === 0 ? text_hex_color+"50" : text_hex_color);
+  topButton("edit" , topButtonWidth*1, editMode ? text_hex_color+"50" : text_hex_color);
   topButton("clear", width-topButtonWidth*2, componentsToHex(lerp(bgLuminance, (bgLuminance>0.5) ? 0:1, 0.7), 0.7, 0.1));
   topButton("save" , width-topButtonWidth*1, text_hex_color);
   
@@ -1578,16 +1580,15 @@ function redrawInterface(buffer, activeInputGadget) {
         const size = 54;
         const centerOffset = 40;
         if (isActive) {
-          buffer.stroke(anti_hex_color);
-          buffer.strokeWeight(20);
-          buffer.line(x, y, x+centerOffset*xDir, y+centerOffset*yDir)
-          buffer.noStroke();
+          buffer.fill(text_hex_color);
+          buffer.ellipse(x+centerOffset*xDir, y+centerOffset*yDir, size, size);
           buffer.fill(anti_hex_color);
         } else {
-          buffer.fill(anti_hex_color+"C0");
+          buffer.fill(anti_hex_color);
+          buffer.ellipse(x+centerOffset*xDir, y+centerOffset*yDir, size, size);
+          buffer.fill(text_hex_color);
         }
-        buffer.ellipse(x+centerOffset*xDir, y+centerOffset*yDir, size, size);
-        buffer.fill(text_hex_color);
+        
 
         const posX = x+centerOffset*xDir;
         const posY = y+centerOffset*yDir;
@@ -1608,14 +1609,14 @@ function redrawInterface(buffer, activeInputGadget) {
         } else if (text === "LC") {
           buffer.strokeWeight(8);
 
-          let startLumArr = [1.0, brushSaturation, brushHue];
-          let endLumArr   = [0.0, brushSaturation, brushHue];
-          drawGradientLine(posX, posY - size/3, posX, posY + size/3, startLumArr, endLumArr, size);
-
           let startChromaArr = [brushLuminance, 0.0, brushHue];
           let endChromaArr   = [brushLuminance, 1.0, brushHue];
           drawGradientLine(posX - size/3, posY, posX + size/3, posY, startChromaArr, endChromaArr, size);
           
+          let startLumArr = [1.0, brushSaturation, brushHue];
+          let endLumArr   = [0.0, brushSaturation, brushHue];
+          drawGradientLine(posX, posY - size/3, posX, posY + size/3, startLumArr, endLumArr, size);
+
           buffer.noStroke();
 
         } else {
