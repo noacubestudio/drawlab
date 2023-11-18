@@ -464,14 +464,14 @@ function updateInput(event) {
     const didNotDraw = (penDownDuration < 200 && penDownBounds < 20) || (penDownBounds < 2);
 
     // was drawing, but only short
-    if (menuState.onPage === 0 && didNotDraw) {
+    if (inputMode() === 'draw' && didNotDraw) {
 
       if (!editMode) {
         doAction("undo");
       }
       
       menuState.onPage = 1;
-    } else if (menuState.onPage > 0) {
+    } else if (inputMode() !== 'draw') {
       if (menuState.onPage > 1) menuState.lastGadgetPage = menuState.onPage;
       menuState.onPage = 0;
     }
@@ -1340,7 +1340,7 @@ function redrawInterface(buffer, activeInputGadget) {
   const topButtonWidth = 80;
 
   topButton("undo" , topButtonWidth*0, paintingState.containsNewStroke || penRecording.length === 0 ? text_hex_color+"50" : text_hex_color);
-  topButton("edit" , topButtonWidth*1, editMode ? text_hex_color+"50" : text_hex_color);
+  topButton("edit" , topButtonWidth*1, editMode || penRecording.length === 0 ? text_hex_color+"50" : text_hex_color);
   topButton("clear", width-topButtonWidth*2, componentsToHex(lerp(bgLuminance, (bgLuminance>0.5) ? 0:1, 0.7), 0.7, 0.1));
   topButton("save" , width-topButtonWidth*1, text_hex_color);
   
@@ -1365,7 +1365,6 @@ function redrawInterface(buffer, activeInputGadget) {
     } else {
       buffer.fill(componentsToHex(brushLuminance, brushSaturation, brushHue));
     }
-    // buffer.rect(sliderStart-60, 0, 60, 60);
     
     drawRoundColorExampleWithVariation(55, sliderStart - 30, 30);
   }
@@ -1373,33 +1372,6 @@ function redrawInterface(buffer, activeInputGadget) {
 
   // bottom left/ top middle text
   buffer.fill(text_hex_color);
-
-  // if (activeInputGadget === "lumAndChr"
-  //   || activeInputGadget === "hue" 
-  //   || activeInputGadget === "eyedropper") {
-
-  //   const newColorText = "okHSL:" + 
-  //     brushHue.toFixed(3) + ", " + 
-  //     brushSaturation.toFixed(3) + ", " + 
-  //     brushLuminance.toFixed(3) + "  noise:" + 
-  //     brushColorVar.toFixed(3) + "";
-
-  //   buffer.textAlign(CENTER);
-  //   buffer.text(newColorText, width/2, 60 + 20 - 6);
-    
-  //   if (refLuminance !== undefined) {
-  //     buffer.fill(componentsToHex(lessTextLum, min(bgChroma, 0.2), bgHue));
-
-  //     const refColorText = "okHSL:" + 
-  //       refHue.toFixed(3) + ", " + 
-  //       refSaturation.toFixed(3) + ", " + 
-  //       refLuminance.toFixed(3) + "  noise:" + 
-  //       refVar.toFixed(3) + "";
-
-  //     buffer.text(refColorText, width/2, 60 + 40 - 6);
-  //   }
-  // } 
-
 
   // set new values
   if (menuState.topSliderDeltaX !== undefined) {
@@ -1453,27 +1425,27 @@ function redrawInterface(buffer, activeInputGadget) {
 
   buffer.textAlign(LEFT);
   buffer.fill(text_hex_color);
-  const controlsInfo = (isTouchControl !== false) ? "(ignore touch draw: on)" : "KEYS 1/2/3/4 TO ADJUST"
+  const controlsInfo = (isTouchControl !== false) ? "pen required!" : "shortcut list: 1, 2, 3, 4, u, e, c, s";
   buffer.text(controlsInfo, 20, height - 20 - 12);
 
   // draw the size indicator
   if (drawSliders) {
     buffer.drawingContext.save();
-    buffer.fill(bg_hex_color);
-    buffer.rect(sliderStart + 600, 0, 60, 60);
+    buffer.fill(anti_hex_color+"90");
+    buffer.rect(sliderStart + 600, 0, 60, 60, 20, 20, 20, 20);
     buffer.drawingContext.clip();
-    buffer.fill(componentsToHex(brushLuminance, brushSaturation, brushHue));
-    drawStamp(buffer, sliderStart + 630, 30, brushSizeWithEasing, pen.angle, pen.pressure, texture);
-    buffer.noFill();
-    buffer.stroke(text_hex_color);
-    buffer.strokeWeight(1);
+    //buffer.fill(componentsToHex(brushLuminance, brushSaturation, brushHue));
+    //drawStamp(buffer, sliderStart + 630, 30, brushSizeWithEasing, pen.angle, pen.pressure, texture);
+    buffer.fill(text_hex_color+"30");
     buffer.ellipse(sliderStart + 630, 30, brushSizeWithEasing, brushSizeWithEasing)
+    buffer.ellipse(sliderStart + 630, 30, brushSizeWithEasing*0.66, brushSizeWithEasing*0.66)
+    buffer.ellipse(sliderStart + 630, 30, brushSizeWithEasing*0.33, brushSizeWithEasing*0.33)
     buffer.drawingContext.restore();
     buffer.noStroke();
-    buffer.fill(text_hex_color);
-    buffer.textSize(11);
-    buffer.textAlign(CENTER);
-    buffer.text(Math.round(brushSizeWithEasing), sliderStart + 600 + 30, 10 + 18);
+    // buffer.fill(text_hex_color);
+    // buffer.textSize(11);
+    // buffer.textAlign(CENTER);
+    // buffer.text(Math.round(brushSizeWithEasing), sliderStart + 600 + 30, 8);
   }
 
 
@@ -1716,14 +1688,19 @@ function redrawInterface(buffer, activeInputGadget) {
       const minDotSize = 4;
       const maxDotSize = 20;
 
-      buffer.fill(text_hex_color);
-      buffer.ellipse(posX, lineTranslateY + gadgetRadius, minDotSize);
-      buffer.fill(text_hex_color);
+      buffer.fill(anti_hex_color+"50");
+      buffer.ellipse(posX, lineTranslateY + gadgetRadius      , 4 + minDotSize);
+      buffer.ellipse(posX, lineTranslateY + 0.5 * gadgetRadius, 4 + easeInCirc(lerp(minDotSize, maxDotSize, 0.25), minDotSize, maxDotSize));
+      buffer.ellipse(posX, lineTranslateY + 0.0 * gadgetRadius, 4 + easeInCirc(lerp(minDotSize, maxDotSize, 0.5), minDotSize, maxDotSize));
+      buffer.ellipse(posX, lineTranslateY - 0.5 * gadgetRadius, 4 + easeInCirc(lerp(minDotSize, maxDotSize, 0.75), minDotSize, maxDotSize));
+      buffer.ellipse(posX, lineTranslateY - gadgetRadius      , 4 + maxDotSize);
+
+      buffer.fill(text_hex_color+"50");
+      buffer.ellipse(posX, lineTranslateY + gadgetRadius      , minDotSize);
       buffer.ellipse(posX, lineTranslateY + 0.5 * gadgetRadius, easeInCirc(lerp(minDotSize, maxDotSize, 0.25), minDotSize, maxDotSize));
       buffer.ellipse(posX, lineTranslateY + 0.0 * gadgetRadius, easeInCirc(lerp(minDotSize, maxDotSize, 0.5), minDotSize, maxDotSize));
       buffer.ellipse(posX, lineTranslateY - 0.5 * gadgetRadius, easeInCirc(lerp(minDotSize, maxDotSize, 0.75), minDotSize, maxDotSize));
-      buffer.fill(text_hex_color);
-      buffer.ellipse(posX, lineTranslateY - gadgetRadius, maxDotSize);
+      buffer.ellipse(posX, lineTranslateY - gadgetRadius      , maxDotSize);
 
       buffer.fill(brush_hex_color);
       const easedSize = easeInCirc(brushSize, 4, 600);
@@ -1747,15 +1724,23 @@ function redrawInterface(buffer, activeInputGadget) {
   }
 
   function drawCrosshair(size, x, y) {
+    const expand_size = Math.min(25, size * 0.4);
+
+    //shadow ver
+    buffer.strokeWeight(4);
+    buffer.stroke(anti_hex_color);
+    buffer.line(x, y - size*0.5, x, y - size*0.5 - expand_size);
+    buffer.line(x, y + size*0.5, x, y + size*0.5 + expand_size);
+    buffer.line(x - size*0.5, y, x - size*0.5 - expand_size, y);
+    buffer.line(x + size*0.5, y, x + size*0.5 + expand_size, y);
+
     // draw the crosshair
     buffer.strokeWeight(2);
-    const outerLuminance = (brushLuminance > 0.5) ? 0.0 : 1.0;
-    buffer.stroke(componentsToHex(outerLuminance, 0.0, 0));
-  
-    buffer.line(x, y - size*0.5, x, y - size*0.5 - 6);
-    buffer.line(x, y + size*0.5, x, y + size*0.5 + 6);
-    buffer.line(x - size*0.5, y, x - size*0.5 - 6, y);
-    buffer.line(x + size*0.5, y, x + size*0.5 + 6, y);
+    buffer.stroke(text_hex_color);
+    buffer.line(x, y - size*0.5, x, y - size*0.5 - expand_size);
+    buffer.line(x, y + size*0.5, x, y + size*0.5 + expand_size);
+    buffer.line(x - size*0.5, y, x - size*0.5 - expand_size, y);
+    buffer.line(x + size*0.5, y, x + size*0.5 + expand_size, y);
   
     // reset
     buffer.strokeWeight(6);
