@@ -5,11 +5,6 @@ let paintingBuffer;
 let interfaceBuffer;
 let newStrokeBuffer;
 
-// background color settings
-let bgHue = 0.6;
-let bgChroma = 0.1;
-let bgLuminance = 0.15;
-
 const paintingState = {
   width: () => Math.min(width, height)-150,
   height: () => Math.min(width, height)-150,
@@ -46,6 +41,11 @@ let toolPresets = [
 
 let gadgetRadius; // based on canvas size
 
+// canvas color settings
+let canvasHue = 0.6;
+let canvasSaturation = 0.1;
+let canvasLuminance = 0.15;
+
 // current brush settings for drawing
 let brushHue = 0.6;
 let brushColorVar = 0.5;
@@ -54,9 +54,6 @@ let brushLuminance = 0.7;
 let brushSize = 200;
 let brushTool = toolPresets[0].brush;
 let texture = toolPresets[0].texture;
-
-// save 0-1 values here for consistent noise that stays between redraws
-let noiseValues256 = [];
 
 // control
 let isTouchControl = undefined;
@@ -123,6 +120,130 @@ function preload() {
   fontMedium = loadFont('assets/IBMPlexSans-Medium.ttf');
 }
 
+
+// Main color representation in OKHSL. Converted to hex color using the helper file.
+class HSLColor {
+  static RANDOM_VALUES = Array.from({ length: 256 }, () => Math.random() * 2 - 1);
+
+  static lerpColorInHSL(color1, color2, lerpAmount) {
+    const lerpedH = lerp(color1.h, color2.h, lerpAmount);
+    const lerpedS = lerp(color1.s, color2.s, lerpAmount);
+    const lerpedL = lerp(color1.l, color2.l, lerpAmount);
+    // don't lerp alpha. if needed, could be a separate function.
+    return new HSLColor(lerpedH, lerpedS, lerpedL);
+  }
+
+  // WIP, maybe instead store the HSLColor itself and update that
+  static brushWithVar(seed) {
+    const base = new HSLColor(brushHue, brushSaturation, brushLuminance);
+    return base.varyComponents(seed, brushColorVar);
+  }
+
+  static noiseValue(seed) {
+    seed = Math.floor(Math.abs(seed));
+    return this.RANDOM_VALUES[seed % this.RANDOM_VALUES.length];
+  }
+
+  /**
+   * Creates an instance of HSLColor.
+   *
+   * @param {number} h - The hue component, in the range [0, 1].
+   * @param {number} s - The saturation component, in the range [0, 1].
+   * @param {number} l - The lightness component, in the range [0, 1].
+   * @param {number} [a=1] - The alpha (opacity) component, in the range [0, 1]. Defaults to 1.
+   */
+  constructor(h, s, l, a = 1) {
+    this.h = h;
+    this.s = s;
+    this.l = l;
+    this.a = a;
+  }
+
+  #toRGBArray() {
+    return okhsl_to_srgb(this.h, this.s, this.l); // from conversion helpers file
+  }
+
+  #alphaToHex(a = this.a) {
+    if (a === 1) return "";
+    const hex = Math.round(a * 255).toString(16);
+    return hex.length === 1 ? "0" + hex : hex;
+  }
+
+  /**
+   * Create a copy of the current color.
+   * @returns {HSLColor} A new HSLColor instance with the same components.
+   */
+  copy() {
+    return new HSLColor(this.h, this.s, this.l, this.a);
+  }
+
+  /**
+   * @param {number} value - The new hue value (between 0 and 1).
+   */
+  setHue(value) {
+    this.h = value;
+    return this;
+  }
+  /**
+   * @param {number} value - The new saturation value (between 0 and 1).
+   */
+  setSaturation(value) {
+    this.s = value;
+    return this;
+  }
+  /**
+   * @param {number} value - The new luminance value (between 0 and 1).
+   */
+  setLuminance(value) {
+    this.l = value;
+    return this;
+  }
+  /**
+   * @param {number} value - The new alpha value (between 0 and 1).
+   */
+  setAlpha(value) {
+    this.a = value;
+    return this;
+  }
+
+  /**
+   * Create a copy of the current color that is darker and limited in saturation.
+   */
+  behind() {
+    return new HSLColor(this.h, Math.min(this.s, 0.2), this.l * 0.8, this.a);
+  }
+
+  varyComponents(seed, strength = 0.5) {
+    if (strength === 0) return this;
+    seed = Math.abs(seed);
+
+    // add noise
+    const lNoiseValue = HSLColor.RANDOM_VALUES[Math.floor(seed*300   ) % HSLColor.RANDOM_VALUES.length];
+    const hNoiseValue = HSLColor.RANDOM_VALUES[Math.floor(seed*400+50) % HSLColor.RANDOM_VALUES.length];
+    this.l += lNoiseValue * lerp(easeInCirc(strength), strength, 0.1);
+    this.h += hNoiseValue * lerp(strength, easeInCirc(strength), easeOutCubic(this.s));
+    
+    // make sure the components are still in range
+    this.l = Math.max(0, Math.min(1, this.l));
+    this.h = Math.min(1, this.h);
+
+    return this;
+  }
+
+  get hex() {
+    const rgbArray = this.#toRGBArray();
+    const rgbHexString = rgb_to_hex(rgbArray[0], rgbArray[1], rgbArray[2]); // from conversion helpers file
+    return rgbHexString + this.#alphaToHex(); 
+  }
+
+  toHexWithSetAlpha(a) {
+    const rgbArray = this.#toRGBArray();
+    const rgbHexString = rgb_to_hex(rgbArray[0], rgbArray[1], rgbArray[2]); // from conversion helpers file
+    return rgbHexString + this.#alphaToHex(a); 
+  }
+}
+
+
 function setup() {
   cnv = createCanvas(windowWidth - 10, windowHeight - 10);
   newCanvasSize();
@@ -150,8 +271,9 @@ function setup() {
     paintingBuffer.pixelDensity(1);
     newStrokeBuffer.pixelDensity(1);
   }
-  paintingBuffer.background(componentsToHex(bgLuminance, bgChroma, bgHue));
-  document.body.style.backgroundColor = componentsToHex(bgLuminance*0.9, Math.min(bgChroma, 0.1), bgHue);
+  const canvasColor = new HSLColor(canvasHue, canvasSaturation, canvasLuminance);
+  paintingBuffer.background(canvasColor.hex);
+  document.body.style.backgroundColor = canvasColor.behind().hex;
 
   // Create a graphics buffer for the indicator
   interfaceBuffer = createGraphics(width, height);
@@ -159,9 +281,6 @@ function setup() {
   interfaceBuffer.textFont(fontMedium);
   interfaceBuffer.textAlign(LEFT, CENTER);
   newInterfaceSize();
-
-  // new random noise
-  noiseValues256 = Array.from({ length: 256 }, () => random(-1, 1));
   
   draw();
 }
@@ -511,16 +630,17 @@ function doAction(action) {
 
   } else if (action === "clear") {
 
-    [bgLuminance, brushLuminance] = [brushLuminance, bgLuminance];
-    [bgChroma, brushSaturation] = [brushSaturation, bgChroma];
-    [bgHue, brushHue] = [brushHue, bgHue];
+    [canvasLuminance, brushLuminance] = [brushLuminance, canvasLuminance];
+    [canvasSaturation, brushSaturation] = [brushSaturation, canvasSaturation];
+    [canvasHue, brushHue] = [brushHue, canvasHue];
 
     newStrokeBuffer.clear();
     penRecording = [];
     editMode = false;
 
-    paintingBuffer.background(componentsToHex(bgLuminance, bgChroma, bgHue));
-    document.body.style.backgroundColor = componentsToHex(bgLuminance*0.9, Math.min(bgChroma, 0.1), bgHue);
+    const canvasColor = new HSLColor(canvasHue, canvasSaturation, canvasLuminance);
+    paintingBuffer.background(canvasColor.hex);
+    document.body.style.backgroundColor = canvasColor.behind().hex;
 
   } else if (action === "save") {
 
@@ -550,40 +670,37 @@ function keyReleased() {
 
 
 function inputMode() {
-  // desktop or tablet
   if (menuState.onPage === 1) {
     return "cloverMenu";
   }
-
-  //'1', luminance and chroma 
+  //'1'
   if (keyIsDown(49) || menuState.onPage === 2) {
-    return "lumAndChr";
+    return "satAndLum";
   }
-  //'2', hue
+  //'2'
   if (keyIsDown(50) || menuState.onPage === 3) {
     return "hue";
   }
-  //'3', size
+  //'3'
   if (keyIsDown(51) || menuState.onPage === 4) {
     return "size";
   }
-  //'4', eyedropper ... WIP, currently not on touch
+  //'4'
   if (keyIsDown(52) || menuState.onPage === 5) {
     return "eyedropper";
   }
-  
-  // otherwise just
+
   return "draw";
 }
 
 function draw() {
 
-  background(componentsToHex(bgLuminance*0.9, Math.min(bgChroma, 0.1), bgHue));
+  background(new HSLColor(canvasHue, canvasSaturation, canvasLuminance).behind().hex);
 
   const wasInMenu = (currentInputMode !== "draw");
   currentInputMode = inputMode();
 
-  if (currentInputMode === "lumAndChr" 
+  if (currentInputMode === "satAndLum" 
     || currentInputMode === "hue" 
     || currentInputMode === "size" 
     || currentInputMode === "eyedropper"
@@ -682,11 +799,11 @@ function updateBrushReferenceFromInput() {
   refScreenHoverX ??= menuState.screenHoverX;
   refScreenHoverY ??= menuState.screenHoverY;
   // starting brush settings
-  refHue       ??= brushHue;
-  refSaturation    ??= brushSaturation;
-  refLuminance ??= brushLuminance;
-  refSize      ??= brushSize;
-  refVar       ??= brushColorVar;
+  refHue        ??= brushHue;
+  refSaturation ??= brushSaturation;
+  refLuminance  ??= brushLuminance;
+  refSize       ??= brushSize;
+  refVar        ??= brushColorVar;
 }
 
 function redrawLastStroke(buffer, xDiff, yDiff) {
@@ -747,13 +864,13 @@ function drawInNewStrokeBuffer(buffer, startX, startY, startAngle, startPressure
   } else if (brushTool === "Fan Line Tool") {
 
     // one color variation for each line instance
-    buffer.stroke(currentBrushToHex(endX * endY));
+    buffer.stroke(HSLColor.brushWithVar(endX * endY).hex);
     drawWithLine(buffer, startX, startY, endX, endY, easedSize);
 
   } else if (brushTool === "Round Line Tool") {
 
     // one color variation for each line instance
-    buffer.stroke(currentBrushToHex(startX * startY));
+    buffer.stroke(HSLColor.brushWithVar(startX * startY).hex);
     drawWithLine(buffer, startX, startY, endX, endY, easedSize);
 
   } else if (brushTool === "Sharp Line Tool" || brushTool === "Brush Tool") {
@@ -763,19 +880,19 @@ function drawInNewStrokeBuffer(buffer, startX, startY, startAngle, startPressure
   } else if (brushTool === "Triangle Tool") {
 
     // one color variation for each line instance
-    buffer.fill(currentBrushToHex(startX * startY));
+    buffer.fill(HSLColor.brushWithVar(startX * startY).hex);
     drawWithPolygon(buffer, startX, startY, endX, endY, recording, 3);
 
   } else if (brushTool === "Lasso Tool") {
 
     // one color variation for each line instance
-    buffer.fill(currentBrushToHex(startX * startY));
+    buffer.fill(HSLColor.brushWithVar(startX * startY).hex);
     drawwithLasso(buffer, startX, startY, endX, endY, recording, easedSize);
 
   } else if (brushTool === "Mirror Tool") {
 
     // one color variation for each line instance
-    buffer.fill(currentBrushToHex(startX * startY));
+    buffer.fill(HSLColor.brushWithVar(startX * startY).hex);
     drawwithMirror(buffer, startX, startY, endX, endY, recording, easedSize);
   }
 }
@@ -809,7 +926,7 @@ function updateBrushSettingsFromInput(currentInputMode) {
   
   if (!pen.isDown) return;
 
-  if (currentInputMode === "lumAndChr") {
+  if (currentInputMode === "satAndLum") {
 
     // Get positions
     let deltaX = pen.x - (penMode ? pen.startX : refX);
@@ -881,20 +998,13 @@ function drawBrushstroke(buffer, x, y, size, angle, pressure, texture) {
 
   // draw bigger version behind to give some extra detail
   if (texture === "Rounded") {
-    const rainbow = componentsToHex(
-      brushLuminance*0.98,
-      brushSaturation,
-      brushHue,
-      {seed: x * y, strength: brushColorVar}
-    );
-    buffer.fill(rainbow);
+    const rainbow = new HSLColor(brushHue, brushSaturation, brushLuminance * 0.98).varyComponents(x * y, brushColorVar);
+    buffer.fill(rainbow.hex);
     drawStamp(buffer, x, y, size*1.05, angle, pressure, texture);
   }
   
-
   // one color variation for each stamp instance
-  const brushHex = currentBrushToHex(x + y);
-  buffer.fill(brushHex);
+  buffer.fill(HSLColor.brushWithVar(x + y).hex);
   drawStamp(buffer, x, y, size, angle, pressure, texture);
 }
 
@@ -935,8 +1045,8 @@ function drawStamp(buffer, x, y, size, angle, pressure, texture) {
     for (let i = 0; i < circleCount; i++) {
       const rakeY = i*(circleSize*(1+gapSize));
       // modify color too
-      const brushHex = currentBrushToHex(i + Math.round((angle !== undefined) ? angle*6 : 0));
-      buffer.fill(brushHex);
+      const brushCol = HSLColor.brushWithVar(i + Math.round((angle !== undefined) ? angle*6 : 0));
+      buffer.fill(brushCol.hex);
 
       buffer.ellipse(0, rakeY, circleSize);
     }
@@ -944,11 +1054,6 @@ function drawStamp(buffer, x, y, size, angle, pressure, texture) {
   
 
   buffer.pop();
-}
-
-function currentBrushToHex(seed) {
-  if (seed === undefined) return componentsToHex(brushLuminance, brushSaturation, brushHue);
-  return componentsToHex(brushLuminance, brushSaturation, brushHue, {seed: seed, strength: brushColorVar});
 }
 
 function drawWithLine(buffer, xa, ya, xb, yb, size) {
@@ -989,9 +1094,9 @@ function drawWithConnection(buffer, startX, startY, startAngle, startPressure, e
       const lowerSide = i/steps - 0.5;
       const higherSide = (i+1)/steps - 0.5;
   
-      const rf = (i !== 0 && i !== steps-1) ? 0.1 * size * easedHueVar(brushColorVar) : 0; // randomness matches increasing variation
+      const rf = (i !== 0 && i !== steps-1) ? 0.1 * size * brushColorVar : 0; // randomness matches increasing variation
 
-      const lerpPart = noiseValues256[Math.floor(i + ((startX !== undefined) ? Math.abs(startX + startY) : 0)) % noiseValues256.length] ?? 0.5;
+      const lerpPart = HSLColor.noiseValue(i + (startX !== undefined ? startX + startY : 0));
       const middleX = lerp(startX, endX, lerpPart);
       const middleY = lerp(startY, endY, lerpPart);
 
@@ -1006,9 +1111,9 @@ function drawWithConnection(buffer, startX, startY, startAngle, startPressure, e
       midEdgeVectorHigher   = p5.Vector.fromAngle(avgAngle, higherSide*size*map(avgPressure, 0, 0.3, 0.3, 2.0, true));
 
 
-      if (noiseValues256[Math.abs(startX * startY) * i % noiseValues256.length] < startPressure * 4) {
-        const brushHex = currentBrushToHex(i + randomID + Math.abs(startX * startY));
-        buffer.fill(brushHex);
+      if (HSLColor.noiseValue(startX * startY * i) < startPressure * 4) {
+        const brushCol = HSLColor.brushWithVar(i + randomID + Math.abs(startX * startY));
+        buffer.fill(brushCol.hex);
   
         buffer.beginShape();
         randomizedVertex(buffer, startX, startEdgeVectorLower.x , startY, startEdgeVectorLower.y , rf);
@@ -1018,9 +1123,9 @@ function drawWithConnection(buffer, startX, startY, startAngle, startPressure, e
         buffer.endShape();
       }
 
-      if (noiseValues256[Math.abs(endX * endY) * i % noiseValues256.length] < endPressure * 4) {
-        const brushHex2 = currentBrushToHex(i + randomID + Math.abs(endX * endY) );
-        buffer.fill(brushHex2);
+      if (HSLColor.noiseValue(endX * endY * i) < endPressure * 4) {
+        const brushCol2 = HSLColor.brushWithVar(i + randomID + Math.abs(endX * endY) );
+        buffer.fill(brushCol2.hex);
   
         buffer.beginShape();
         randomizedVertex(buffer, middleX,midEdgeVectorLower.x, middleY, midEdgeVectorLower.y, rf);
@@ -1035,8 +1140,8 @@ function drawWithConnection(buffer, startX, startY, startAngle, startPressure, e
 
   function randomizedVertex(buffer, x, xOff, y, yOff, randomFactor) {
     buffer.vertex(
-      x + xOff + noiseValues256[Math.floor(Math.abs(x)) % noiseValues256.length] * randomFactor, 
-      y + yOff + noiseValues256[Math.floor(Math.abs(y)) % noiseValues256.length] * randomFactor
+      x + xOff + HSLColor.noiseValue(x) * randomFactor, 
+      y + yOff + HSLColor.noiseValue(y) * randomFactor
     );
   }
 }
@@ -1231,17 +1336,22 @@ function redrawInterface(buffer, activeInputGadget) {
   buffer.clear();
 
   // Interface Colors
-  const bg_hex_color   = componentsToHex(bgLuminance*0.9, Math.min(bgChroma, 0.1), bgHue);
-  const text_hex_color = componentsToHex(lerp(bgLuminance, (bgLuminance>0.5) ? 0:1, 0.7), Math.min(bgChroma, 0.2), bgHue);
-  const anti_hex_color = componentsToHex(lerp(bgLuminance, (bgLuminance>0.5) ? 1:0, 0.7), Math.min(bgChroma, 0.2), bgHue);
-
-  const brush_hex_color = componentsToHex(brushLuminance, brushSaturation, brushHue);
-  const anti_brush_hex_color = componentsToHex(lerp(brushLuminance, (brushLuminance>0.5) ? 0:1, 0.7), brushSaturation*0.3, brushHue);
+  const uiColors = {};
+  uiColors.bg = new HSLColor(canvasHue, canvasSaturation, canvasLuminance).behind();
+  uiColors.fg = uiColors.bg.copy()
+    .setLuminance(lerp(canvasLuminance, (canvasLuminance>0.5) ? 0 : 1, 0.7)); 
+  uiColors.fgDisabled = uiColors.fg.copy().setAlpha(0.2);
+  uiColors.constrastBg = uiColors.fg.copy()
+    .setLuminance(lerp(canvasLuminance, canvasLuminance > 0.5 ? 1 : 0, 0.7)); 
+  uiColors.brush = new HSLColor(brushHue, brushSaturation, brushLuminance);
+  uiColors.onBrush = uiColors.brush.copy()
+    .setLuminance(lerp(brushLuminance, (brushLuminance>0.5) ? 0:1, 0.7));
   
+  // correct brush size, calculated with easing function from the raw value
   const brushSizeWithEasing = easeInCirc(brushSize, 4, 600);
 
   // Background borders
-  buffer.fill(bg_hex_color);
+  buffer.fill(uiColors.bg.hex);
   buffer.rect(0, 0, width, 60);
 
   // Unfinished brushstroke preview
@@ -1252,18 +1362,18 @@ function redrawInterface(buffer, activeInputGadget) {
     buffer.translate(paintingState.x(), paintingState.y());
 
     if (brushTool === "Round Line Tool") {
-      buffer.stroke(currentBrushToHex(pen.startX * pen.startY));
+      buffer.stroke(HSLColor.brushWithVar(pen.startX * pen.startY).hex);
       drawWithLine(buffer, pen.startX, pen.startY, pen.x, pen.y, brushSizeWithEasing);
     } else if (brushTool === "Sharp Line Tool") { 
       drawWithConnection(buffer, pen.startX, pen.startY, pen.startAngle, pen.startPressure, pen.x, pen.y, pen.angle, pen.pressure, brushSizeWithEasing, texture);
     } else if (brushTool === "Triangle Tool") {
-      buffer.fill(currentBrushToHex(pen.startX * pen.startY));
+      buffer.fill(HSLColor.brushWithVar(pen.startX * pen.startY).hex);
       drawWithPolygon(buffer, pen.startX, pen.startY, pen.x, pen.y, penRecording, 3);
     } else if (brushTool === "Lasso Tool") {
-      buffer.fill(currentBrushToHex(pen.startX * pen.startY));
+      buffer.fill(HSLColor.brushWithVar(pen.startX * pen.startY).hex);
       drawwithLasso(buffer, pen.startX, pen.startY, pen.x, pen.y, penRecording, brushSizeWithEasing);
     } else if (brushTool === "Mirror Tool") {
-      buffer.fill(currentBrushToHex(pen.startX * pen.startY));
+      buffer.fill(HSLColor.brushWithVar(pen.startX * pen.startY).hex);
       drawwithMirror(buffer, pen.startX, pen.startY, pen.x, pen.y, penRecording, brushSizeWithEasing);
     }
 
@@ -1294,12 +1404,12 @@ function redrawInterface(buffer, activeInputGadget) {
           drawBrushstroke(buffer, x, 0, cornerPreviewBrushSize, pen.angle, pen.pressure, menuTexture);
         }
       } else if (menuBrushTool === "Round Line Tool" || menuBrushTool === "Fan Line Tool") {
-        buffer.stroke(brush_hex_color);
+        buffer.stroke(uiColors.brush.hex);
         drawWithLine(buffer, 0, 0, 40, 0, cornerPreviewBrushSize);
       } else if (menuBrushTool === "Sharp Line Tool" || menuBrushTool === "Brush Tool") {
         drawWithConnection(buffer, -20, 0, pen.startAngle, pen.startPressure, 60, 0, pen.angle, pen.pressure, cornerPreviewBrushSize, menuTexture, 0);
       } else {
-        buffer.stroke(brush_hex_color);
+        buffer.stroke(uiColors.brush.hex);
         drawWithPlaceholder(buffer, 0, 0, 40, 0, cornerPreviewBrushSize);
       }
     }
@@ -1308,9 +1418,9 @@ function redrawInterface(buffer, activeInputGadget) {
 
     if (spotY > 0) {
       buffer.textAlign(CENTER);
-      buffer.stroke(brush_hex_color);
+      buffer.stroke(uiColors.brush.hex);
       buffer.strokeWeight(3);
-      buffer.fill(anti_brush_hex_color);
+      buffer.fill(uiColors.onBrush.hex);
       if (brushTool === menuBrushTool && texture === menuTexture) {
         
       }
@@ -1324,10 +1434,9 @@ function redrawInterface(buffer, activeInputGadget) {
 
 
   function topButton(text, x, textColor) {
-
-    buffer.fill(anti_hex_color+"90");
-    buffer.rect(x+3, 0, topButtonWidth-6, 60, 0, 0, 20, 20)
-    buffer.fill(textColor)
+    buffer.fill(uiColors.constrastBg.toHexWithSetAlpha(0.5));
+    buffer.rect(x+3, 0, topButtonWidth-6, 60, 0, 0, 20, 20);
+    buffer.fill(textColor.hex);
     buffer.text(text, x, 0, topButtonWidth, 60 - 8);
   }
 
@@ -1337,12 +1446,12 @@ function redrawInterface(buffer, activeInputGadget) {
 
   const topButtonWidth = 80;
 
-  topButton("undo" , topButtonWidth*0, penRecording.length === 0 ? text_hex_color+"50" : text_hex_color);
-  topButton("edit" , topButtonWidth*1, editMode || penRecording.length === 0 ? text_hex_color+"50" : text_hex_color);
-  topButton("clear", width-topButtonWidth*2, componentsToHex(lerp(bgLuminance, (bgLuminance>0.5) ? 0:1, 0.7), 0.7, 0.1));
-  topButton("save" , width-topButtonWidth*1, text_hex_color);
+  topButton("undo" , topButtonWidth*0,             penRecording.length === 0 ? uiColors.fgDisabled : uiColors.fg);
+  topButton("edit" , topButtonWidth*1, editMode || penRecording.length === 0 ? uiColors.fgDisabled : uiColors.fg);
+  topButton("clear", width-topButtonWidth*2, uiColors.fg.copy().setHue(0.1).setSaturation(0.8));
+  topButton("save" , width-topButtonWidth*1, uiColors.fg);
   
-  buffer.fill(text_hex_color);
+  buffer.fill(uiColors.fg.hex);
   buffer.textAlign(LEFT);
   buffer.textFont(fontMedium);
 
@@ -1352,24 +1461,22 @@ function redrawInterface(buffer, activeInputGadget) {
   const sliderStart = width/2 - 300;
 
   if (drawSliders) {
-    drawGradientSlider(sliderStart, 0, 200, 60,     [0.0, brushSaturation, brushHue], [1.0, brushSaturation, brushHue], brushLuminance);
-    drawGradientSlider(sliderStart+200, 0, 200, 60, [brushLuminance, 0.0, brushHue], [brushLuminance, 1.0, brushHue], brushSaturation);
-    drawGradientSlider(sliderStart+400, 0, 200, 60, [brushLuminance, brushSaturation, 0.0], [brushLuminance, brushSaturation, 1.0], brushHue);
+    let baseColor = uiColors.brush;
+    drawGradientSlider(sliderStart, 0, 200, 60,     baseColor.copy().setLuminance(0), baseColor.copy().setLuminance(1), brushLuminance);
+    drawGradientSlider(sliderStart+200, 0, 200, 60, baseColor.copy().setSaturation(0), baseColor.copy().setSaturation(1), brushSaturation);
+    drawGradientSlider(sliderStart+400, 0, 200, 60, baseColor.copy().setHue(0), baseColor.copy().setHue(1), brushHue);
     if (refHue !== undefined) {
-      drawGradientSlider(sliderStart, 0, 200, 10,     [0.0, refSaturation, refHue], [1.0, refSaturation, refHue], refLuminance);
-      drawGradientSlider(sliderStart+200, 0, 200, 10, [refLuminance, 0.0, refHue], [refLuminance, 1.0, refHue], refSaturation);
-      drawGradientSlider(sliderStart+400, 0, 200, 10, [refLuminance, refSaturation, 0.0], [refLuminance, refSaturation, 1.0], refHue);
-      buffer.fill(componentsToHex(refLuminance, refSaturation, refHue));
-    } else {
-      buffer.fill(componentsToHex(brushLuminance, brushSaturation, brushHue));
+      baseColor = new HSLColor(refHue, refSaturation, refLuminance);
+      drawGradientSlider(sliderStart, 0, 200, 10,     baseColor.copy().setLuminance(0), baseColor.copy().setLuminance(1), refLuminance);
+      drawGradientSlider(sliderStart+200, 0, 200, 10, baseColor.copy().setSaturation(0), baseColor.copy().setSaturation(1), refSaturation);
+      drawGradientSlider(sliderStart+400, 0, 200, 10, baseColor.copy().setHue(0), baseColor.copy().setHue(1), refHue);
     }
-    
     drawRoundColorExampleWithVariation(55, sliderStart - 30, 30);
   }
 
 
   // bottom left/ top middle text
-  buffer.fill(text_hex_color);
+  buffer.fill(uiColors.fg.hex);
 
   // set new values
   if (menuState.topSliderDeltaX !== undefined) {
@@ -1415,38 +1522,32 @@ function redrawInterface(buffer, activeInputGadget) {
       y: 60 + 14
     }
     let bbox = fontMedium.textBounds(textContent, textPos.x, textPos.y);
-    buffer.fill(anti_hex_color+"90");
+    buffer.fill(uiColors.constrastBg.toHexWithSetAlpha(0.5));
     buffer.rect(bbox.x - bbox.w/2 - 13, bbox.y + bbox.h/2 - 4, bbox.w+26, bbox.h+12, 20);
-    buffer.fill(text_hex_color);
+    buffer.fill(uiColors.fg.hex);
     buffer.text(textContent, textPos.x, textPos.y);
   }
 
   buffer.textAlign(LEFT);
-  buffer.fill(text_hex_color);
+  buffer.fill(uiColors.fg.hex);
   const controlsInfo = (isTouchControl !== false) ? "pen required!" : "shortcut list: 1, 2, 3, 4, u, e, c, s";
   buffer.text(controlsInfo, 20, height - 20 - 12);
 
   // draw the size indicator
   if (drawSliders) {
     buffer.drawingContext.save();
-    buffer.fill(anti_hex_color+"90");
+    buffer.fill(uiColors.constrastBg.toHexWithSetAlpha(0.5));
     buffer.rect(sliderStart + 600, 0, 60, 60, 20, 20, 20, 20);
     buffer.drawingContext.clip();
-    //buffer.fill(componentsToHex(brushLuminance, brushSaturation, brushHue));
-    //drawStamp(buffer, sliderStart + 630, 30, brushSizeWithEasing, pen.angle, pen.pressure, texture);
-    buffer.fill(text_hex_color+"60");
+
+    buffer.fill(uiColors.fg.toHexWithSetAlpha(0.4));
     buffer.ellipse(sliderStart + 630, 30, brushSizeWithEasing, brushSizeWithEasing)
-    buffer.fill(anti_hex_color+"40");
+    buffer.fill(uiColors.constrastBg.toHexWithSetAlpha(0.3));
     buffer.ellipse(sliderStart + 630, 30, brushSizeWithEasing*0.66, brushSizeWithEasing*0.66)
     buffer.ellipse(sliderStart + 630, 30, brushSizeWithEasing*0.33, brushSizeWithEasing*0.33)
     buffer.drawingContext.restore();
     buffer.noStroke();
-    // buffer.fill(text_hex_color);
-    // buffer.textSize(11);
-    // buffer.textAlign(CENTER);
-    // buffer.text(Math.round(brushSizeWithEasing), sliderStart + 600 + 30, 8);
   }
-
 
   //reset text size
   buffer.textSize((width < height) ? 13 : 16);
@@ -1463,13 +1564,13 @@ function redrawInterface(buffer, activeInputGadget) {
     const ymin = penRecording.reduce((a, b) => Math.min(a, b.y),  Infinity) - margin;
     const ymax = penRecording.reduce((a, b) => Math.max(a, b.y), -Infinity) + margin;
   
-    buffer.stroke(componentsToHex(bgLuminance, bgChroma, bgHue));
+    buffer.stroke(uiColors.constrastBg.hex);
     buffer.strokeWeight(3);
     buffer.line(xmin, ymin, xmax, ymin);
     buffer.line(xmin, ymin, xmin, ymax);
     buffer.line(xmin, ymax, xmax, ymax);
     buffer.line(xmax, ymin, xmax, ymax);
-    buffer.stroke(text_hex_color);
+    buffer.stroke(uiColors.fg.hex);
     buffer.strokeWeight(1);
     buffer.line(xmin, ymin, xmax, ymin);
     buffer.line(xmin, ymin, xmin, ymax);
@@ -1499,7 +1600,7 @@ function redrawInterface(buffer, activeInputGadget) {
       drawBrushstroke(buffer, hover.x, hover.y, brushSizeWithEasing, hover.angle, undefined, texture);
     } else if (brushTool === "Round Line Tool" || brushTool === "Fan Line Tool") {
       drawCrosshair(brushSizeWithEasing, hover.x, hover.y);
-      buffer.stroke(currentBrushToHex(hover.x * hover.y));
+      buffer.stroke(HSLColor.brushWithVar(hover.x * hover.y).hex);
       drawWithLine(buffer, hover.x, hover.y, hover.x, hover.y, brushSizeWithEasing)
     } else if (brushTool === "Sharp Line Tool" || brushTool === "Brush Tool") {
       if (hover.lastX !== undefined && hover.lastY !== undefined) {
@@ -1515,7 +1616,7 @@ function redrawInterface(buffer, activeInputGadget) {
   function drawActiveGadget() {
 
     if (activeInputGadget === "eyedropper") {
-      buffer.fill(brush_hex_color);
+      buffer.fill(uiColors.brush.hex);
       const easedSize = easeInCirc(brushSize, 4, 600);
       const screenX = (!pen.isDown) ? menuState.screenHoverX : menuState.screenPointerX;
       const screenY = (!pen.isDown) ? menuState.screenHoverY : menuState.screenPointerY;
@@ -1530,7 +1631,7 @@ function redrawInterface(buffer, activeInputGadget) {
     if (useBaseX === undefined || useBaseY === undefined) return;
 
     buffer.noStroke();
-    buffer.fill(brush_hex_color);
+    buffer.fill(uiColors.brush.hex);
 
     const sideDist = gadgetRadius; //(Math.max(width, height) > 4* gadgetRadius) ? gadgetRadius : gadgetRadius*0.5;
     const ankerX = constrain(useBaseX, sideDist, width - sideDist);
@@ -1551,13 +1652,13 @@ function redrawInterface(buffer, activeInputGadget) {
         const size = 54;
         const centerOffset = 40;
         if (isActive) {
-          buffer.fill(text_hex_color);
+          buffer.fill(uiColors.fg.hex);
           buffer.ellipse(x+centerOffset*xDir, y+centerOffset*yDir, size, size);
-          buffer.fill(anti_hex_color);
+          buffer.fill(uiColors.constrastBg.hex);
         } else {
-          buffer.fill(anti_hex_color);
+          buffer.fill(uiColors.constrastBg.hex);
           buffer.ellipse(x+centerOffset*xDir, y+centerOffset*yDir, size, size);
-          buffer.fill(text_hex_color);
+          buffer.fill(uiColors.fg.hex);
         }
         
 
@@ -1567,26 +1668,24 @@ function redrawInterface(buffer, activeInputGadget) {
         if (text === "H") {
           buffer.strokeWeight(8);
 
-          let startVarArr = [brushLuminance, brushSaturation, brushHue, 1];
-          let endVarArr   = [brushLuminance, brushSaturation, brushHue, 0];
-          drawGradientLine(posX, posY - size/3, posX, posY + size/3, startVarArr, endVarArr, size);
+          drawColorAxis(posX, posY - size/3, posX, posY + size/3, uiColors.brush, uiColors.brush, size, 1.0, 0.0);
 
-          let startHueArr = [brushLuminance, brushSaturation, 0 + refHue - 0.5];
-          let endHueArr   = [brushLuminance, brushSaturation, 1 + refHue - 0.5];
-          drawGradientLine(posX - size/3, posY, posX + size/3, posY, startHueArr, endHueArr, size);
+          const startColorHue = uiColors.brush.copy().setHue(brushHue - 0.5); 
+          const endColorHue   = uiColors.brush.copy().setHue(brushHue + 0.5);
+          drawColorAxis(posX - size/3, posY, posX + size/3, posY, startColorHue, endColorHue, size);
           
           buffer.noStroke();
 
         } else if (text === "LC") {
           buffer.strokeWeight(8);
 
-          let startChromaArr = [brushLuminance, 0.0, brushHue];
-          let endChromaArr   = [brushLuminance, 1.0, brushHue];
-          drawGradientLine(posX - size/3, posY, posX + size/3, posY, startChromaArr, endChromaArr, size);
+          const startColorSat = uiColors.brush.copy().setSaturation(0);
+          const endColorSat   = uiColors.brush.copy().setSaturation(1);
+          drawColorAxis(posX - size/3, posY, posX + size/3, posY, startColorSat, endColorSat, size);
           
-          let startLumArr = [1.0, brushSaturation, brushHue];
-          let endLumArr   = [0.0, brushSaturation, brushHue];
-          drawGradientLine(posX, posY - size/3, posX, posY + size/3, startLumArr, endLumArr, size);
+          const startColorLum = uiColors.brush.copy().setLuminance(1);
+          const endColorLum   = uiColors.brush.copy().setLuminance(0);
+          drawColorAxis(posX, posY - size/3, posX, posY + size/3, startColorLum, endColorLum, size);
 
           buffer.noStroke();
 
@@ -1619,25 +1718,19 @@ function redrawInterface(buffer, activeInputGadget) {
       buffer.strokeWeight(16);
       buffer.line(0, radius*2 * (brushColorVar - 1), 0, radius*2 * brushColorVar);
 
-      let startVarArr = [brushLuminance, brushSaturation, brushHue, 1.0];
-      let endVarArr   = [brushLuminance, brushSaturation, brushHue, 0.0];
       buffer.strokeWeight(14);
-      drawGradientLine(0, radius*2 * (brushColorVar - 1), 0, radius*2 * brushColorVar, startVarArr, endVarArr, gadgetRadius);
+      drawColorAxis(0, radius*2 * (brushColorVar - 1), 0, radius*2 * brushColorVar, uiColors.brush, uiColors.brush, gadgetRadius, 1.0, 0.0);
 
       // hue
       // stay centered since hue is a circle anyway
       buffer.stroke("black");
       buffer.strokeWeight(16);
-      // let deltaHue = brushHue - refHue;
-      // if (deltaHue < 0) deltaHue += 1.0;
-      // if (deltaHue > 1) deltaHue % 1;
-      // deltaHue += 0.5;
       buffer.line(radius*2 * -0.5, 0, radius*2 * (1-0.5), 0);
 
-      let startHueArr = [brushLuminance, brushSaturation, brushHue - 0.5];
-      let endHueArr   = [brushLuminance, brushSaturation, brushHue + 0.5];
+      const startColorHue = uiColors.brush.copy().setHue(brushHue - 0.5); 
+      const endColorHue   = uiColors.brush.copy().setHue(brushHue + 0.5);
       buffer.strokeWeight(14);
-      drawGradientLine(radius*2 * -0.5, 0, radius*2 * (1-0.5), 0, startHueArr, endHueArr, gadgetRadius);
+      drawColorAxis(radius*2 * -0.5, 0, radius*2 * (1-0.5), 0, startColorHue, endColorHue, gadgetRadius);
 
       buffer.pop();
 
@@ -1645,7 +1738,7 @@ function redrawInterface(buffer, activeInputGadget) {
       //const currentColorSize = constrain(easeInCirc(brushSize, 4, 600), 8, gadgetRadius/3);
       drawRoundColorExampleWithVariation(40, ankerX, ankerY);
 
-    } else if (activeInputGadget === "lumAndChr") {
+    } else if (activeInputGadget === "satAndLum") {
 
       const radius = gadgetRadius;
       buffer.push();
@@ -1654,21 +1747,21 @@ function redrawInterface(buffer, activeInputGadget) {
       buffer.fill("black")
       buffer.ellipse(0, 0, constrain(easeInCirc(brushSize, 4, 600), 8, gadgetRadius/3)+2)
 
-      let startLumArr = [1.0, brushSaturation, brushHue];
-      let endLumArr   = [0.0, brushSaturation, brushHue];
+      const startColorLum = uiColors.brush.copy().setLuminance(1);
+      const endColorLum   = uiColors.brush.copy().setLuminance(0);
       buffer.stroke("black");
       buffer.strokeWeight(16);
       buffer.line(0, radius*2 * (-1 + brushLuminance), 0, radius*2 * brushLuminance);
       buffer.strokeWeight(14);
-      drawGradientLine(0, radius*2 * (-1 + brushLuminance), 0, radius*2 * brushLuminance, startLumArr, endLumArr, gadgetRadius);
+      drawColorAxis(0, radius*2 * (-1 + brushLuminance), 0, radius*2 * brushLuminance, startColorLum, endColorLum, gadgetRadius);
 
-      let startChromaArr = [brushLuminance, 0.0, brushHue];
-      let endChromaArr   = [brushLuminance, 1.0, brushHue];
+      const startColorSat = uiColors.brush.copy().setSaturation(0);
+      const endColorSat   = uiColors.brush.copy().setSaturation(1);
       buffer.stroke("black");
       buffer.strokeWeight(16);
       buffer.line(radius*2 * -brushSaturation, 0, radius*2 * (1-brushSaturation), 0);
       buffer.strokeWeight(14);
-      drawGradientLine(radius*2 * -brushSaturation, 0, radius*2 * (1-brushSaturation), 0, startChromaArr, endChromaArr, gadgetRadius);
+      drawColorAxis(radius*2 * -brushSaturation, 0, radius*2 * (1-brushSaturation), 0, startColorSat, endColorSat, gadgetRadius);
       
       buffer.pop();
 
@@ -1687,21 +1780,21 @@ function redrawInterface(buffer, activeInputGadget) {
       const minDotSize = 4;
       const maxDotSize = 20;
 
-      buffer.fill(anti_hex_color+"50");
+      buffer.fill(uiColors.constrastBg.toHexWithSetAlpha(0.3));
       buffer.ellipse(posX, lineTranslateY + gadgetRadius      , 4 + minDotSize);
       buffer.ellipse(posX, lineTranslateY + 0.5 * gadgetRadius, 4 + easeInCirc(lerp(minDotSize, maxDotSize, 0.25), minDotSize, maxDotSize));
       buffer.ellipse(posX, lineTranslateY + 0.0 * gadgetRadius, 4 + easeInCirc(lerp(minDotSize, maxDotSize, 0.5), minDotSize, maxDotSize));
       buffer.ellipse(posX, lineTranslateY - 0.5 * gadgetRadius, 4 + easeInCirc(lerp(minDotSize, maxDotSize, 0.75), minDotSize, maxDotSize));
       buffer.ellipse(posX, lineTranslateY - gadgetRadius      , 4 + maxDotSize);
 
-      buffer.fill(text_hex_color+"50");
+      buffer.fill(uiColors.fg.toHexWithSetAlpha(0.3));
       buffer.ellipse(posX, lineTranslateY + gadgetRadius      , minDotSize);
       buffer.ellipse(posX, lineTranslateY + 0.5 * gadgetRadius, easeInCirc(lerp(minDotSize, maxDotSize, 0.25), minDotSize, maxDotSize));
       buffer.ellipse(posX, lineTranslateY + 0.0 * gadgetRadius, easeInCirc(lerp(minDotSize, maxDotSize, 0.5), minDotSize, maxDotSize));
       buffer.ellipse(posX, lineTranslateY - 0.5 * gadgetRadius, easeInCirc(lerp(minDotSize, maxDotSize, 0.75), minDotSize, maxDotSize));
       buffer.ellipse(posX, lineTranslateY - gadgetRadius      , maxDotSize);
 
-      buffer.fill(brush_hex_color);
+      buffer.fill(uiColors.brush.hex);
       const easedSize = easeInCirc(brushSize, 4, 600);
       drawStamp(buffer, posX, ankerY, easedSize, pen.angle, pen.pressure, texture);
       drawCrosshair(easedSize, posX, ankerY);
@@ -1709,15 +1802,14 @@ function redrawInterface(buffer, activeInputGadget) {
   }
 
   function drawRoundColorExampleWithVariation(size, x, y) {
-    buffer.fill(brush_hex_color);
+    buffer.fill(uiColors.brush.hex);
     buffer.ellipse(x, y, size);
 
     const varSegments = 48;
     for (let i = 0; i < varSegments; i++) {
       const start = (TWO_PI / varSegments) * i;
       const stop = start + TWO_PI / varSegments; 
-      const varHex = currentBrushToHex(i);
-      buffer.fill(varHex);
+      buffer.fill(HSLColor.brushWithVar(i).hex);
       buffer.arc(x, y, size, size, start, stop);
     }
   }
@@ -1727,7 +1819,7 @@ function redrawInterface(buffer, activeInputGadget) {
 
     //shadow ver
     buffer.strokeWeight(4);
-    buffer.stroke(anti_hex_color);
+    buffer.stroke(uiColors.constrastBg.hex);
     buffer.line(x, y - size*0.5, x, y - size*0.5 - expand_size);
     buffer.line(x, y + size*0.5, x, y + size*0.5 + expand_size);
     buffer.line(x - size*0.5, y, x - size*0.5 - expand_size, y);
@@ -1735,7 +1827,7 @@ function redrawInterface(buffer, activeInputGadget) {
 
     // draw the crosshair
     buffer.strokeWeight(2);
-    buffer.stroke(text_hex_color);
+    buffer.stroke(uiColors.fg.hex);
     buffer.line(x, y - size*0.5, x, y - size*0.5 - expand_size);
     buffer.line(x, y + size*0.5, x, y + size*0.5 + expand_size);
     buffer.line(x - size*0.5, y, x - size*0.5 - expand_size, y);
@@ -1746,17 +1838,18 @@ function redrawInterface(buffer, activeInputGadget) {
     buffer.noStroke();
   }
 
-  function drawGradientLine(xStart, yStart, xEnd, yEnd, startArr, endArr, radius) {
-    const segments = Math.floor(radius)/2;
+  function drawColorAxis(xStart, yStart, xEnd, yEnd, startColor, endColor, radius, startVar = 0, endVar = 0) {
+    const segments = Math.floor(radius);
     let lastX = xStart;
     let lastY = yStart;
     for (let i = 1; i < segments + 1; i++) {
       const toX = lerp(xStart, xEnd, i / segments);
       const toY = lerp(yStart, yEnd, i / segments);
       const colorLerpAmt = (i - 0.5) / segments;
-      const mixedOkLCH = lerpedComponentsToHex(startArr, endArr, colorLerpAmt);
-  
-      buffer.stroke(mixedOkLCH);
+      const lerpedVar = lerp(startVar, endVar, colorLerpAmt);
+      const lerpedColor = HSLColor.lerpColorInHSL(startColor, endColor, colorLerpAmt).varyComponents(i, lerpedVar);
+      
+      buffer.stroke(lerpedColor.hex);
       buffer.line(lastX, lastY, toX, toY);
   
       lastX = toX;
@@ -1764,79 +1857,29 @@ function redrawInterface(buffer, activeInputGadget) {
     }
   }
 
-  function drawGradientSlider(x, y, width, height, startArr, endArr, sliderPercent) {
+  function drawGradientSlider(x, y, width, height, startColor, endColor, sliderPercent) {
     const segments = width;
     const currentSegment = Math.round(segments * sliderPercent);
 
     for (let i = 0; i < segments; i++) {
       const colorLerpAmt = (i + 0.5) / segments;
-      const mixedOkLCH = lerpedComponentsToHex(startArr, endArr, colorLerpAmt);
+      const lerpedColor = HSLColor.lerpColorInHSL(startColor, endColor, colorLerpAmt);
 
       const curvedHeight = height * Math.min((1 - Math.abs((i/segments)-0.5) * 2) * 6, 1) ** 0.12
   
-      buffer.fill(mixedOkLCH);
+      buffer.fill(lerpedColor.hex);
       buffer.rect(x + (i/segments) * width, y, width/segments, curvedHeight);
 
       if (i === currentSegment) {
-        buffer.fill("#ffffffc0");
+        buffer.fill(new HSLColor(0,0,1,0.8).hex);
         buffer.rect(x + (i/segments) * width, y, width/segments, curvedHeight);
       }
       if (i+1 === currentSegment) {
-        buffer.fill("#000000c0");
+        buffer.fill(new HSLColor(0,0,0,0.8).hex);
         buffer.rect(x + (i/segments) * width, y, width/segments, curvedHeight);
       }
     }
   }
-
-  // function drawHueCircle(center, radius, numSegments, luminance, chroma, rotateAngle) {
-  //   let segmentAngle = TWO_PI / numSegments; // angle of each segment
-  
-  //   for (let i = 0; i < numSegments; i++) {
-  //     let cHue = map(i, 0, numSegments, 0, 1); // map segment index to hue value
-  //     let brushHex = componentsToHex(luminance, chroma, cHue);
-  //     buffer.stroke(brushHex); // set stroke color based on hue
-  //     let startAngle = i * segmentAngle + rotateAngle; // starting angle of segment
-  //     let endAngle = startAngle + segmentAngle; // ending angle of segment
-  //     let start = createVector(
-  //       cos(startAngle) * radius,
-  //       sin(startAngle) * radius
-  //     ); // starting point of segment
-  //     let end = createVector(cos(endAngle) * radius, sin(endAngle) * radius); // ending point of segment
-  //     start.add(center); // add center point to starting point
-  //     end.add(center); // add center point to ending point
-  //     buffer.line(start.x, start.y, end.x, end.y); // draw segment
-  //   }
-  // }
-}
-
-function lerpedComponentsToHex(startArr, endArr, colorLerpAmt) {
-  const mixedArr = [
-    lerp(startArr[0], endArr[0], colorLerpAmt),
-    lerp(startArr[1], endArr[1], colorLerpAmt),
-    lerp(startArr[2], endArr[2], colorLerpAmt),
-  ];
-
-  // show hue variation increasing instead
-  if (startArr[3] !== undefined) {
-    const lerpedVar = lerp(startArr[3], endArr[3], colorLerpAmt);
-    return componentsToHex(mixedArr[0], mixedArr[1], mixedArr[2], {seed: colorLerpAmt, strength: lerpedVar});
-  }
-
-  return componentsToHex(mixedArr[0], mixedArr[1], mixedArr[2]);
-}
-
-function componentsToHex(l, s, h, varObject) {
-
-  if (varObject !== undefined) {
-    l += noiseValues256[Math.floor(varObject.seed*300     ) % noiseValues256.length] * easedLumaVar(varObject.strength);
-    h += noiseValues256[Math.floor(varObject.seed*400 + 50) % noiseValues256.length] * easedHueVar(varObject.strength);
-  }
-
-  l = Math.max(0, l);
-  l = Math.min(1, l);
-
-  const colArr = okhsl_to_srgb(h, s, l);
-  return rgb_to_hex(colArr[0], colArr[1], colArr[2]);
 }
 
 function easeInCirc(x, from, to) {
@@ -1848,30 +1891,6 @@ function easeInCirc(x, from, to) {
 
 function easeOutCubic(x) {
   return 1 - Math.pow(1 - x, 3);
-}
-
-function easedHueVar(brushVar) {
-
-  if (brushVar === undefined) return 0;
-
-  // for low chroma, use the no curve amount of hue variation (more intense)
-  // for high chroma, use the curve (less intense)
-  return lerp(
-    brushVar,
-    easeInCirc(brushVar),
-    easeOutCubic(brushSaturation)
-  );
-}
-
-function easedLumaVar(lumaVar) {
-  if (lumaVar === undefined) return 0;
-
-  return lerp(easeInCirc(lumaVar), lumaVar, 0.1);
-  // lerp(
-  //   lumaVar,
-  //   easeInCirc(lumaVar),
-  //   easeOutCubic(brushLuminance)
-  // );
 }
 
 function tiltToAngle(tiltX, tiltY) {
