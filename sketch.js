@@ -1,9 +1,12 @@
+// defined in setup() once
 let cnv;
+let interfaceBuffer = undefined; // in setup()
+let currentPainting = undefined; // in setup()
 
-// render the painting and visuals separately
-let paintingBuffer;
-let interfaceBuffer;
-let newStrokeBuffer;
+// initially set in setup()
+let canvasColor = undefined;
+let currentBrush = undefined;
+let previousBrush = undefined;
 
 const paintingState = {
   width: () => Math.min(width, height)-150,
@@ -16,32 +19,8 @@ let gadgetRadius; // based on canvas size
 // menu
 let toolPresets = [
   {brush: "Brush Tool", texture: "Regular", menuName: "Brush"},
-  {brush: "Brush Tool", texture: "Rake", menuName: "Rake"},
-  {brush: "Stamp Tool", texture: "Rounded", menuName: "Stamp"},
-  //{brush: "Stamp Tool", texture: "Rake", menuName: "Rake S"},
-  // {brush: "Sharp Line Tool", texture: "Regular", menuName: "Sharp L"},
-  // {brush: "Sharp Line Tool", texture: "Rake", menuName: "Rake L"},
-  // {brush: "Round Line Tool", texture: undefined, menuName: "Round L"},
-  // {brush: "Fan Line Tool", texture: undefined, menuName: "Fan"},
-  // {brush: "Triangle Tool", texture: undefined, menuName: "Triangle"},
-  {brush: "Lasso Tool", texture: undefined, menuName: "Lasso"},
-  {brush: "Mirror Tool", texture: undefined, menuName: "Mirror"},
+  {brush: "Brush Tool", texture: "Rake",    menuName: "Rake" },
 ];
-
-// colors
-let canvasColor // = new HSLColor(0.6, 0.1, 0.15); // defined in setup
-let brushColor // = new HSLColor(0.6, 0.6, 0.7); // defined in setup
-let previousColor = undefined;
-
-// current brush settings for drawing
-let brushColorVar = 0.5;
-let brushSize = 200;
-let brushTool = toolPresets[0].brush;
-let texture = toolPresets[0].texture;
-
-// reference of previous brush settings for relative change
-let previousColorVar = undefined;
-let previousSize = undefined;
 
 // control
 let isTouchControl = undefined;
@@ -74,10 +53,8 @@ const hover = {
   lastX: undefined,
   lastY: undefined
 };
-
-// recorded brushstroke
+// state
 let currentInputMode;
-let penRecording = [];
 let editMode = false;
 
 // touch control state
@@ -110,83 +87,354 @@ function preload() {
   fontMedium = loadFont('assets/IBMPlexSans-Medium.ttf');
 }
 
-//unused, WIP
-// each surface is an area of a canvas with a position, render function, optional state, and way to use gestures that started on it.
-// when the state of a canvas changes, ongoing gestures' effects are undone and a new starting point for the gesture is set.
-class Surface {
 
+
+class BrushSettings {
+  /**
+   * Creates an instance of BrushSettings.
+   * @param {HSLColor} color The base color of the brush.
+   * @param {number} size The size of the brush, in the range [0-1].
+   * @param {number} colorVar The color variation strength, in the range [0-1].
+   * @param {string} tool The name of the tool.
+   * @param {string} texture The name of the texture.
+   */
+  constructor(color, size, colorVar, tool, texture) {
+    this.color = color.copy();
+    this.size = size;
+    this.colorVar = colorVar;
+    this.tool = tool;
+    this.texture = texture;
+  }
+
+  copy() {
+    return new BrushSettings(this.color, this.size, this.colorVar, this.tool, this.texture);
+  }
+
+  /**
+   * Get the actual size in pixels from the abstract 0-1 size value. Not linear.
+   */
+  get pxSize() {
+    const pxSize = map(easeInCirc(this.size, 0, 1), 0, 1, 4, 600);
+    return pxSize;
+  }
+
+  getColorWithVar(seed) {
+    return this.color.copy().varyComponents(seed, this.colorVar);
+  }
 }
 
-//unused, WIP
-// Used for UI gestures, such as dragging sliders, and also recordings of brushstrokes.
-class Gesture {
-  // static CURRENT_GESTURES = [];
-  // static LAST_BRUSH_STROKE = undefined;
 
-  constructor(startEvent) {
-    this.surfaceName = determineSurface(startEvent);
-    this.points = [startEvent];
+class BrushStrokePoint {
+  /**
+   * Creates an instance of BrushStrokePoint.
+   * @param {number} x The x coordinate of the point.
+   * @param {number} y The y coordinate of the point.
+   * @param {number|undefined} azimuthAngle The angle of the pen at this point.
+   * @param {number|undefined} force The pen pressure detected at this point.
+   */
+  constructor(x, y, azimuthAngle, force) {
+    this.x = x;
+    this.y = y;
+    this.azimuthAngle = azimuthAngle;
+    this.force = force;
+    this.seed = x * y;
   }
 
-  addPoint(event) {
-    this.points.push(event);
-    // wip, add reaction to the movement here - like drawing, slider move.
-    return this;
-  }
-
-  determineSurface(event) {
-    // get the element name based on the position, for example a specific button
-    // depending on the screen size, some surfaces aren't present.
-    // surfaces transition between states. in edit state, a drag gesture will do something else.
-    // gestures belong to a surface.
+  move(xDelta, yDelta) {
+    if (xDelta === 0 && yDelta === 0) return;
+    this.x += xDelta;
+    this.y += yDelta;
+    // the seed stays the same, doesn't also change with moved position
   }
 }
 
-//unused, WIP
+
+class BrushStroke {
+  /**
+   * Creates an instance of BrushStroke.
+   * Contains an array of points.
+   * @param {p5.graphics} buffer A p5 Graphics buffer.
+   * @param {BrushSettings} settings The settings for the brush. May be modified later. 
+   */
+  constructor(buffer, settings = currentBrush.copy()) {
+    this.buffer = buffer;
+    this.points = [];
+    this.settings = settings;
+  }
+
+  get bounds() {
+    //const margin = (["Triangle Tool", "Lasso Tool", "Mirror Tool"].includes(currentBrush.tool)) ? 0 : currentBrush.pxSize*0.5;
+    const xmin = this.points.reduce((a, b) => Math.min(a, b.x),  Infinity); //- margin;
+    const xmax = this.points.reduce((a, b) => Math.max(a, b.x), -Infinity); //+ margin;
+    const ymin = this.points.reduce((a, b) => Math.min(a, b.y),  Infinity) //- margin;
+    const ymax = this.points.reduce((a, b) => Math.max(a, b.y), -Infinity) //+ margin;
+    return {x: xmin, y:ymin, width: xmax-xmin, height: ymax-ymin};
+  }
+
+  addPoint(point) {
+    this.points.push(new BrushStrokePoint(point.x,  point.y,  point.azimuthAngle, point.force));
+  }
+
+  movePoints(xDelta, yDelta) {
+    if (xDelta === 0 && yDelta === 0) return;
+    this.points.forEach((point) => point.move(xDelta, yDelta));
+  }
+
+  reset() {
+    this.buffer.clear();
+    this.points = [];
+    this.settings = currentBrush.copy();
+  }
+
+  renderWholeStroke() {
+    if(this.points.length < 2) {
+      //console.log("can't draw stroke, too short:", strokeData.length, strokeData)
+      return;
+    }
+    // wip, ignores tool for now
+    this.points.forEach((point, index) => {
+      const lastPoint = this.points[index - 1];
+      if (lastPoint !== undefined) { 
+        this.renderStrokePart(lastPoint, point);
+      }
+    });
+  }
+
+  // WIP, currently ignores tool
+  /**
+   * Render two points of the stroke.
+   * @param {BrushStrokePoint} start The first point of the stroke segment.
+   * @param {BrushStrokePoint} end The second point of the stroke segment.
+   * @returns 
+   */
+  renderStrokePart(start, end) {
+
+    if (start === undefined || end === undefined) {
+      console.log("can't draw this stroke part, point(s) missing!");
+      return;
+    } 
+    if (start.x === end.x && start.y === end.y) return;
+
+    start.azimuthAngle ??= end.azimuthAngle;
+    start.azimuthAngle ??= p5.Vector.angleBetween(createVector(0, -1), createVector(end.x-start.x, end.y-start.y));
+      end.azimuthAngle ??= p5.Vector.angleBetween(createVector(0, -1), createVector(end.x-start.x, end.y-start.y));
+
+      end.force ??= start.force;
+    start.force ??= 0.2;
+      end.force ??= 0.2;
+
+    const avgPressure = (start.force + end.force) / 2;
+
+    this.buffer.noStroke();
+
+    const steps = map(this.settings.pxSize, 10, 300, 10, 200);
+    for (let i = 0; i < steps; i++) {
+
+      const drawStep = (this.settings.texture !== "Rake" || i % 3 == 0 || i == steps-1)
+
+      if (drawStep) {
+        const lowerSide = i/steps - 0.5;
+        const higherSide = (i+1)/steps - 0.5;
+    
+        const rf = (i !== 0 && i !== steps-1) ? 0.1 * this.settings.pxSize * this.settings.colorVar : 0; // randomness matches increasing variation
+
+        const lerpPart = HSLColor.noiseValue(i + (start.x !== undefined ? start.x + start.y : 0));
+        const middleX = lerp(start.x, end.x, lerpPart);
+        const middleY = lerp(start.y, end.y, lerpPart);
+
+        const startEdgeVectorLower  = p5.Vector.fromAngle(start.azimuthAngle, lowerSide*this.settings.pxSize*map(start.force, 0, 0.3, 0.3, 2.0, true));
+        const startEdgeVectorHigher = p5.Vector.fromAngle(start.azimuthAngle, higherSide*this.settings.pxSize*map(start.force, 0, 0.3, 0.3, 2.0, true));
+
+        const endEdgeVectorLower    = p5.Vector.fromAngle(end.azimuthAngle, lowerSide*this.settings.pxSize*map(end.force, 0, 0.3, 0.3, 2.0, true));
+        const endEdgeVectorHigher   = p5.Vector.fromAngle(end.azimuthAngle, higherSide*this.settings.pxSize*map(end.force, 0, 0.3, 0.3, 2.0, true));
+
+        let avgAngle = lerp(start.azimuthAngle, end.azimuthAngle, lerpPart);
+        const midEdgeVectorLower    = p5.Vector.fromAngle(avgAngle, lowerSide*this.settings.pxSize*map(avgPressure, 0, 0.3, 0.3, 2.0, true));
+        const midEdgeVectorHigher   = p5.Vector.fromAngle(avgAngle, higherSide*this.settings.pxSize*map(avgPressure, 0, 0.3, 0.3, 2.0, true));
+
+
+        if (HSLColor.noiseValue(start.seed * i) < start.force * 4) {
+          const brushCol = this.settings.getColorWithVar(i + start.seed);
+          this.buffer.fill(brushCol.hex);
+    
+          this.buffer.beginShape();
+          randomizedVertex(this.buffer, start.x, startEdgeVectorLower.x , start.y, startEdgeVectorLower.y , rf);
+          randomizedVertex(this.buffer, start.x, startEdgeVectorHigher.x, start.y, startEdgeVectorHigher.y, rf);
+          randomizedVertex(this.buffer, middleX, midEdgeVectorHigher.x, middleY, midEdgeVectorHigher.y, rf);
+          randomizedVertex(this.buffer, middleX, midEdgeVectorLower.x, middleY, midEdgeVectorLower.y, rf);
+          this.buffer.endShape();
+        }
+
+        if (HSLColor.noiseValue(end.seed * i) < end.force * 4) {
+          const brushCol2 = this.settings.getColorWithVar(i + end.seed);
+          this.buffer.fill(brushCol2.hex);
+    
+          this.buffer.beginShape();
+          randomizedVertex(this.buffer, middleX, midEdgeVectorLower.x , middleY, midEdgeVectorLower.y , rf);
+          randomizedVertex(this.buffer, middleX, midEdgeVectorHigher.x, middleY, midEdgeVectorHigher.y, rf);
+          randomizedVertex(this.buffer, end.x  , endEdgeVectorHigher.x, end.y  , endEdgeVectorHigher.y, rf);
+          randomizedVertex(this.buffer, end.x  , endEdgeVectorLower.x , end.y  , endEdgeVectorLower.y , rf);
+          this.buffer.endShape();
+        }
+
+      }
+    }
+
+    function randomizedVertex(buffer, x, xOff, y, yOff, randomFactor) {
+      buffer.vertex(
+        x + xOff + HSLColor.noiseValue(x) * randomFactor, 
+        y + yOff + HSLColor.noiseValue(y) * randomFactor
+      );
+    }
+  }
+}
+
+
 class Painting {
+  /**
+   * Creates an instance of Painting.
+   * Will contain a main buffer as a set number of temporary strokes that can be undone or edited, with their own methods.
+   * @param {number} width The initial width in pixels.
+   * @param {number} height The initial height in pixels.
+   * @param {HSLColor} backgroundColor The initial background color.
+   */
   constructor(width, height, backgroundColor) {
     this.width = width;
     this.height = height;
     this.mainBuffer = createGraphics(width, height);
     this.editableStrokesInUse = 0;
-    this.editableStrokes = Array.from({ length: 16 }, () => createGraphics(width, height));
+    this.editableStrokes = Array.from({ length: 16 }, () => new BrushStroke(createGraphics(width, height), currentBrush.copy()));
 
-    this.clearWithColor(backgroundColor);
+    this.clearWithColor(backgroundColor); // WIP, this is currently missing anything for display density
+  }
 
-    // WIP, this is currently missing anything for display density
+  get editableStrokesCount() {
+    return this.editableStrokesInUse;
+  }
+
+  get usedEditableStrokes() {
+    return this.editableStrokes.slice(0, this.editableStrokesInUse);
+  }
+
+  get oldStrokesBuffer() {
+    return this.mainBuffer;
+  }
+
+  get latestStroke() {
+    if (this.editableStrokesInUse === 0) {
+      console.log("no stroke to get!");
+      return;
+    }
+    return this.editableStrokes[this.editableStrokesInUse-1];
+  }
+
+  get brushSettingsToAdjust() {
+    return editMode ? this.latestStroke.settings : currentBrush;
   }
 
   clearWithColor(color) {
     this.mainBuffer.background(color.hex);
-    this.editableStrokes.forEach((buffer) => {
-      buffer.clear();
+    this.editableStrokes.forEach((stroke) => {
+      stroke.reset();
     });
     this.editableStrokesInUse = 0;
   }
 
   applyOldestStroke() {
     // remove oldest, draw image
-    const oldestBuffer = this.editableStrokes.shift();
-    this.mainBuffer.image(oldestBuffer, 0, 0);
+    const oldestStroke = this.editableStrokes.shift();
+    this.mainBuffer.image(oldestStroke.buffer, 0, 0);
+
     // add again to the end after clearing
-    oldestBuffer.clear();
-    this.editableStrokes.push(oldestBuffer);
+    oldestStroke.reset();
+    this.editableStrokes.push(oldestStroke);
     this.editableStrokesInUse -= 1;
   }
 
-  startStroke(brushGesture) {
-    if (this.editableStrokesInUse > this.editableStrokes.length) this.applyOldestStroke();
-    this.editableStrokesInUse += 1;
-    const currentBuffer = this.editableStrokes[this.editableStrokesInUse];
-    // actually draw the stroke
+  applyAllStrokes() {
+    console.log("cleared undo stack, added all strokes to painting.");
+    while(this.editableStrokesInUse > 0) {
+      this.applyOldestStroke();
+    }
   }
 
-  updateStroke(brushGesture) {
-    const currentBuffer = this.editableStrokes[this.editableStrokesInUse];
-    // actually draw the stroke
+  startStroke() {
+    if (this.editableStrokesInUse > this.editableStrokes.length - 1) this.applyOldestStroke();
+    this.editableStrokesInUse += 1;
+    //console.log("started new stroke:", this.editableStrokesInUse);
+    const currentStroke = this.editableStrokes[this.editableStrokesInUse-1];
+    currentStroke.reset();
+  }
+
+  updateStroke(newPoint) {
+    if (this.editableStrokesInUse === 0) {
+      console.log("nothing to update!");
+      return;
+    }
+    this.latestStroke.addPoint(newPoint);
+  }
+
+  popLatestStroke() {
+    if (this.editableStrokesInUse === 0) {
+      console.log("nothing to undo!");
+      return;
+    }
+    this.latestStroke.reset();
+    this.editableStrokesInUse--;
+    console.log(this.editableStrokesInUse, "editable strokes still present.")
+  }
+
+  download() {
+    const timestamp = new Date().toLocaleString().replace(/[-:T.]/g, "-").replace(/, /g, "_");
+    saveCanvas(this.mainBuffer, "drawlab-canvas_" + timestamp, "png");
+  }
+
+  moveLatestStroke(x, y) {
+    if (this.editableStrokesInUse === 0) {
+      console.log("nothing to move!");
+      return;
+    }
+    this.latestStroke.buffer.clear();
+    this.latestStroke.movePoints(x, y);
+    this.latestStroke.renderWholeStroke();
+  }
+
+  redrawLatestStroke() {
+    if (this.editableStrokesInUse === 0) {
+      console.log("nothing to redraw!");
+      return;
+    }
+    this.latestStroke.buffer.clear();
+    this.latestStroke.renderWholeStroke();
+  }
+
+  continueDrawing() {
+    if (this.editableStrokesInUse === 0) {
+      console.log("nowhere to draw in, stroke was never initialized!");
+      return;
+    }
+
+    if(this.latestStroke.points.length < 2) {
+      //console.log("nothing to draw yet, only contains:", this.latestStroke.points.length, this.latestStroke)
+      return;
+    }
+    const start = this.latestStroke.points[0];
+    const newPoint = this.latestStroke.points[this.latestStroke.points.length-1];
+
+    //draw to the stroke buffer immediately
+    if (["Stamp Tool", "Fan Line Tool", "Brush Tool"].includes(this.latestStroke.settings.tool)) {
+    
+      const lastPoint = this.latestStroke.points[this.latestStroke.points.length - 2];
+      this.latestStroke.renderStrokePart(lastPoint, newPoint);
+
+    } else if (!pen.isDown && pen.wasDown) {
+      
+      // drawn when pen lifted
+      this.latestStroke.buffer.clear();
+      this.latestStroke.renderStrokePart(start, newPoint);
+    }
   }
 }
-
 
 // Main color representation in OKHSL. Converted to hex color using the helper file.
 class HSLColor {
@@ -198,11 +446,6 @@ class HSLColor {
     const lerpedL = lerp(color1.l, color2.l, lerpAmount);
     // don't lerp alpha. if needed, could be a separate function.
     return new HSLColor(lerpedH, lerpedS, lerpedL);
-  }
-
-  // WIP, maybe instead store the HSLColor itself and update that
-  static brushWithVar(seed) {
-    return brushColor.copy().varyComponents(seed, brushColorVar);
   }
 
   static fromRGBwithFallback(r, g, b, fallbackColor) {
@@ -295,6 +538,7 @@ class HSLColor {
   varyComponents(seed, strength = 0.5) {
     if (strength === 0) return this;
     seed = Math.abs(seed);
+    //seed += this.h*this.s*this.l*100;
 
     // add noise
     const lNoiseValue = HSLColor.RANDOM_VALUES[Math.floor(seed*300   ) % HSLColor.RANDOM_VALUES.length];
@@ -335,7 +579,12 @@ class HSLColor {
 
 function setup() {
   canvasColor = new HSLColor(0.6, 0.1, 0.15);
-  brushColor = new HSLColor(0.6, 0.6, 0.7);
+
+  currentBrush = new BrushSettings(
+    new HSLColor(0.6, 0.6, 0.7), 
+    0.3, 0.5, 
+    toolPresets[0].brush, toolPresets[0].texture
+  );
 
   cnv = createCanvas(windowWidth - 10, windowHeight - 10);
   newCanvasSize();
@@ -349,22 +598,14 @@ function setup() {
   el.addEventListener("pointercancel", handlePointerChangeEvent);
   el.addEventListener("pointermove", handlePointerMoveEvent);
   noLoop();
-
   
   pen.x = width/2;
   pen.y = height/2;
   gadgetStartX = pen.x;
   gadgetStartY = pen.y;
 
-  // Create a graphics buffer for the painting and one for the last stroke
-  paintingBuffer = createGraphics(paintingState.width(), paintingState.height());
-  newStrokeBuffer = createGraphics(paintingState.width(), paintingState.height());
-  if ((width * displayDensity()) > 3000) {
-    paintingBuffer.pixelDensity(1);
-    newStrokeBuffer.pixelDensity(1);
-  }
+  currentPainting = new Painting(paintingState.width(), paintingState.height(), canvasColor);
 
-  paintingBuffer.background(canvasColor.hex);
   document.body.style.backgroundColor = canvasColor.behind().hex;
 
   // Create a graphics buffer for the indicator
@@ -386,7 +627,6 @@ function windowResized() {
 function newCanvasSize() {
   const scrollBarMargin = (isTouchControl === false) ? 10 : 0;
   resizeCanvas(windowWidth - scrollBarMargin, windowHeight - 0);
-  //paintingBuffer.resizeCanvas(Math.min(width, height)-140, Math.min(width, height)-140);
   gadgetRadius = (width > 300) ? 120 : 60;
   print("Window size now", width, height, "Canvas size", paintingState.width(), paintingState.height());
 }
@@ -494,13 +734,14 @@ function updateInput(event) {
     if (x < menuW && y < menuH && y > 60) {
       const spot = Math.floor(y/60) - 1;
       if (spot >= 0) {
-        brushTool = toolPresets[spot].brush;
-        texture = toolPresets[spot].texture;
+        const modifyBrush = currentPainting.brushSettingsToAdjust;
+        modifyBrush.tool = toolPresets[spot].brush;
+        modifyBrush.texture = toolPresets[spot].texture;
         if (editMode) {
           pen.lastX = undefined;
           pen.lastY = undefined;
           editMode = false;
-          redrawLastStroke(newStrokeBuffer);
+          currentPainting.redrawLatestStroke();
         }
       }
       menuState.startedEventOnMenu = true;
@@ -534,7 +775,6 @@ function updateInput(event) {
   pen.wasDown = pen.isDown;
   pen.started = false;
   //print(event.type + event.changedTouches[0].identifier + " ");
-
 
   // desktop device could have a pen pointer device or mouse, also hover
   if (isTouchControl === false) {
@@ -632,12 +872,10 @@ function updateInput(event) {
   // update state based on the result
 
   if (endEventTypes.includes(event.type)) {
-    // apply the color change
-    // clear reference
+    if (menuState.topSliderDeltaX !== undefined && editMode) editMode = false; // exit edit mode after using the slider
     menuState.topSliderDeltaX = undefined;
     menuState.topSliderStartX = undefined;
     menuState.startedEventOnMenu = false;
-    //clearBrushReference();
   }
 
   // pen down
@@ -648,19 +886,21 @@ function updateInput(event) {
     pen.startPressure = pen.pressure;
     pen.started = true;
     pen.startTimeStamp = event.timeStamp;
-    if (!editMode && inputMode() === "draw") penRecording = [];
+    if (!editMode && inputMode() === "draw") {
+      currentPainting.startStroke();
+    }
     return;
   }
 
   // record
   if (pen.isDown && !editMode && inputMode() === "draw") {
-    penRecording.push({
+    const addedPoint = {
       x: pen.x,
       y: pen.y,
-      angle: pen.angle,
-      pressure: pen.pressure,
-      event: event.type
-    });
+      azimuthAngle: pen.angle,
+      force: pen.pressure
+    }
+    currentPainting.updateStroke(addedPoint);
   }
 
   // pen lifted
@@ -701,7 +941,7 @@ function updateInput(event) {
 
 function keyPressed() {
   if (key === "c") {
-    doAction("clear");
+    //doAction("clear");
   } else if (key === "s") {
     doAction("save");
   } else if (key === "u") {
@@ -716,49 +956,34 @@ function doAction(action) {
 
   if (action === "undo") {
 
-    newStrokeBuffer.clear();
-    penRecording = [];
+    currentPainting.popLatestStroke();
     editMode = false;
 
   } else if (action === "clear") {
 
     const prevCanvasColor = canvasColor.copy();
-    canvasColor = brushColor.copy();
-    brushColor = prevCanvasColor.copy();
+    canvasColor = currentBrush.color.copy();
+    currentBrush.color = prevCanvasColor.copy();
 
-    newStrokeBuffer.clear();
-    penRecording = [];
-    editMode = false;
-
-    paintingBuffer.background(canvasColor.hex);
+    currentPainting.clearWithColor(canvasColor);
     document.body.style.backgroundColor = canvasColor.behind().hex;
 
   } else if (action === "save") {
 
-    const timestamp = new Date().toLocaleString().replace(/[-:T.]/g, "-").replace(/, /g, "_");
-    
-    // commit the new stroke to the painting and clear the buffer
-    addLastStrokeToPainting();
-    
-    saveCanvas(paintingBuffer, "drawlab-canvas_" + timestamp, "png");
+    // commit strokes to the painting
+    currentPainting.applyAllStrokes();
+    currentPainting.download();
 
   } else if (action === "edit") {
 
     editMode = !editMode;
-    if (penRecording[0] === undefined) editMode = false;
+    if (currentPainting.editableStrokesCount === 0) editMode = false;
   }
-}
-
-function addLastStrokeToPainting() {
-  // commit the new stroke to the painting and clear the buffer
-  paintingBuffer.image(newStrokeBuffer, 0, 0);
-  newStrokeBuffer.clear();
 }
 
 function keyReleased() {
   draw();
 }
-
 
 function inputMode() {
   if (menuState.onPage === 1) {
@@ -784,6 +1009,7 @@ function inputMode() {
   return "draw";
 }
 
+
 function draw() {
 
   background(canvasColor.behind().hex);
@@ -791,43 +1017,28 @@ function draw() {
   const wasInMenu = (currentInputMode !== "draw");
   currentInputMode = inputMode();
 
-  if (currentInputMode === "satAndLum" 
-    || currentInputMode === "hue" 
-    || currentInputMode === "size" 
-    || currentInputMode === "eyedropper"
-    || currentInputMode === "cloverMenu") { // menu opened
+  if (currentInputMode !== "draw") { // menu opened
 
     // save the old brush values as a reference when opening a menu
     updateBrushReferenceFromInput();
     // get the new changed brush values
     updateBrushSettingsFromInput(currentInputMode);
 
-    if (editMode) redrawLastStroke(newStrokeBuffer);
-  }
+    if (editMode) currentPainting.redrawLatestStroke();
 
-  if (currentInputMode === "draw") {
+  } else {
     // clear the reference values so they could be changed again when opening a menu
     if (menuState.startedEventOnMenu !== true) clearBrushReference();
 
-    // start of brushstroke
     if (!editMode && !wasInMenu) {
-      if (pen.started) {
+      if (!pen.started && pen.isDown) {
         
-        addLastStrokeToPainting();
+        // draw brushstroke
+        currentPainting.continueDrawing();
+        // WIP
+        // or
+        // currentPainting.redrawLatestStroke();
 
-        // don't draw on initial spot as a WIP pressure fix
-      } else {
-        // draw to the stroke buffer immediately
-        if ((brushTool === "Stamp Tool" || brushTool === "Fan Line Tool") && pen.isDown) {
-          drawInNewStrokeBuffer(newStrokeBuffer, pen.startX, pen.startY, pen.startAngle, pen.startPressure, pen.x, pen.y, pen.angle, pen.pressure, penRecording)
-
-        } else if (brushTool === "Brush Tool") {
-          drawInNewStrokeBuffer(newStrokeBuffer, pen.lastX, pen.lastY, pen.lastAngle, pen.lastPressure, pen.x, pen.y, pen.angle, pen.pressure, penRecording)
-
-        } else if (!pen.isDown && pen.wasDown) {
-          // drawn when pen lifted
-          drawInNewStrokeBuffer(newStrokeBuffer, pen.startX, pen.startY, pen.startAngle, pen.startPressure, pen.x, pen.y, pen.angle, pen.pressure, penRecording)
-        }
       }
     } else if (editMode && pen.isDown) {
       editState.lastX ??= pen.x;
@@ -839,7 +1050,8 @@ function draw() {
       editState.lastX = pen.x;
       editState.lastY = pen.y;
 
-      redrawLastStroke(newStrokeBuffer, deltaX, deltaY);
+      currentPainting.moveLatestStroke(deltaX, deltaY);
+
     } else if (editMode) {
       editState.lastX = undefined;
       editState.lastY = undefined;
@@ -850,22 +1062,22 @@ function draw() {
   redrawInterface(interfaceBuffer, currentInputMode); 
 
   // draw the painting buffer
-  if (paintingBuffer !== undefined) image(paintingBuffer, paintingState.x(), paintingState.y());
+  image(currentPainting.oldStrokesBuffer, paintingState.x(), paintingState.y());
 
-  // draw the last brushstroke buffer
-  if (newStrokeBuffer !== undefined) image(newStrokeBuffer, paintingState.x(), paintingState.y());
-
+  // draw the still editable brushstrokes
+  currentPainting.usedEditableStrokes.forEach((stroke) => {
+    image(stroke.buffer, paintingState.x(), paintingState.y());
+  });
+  
   // draw the indicator buffer in the top left corner
-  if (interfaceBuffer !== undefined) image(interfaceBuffer, 0, 0);
+  image(interfaceBuffer, 0, 0);
 }
 
 function clearBrushReference() {
   gadgetStartX = undefined;
   gadgetStartY = undefined;
 
-  previousColor = undefined;
-  previousSize = undefined;
-  previousColorVar = undefined;
+  previousBrush = undefined;
 
   refHoverX = undefined;
   refHoverY = undefined;
@@ -885,101 +1097,8 @@ function updateBrushReferenceFromInput() {
   refScreenPointerY ??= menuState.screenPointerY;
   refScreenHoverX ??= menuState.screenHoverX;
   refScreenHoverY ??= menuState.screenHoverY;
-  // starting brush settings
-  previousColor ??= brushColor.copy();
-  previousColorVar ??= brushColorVar;
-  previousSize     ??= brushSize;
-}
 
-function redrawLastStroke(buffer, xDiff, yDiff) {
-  if (buffer === undefined) return;
-  if (penRecording[0] === undefined) return;
-  const easedSize = easeInCirc(brushSize, 4, 600);
-
-  // move recording
-  if (xDiff !== undefined && yDiff !== undefined) {
-    penRecording.forEach((point) => {
-      point.x += xDiff;
-      point.y += yDiff;
-    });
-  }
-
-  xDiff ??= 0;
-  yDiff ??= 0;
-
-  const recStartX = penRecording[0].x;
-  const recStartY = penRecording[0].y;
-  const recStartAngle = penRecording[0].angle;
-  const recStartPressure = penRecording[0].pressure;
-
-  // clear brushstroke before reconstructing from recording
-  buffer.clear();
-
-  // use recording
-  if ((brushTool === "Stamp Tool" || brushTool === "Fan Line Tool")) {
-    penRecording.forEach((point) => {
-      drawInNewStrokeBuffer(buffer, recStartX, recStartY, recStartAngle, recStartPressure, point.x, point.y, point.angle, point.pressure, penRecording)
-    });
-  } else if (brushTool === "Brush Tool"){
-    penRecording.forEach((point, index) => {
-      const lastPoint = penRecording[index - 1];
-      if (lastPoint !== undefined) { 
-        drawInNewStrokeBuffer(buffer, lastPoint.x, lastPoint.y, lastPoint.angle, lastPoint.pressure, point.x, point.y, point.angle, point.pressure, penRecording)
-      }
-    });
-  } else {
-    const recEndX = penRecording[penRecording.length-1].x;
-    const recEndY = penRecording[penRecording.length-1].y;
-    const recEndAngle = penRecording[penRecording.length-1].angle;
-    const recEndPressure = penRecording[penRecording.length-1].pressure;
-    drawInNewStrokeBuffer(buffer, recStartX, recStartY, recStartAngle, recStartPressure, recEndX, recEndY, recEndAngle, recEndPressure, penRecording)
-  }
-}
-
-function drawInNewStrokeBuffer(buffer, startX, startY, startAngle, startPressure, endX, endY, endAngle, endPressure, recording) {
-  if (buffer === undefined) return;
-
-  // drawing in the new stroke buffer, which has to be added to canvas later
-  const easedSize = easeInCirc(brushSize, 4, 600);
-
-  if (brushTool === "Stamp Tool") {
-
-    drawBrushstroke(buffer, endX, endY, easedSize, endAngle, endPressure, texture);
-
-  } else if (brushTool === "Fan Line Tool") {
-
-    // one color variation for each line instance
-    buffer.stroke(HSLColor.brushWithVar(endX * endY).hex);
-    drawWithLine(buffer, startX, startY, endX, endY, easedSize);
-
-  } else if (brushTool === "Round Line Tool") {
-
-    // one color variation for each line instance
-    buffer.stroke(HSLColor.brushWithVar(startX * startY).hex);
-    drawWithLine(buffer, startX, startY, endX, endY, easedSize);
-
-  } else if (brushTool === "Sharp Line Tool" || brushTool === "Brush Tool") {
-    const randomID = (recording.length > 0) ? Math.floor(recording[0].x) : 0;
-    drawWithConnection(buffer, startX, startY, startAngle, startPressure, endX, endY, endAngle, endPressure, easedSize, texture, randomID);
-
-  } else if (brushTool === "Triangle Tool") {
-
-    // one color variation for each line instance
-    buffer.fill(HSLColor.brushWithVar(startX * startY).hex);
-    drawWithPolygon(buffer, startX, startY, endX, endY, recording, 3);
-
-  } else if (brushTool === "Lasso Tool") {
-
-    // one color variation for each line instance
-    buffer.fill(HSLColor.brushWithVar(startX * startY).hex);
-    drawwithLasso(buffer, startX, startY, endX, endY, recording, easedSize);
-
-  } else if (brushTool === "Mirror Tool") {
-
-    // one color variation for each line instance
-    buffer.fill(HSLColor.brushWithVar(startX * startY).hex);
-    drawwithMirror(buffer, startX, startY, endX, endY, recording, easedSize);
-  }
+  previousBrush ??= currentBrush.copy();
 }
 
 
@@ -1011,6 +1130,10 @@ function updateBrushSettingsFromInput(currentInputMode) {
   
   if (!pen.isDown) return;
 
+  // which brush settings to take as the reference/starting point and which to write to
+  const brushToAdjust = currentPainting.brushSettingsToAdjust;
+  const brushToReference = previousBrush;
+
   if (currentInputMode === "satAndLum") {
 
     // Get positions
@@ -1021,8 +1144,8 @@ function updateBrushSettingsFromInput(currentInputMode) {
     let rangeY = gadgetRadius * 2;
 
     // Map to chroma and luminance
-    brushColor.setSaturation(map( deltaX + rangeX * previousColor.saturation, 0, rangeX, 0, 1, true));
-    brushColor.setLuminance(map(-deltaY + rangeY * previousColor.luminance, 0, rangeY, 0, 1, true));
+    brushToAdjust.color.setSaturation(map( deltaX + rangeX * brushToReference.color.saturation, 0, rangeX, 0, 1, true));
+    brushToAdjust.color.setLuminance(map(-deltaY + rangeY * brushToReference.color.luminance, 0, rangeY, 0, 1, true));
 
   } else if (currentInputMode === "hue") { // '1', hue and hue variation
 
@@ -1033,26 +1156,26 @@ function updateBrushSettingsFromInput(currentInputMode) {
     let rangeX = gadgetRadius * 2;
     let rangeY = gadgetRadius * 2;
 
-    brushColor.setHue(map(deltaX + rangeX * previousColor.hue, 0, rangeX, 0, 1));
-    brushColorVar = map(-deltaY + rangeY * previousColorVar, 0, rangeY, 0, 1, true);
+    brushToAdjust.color.setHue(map(deltaX + rangeX * brushToReference.color.hue, 0, rangeX, 0, 1));
+    brushToAdjust.colorVar = map(-deltaY + rangeY * brushToReference.colorVar, 0, rangeY, 0, 1, true);
 
   } else if (currentInputMode === "size") {
 
     const deltaY = pen.y - (penMode ? pen.startY : gadgetStartY);
     const rangeY = gadgetRadius * 2;
-
-    brushSize = map(-deltaY + rangeY * map(previousSize, 4, 600, 0, 1), 0, rangeY, 4, 600, true);
+    
+    brushToAdjust.size = map(-deltaY + rangeY * brushToReference.size, 0, rangeY, 0, 1, true);
   
   } else if (currentInputMode === "eyedropper") {
-    paintingBuffer.image(newStrokeBuffer, 0, 0);
-    newStrokeBuffer.clear();
+    currentPainting.applyAllStrokes();
+    const buffer = currentPainting.oldStrokesBuffer;
 
     // go through a few pixels
     const addRadiusPx = 2;
     const colorsArr = [];
     for (x = -addRadiusPx; x <= addRadiusPx; x++) {
       for (y = -addRadiusPx; y <= addRadiusPx; y++) {
-        const rgbaColor = paintingBuffer.get(pen.x + x, pen.y + y);
+        const rgbaColor = buffer.get(pen.x + x, pen.y + y);
         if (rgbaColor[3] !==0) colorsArr.push(rgbaColor);
       }
     }
@@ -1066,348 +1189,28 @@ function updateBrushSettingsFromInput(currentInputMode) {
     }
 
     // set new color
-    brushColor = HSLColor.fromRGBwithFallback(
+    brushToAdjust.color = HSLColor.fromRGBwithFallback(
       accumulatingRGB[0] / colorsArr.length, 
       accumulatingRGB[1] / colorsArr.length, 
       accumulatingRGB[2] / colorsArr.length, 
-      brushColor
-    );
-  }
-}
-
-function drawBrushstroke(buffer, x, y, size, angle, pressure, texture) {
-  buffer.noStroke();
-
-  // draw bigger version behind to give some extra detail
-  if (texture === "Rounded") {
-    const rainbow = brushColor.copy().setLuminance(brushColor.luminance*0.98).varyComponents(x * y, brushColorVar);
-    buffer.fill(rainbow.hex);
-    drawStamp(buffer, x, y, size*1.05, angle, pressure, texture);
-  }
-  
-  // one color variation for each stamp instance
-  buffer.fill(HSLColor.brushWithVar(x + y).hex);
-  drawStamp(buffer, x, y, size, angle, pressure, texture);
-}
-
-function drawStamp(buffer, x, y, size, angle, pressure, texture) {
-
-  if (x === undefined || y === undefined) return;
-
-  buffer.push();
-  buffer.translate(x, y);
-  buffer.rotate(-HALF_PI);
-
-  let stampW = size;
-  let stampH = size;
-
-  // brush shape
-  if (angle !== undefined) {
-    buffer.rotate(angle);
-  } else {
-    buffer.rotate(HALF_PI);
-  }
-
-  if (texture === "Rounded") {
-
-    if (angle !== undefined) {
-      stampW = (pressure !== undefined) ? size * map(pressure, 0.0, 0.2, 0.1, 0.9, true) : size * 0.1;
-    }
-    buffer.rect(- stampW/2, - stampH/2, stampW, stampH, size / 4);
-
-  } else if (texture === "Rake") {
-
-    // if the brush size is small relative to the painting size, use less circles, if it's big use more
-    const circleCount = Math.floor(map(size, 4, 300, 2, 12));
-    const gapSize = (pressure !== undefined) ? map(pressure, 0.0, 0.2, 3.0, 0.0, true) : 1.0;
-
-    // calculate the actual sizes
-    const circleSize = stampH / ((circleCount-1)*gapSize + circleCount);
-    buffer.translate(0, -stampH*0.5 + circleSize/2);
-    for (let i = 0; i < circleCount; i++) {
-      const rakeY = i*(circleSize*(1+gapSize));
-      // modify color too
-      const brushCol = HSLColor.brushWithVar(i + Math.round((angle !== undefined) ? angle*6 : 0));
-      buffer.fill(brushCol.hex);
-
-      buffer.ellipse(0, rakeY, circleSize);
-    }
-  }
-  
-
-  buffer.pop();
-}
-
-function drawWithLine(buffer, xa, ya, xb, yb, size) {
-  if (xa === undefined || ya === undefined || xb === undefined || yb === undefined) return;
-
-  // draw the line rect
-  buffer.strokeWeight(size);
-  buffer.line(xa, ya, xb, yb);
-
-  buffer.strokeWeight(6);
-  buffer.noStroke();
-}
-
-
-function drawWithConnection(buffer, startX, startY, startAngle, startPressure, endX, endY, endAngle, endPressure, size, texture, randomID) {
-  if (startX === undefined || startY === undefined || endX === undefined || endY === undefined) return;
-  if (startX === endX && startY === endY) return;
-
-  startAngle ??= endAngle;
-  startAngle ??= p5.Vector.angleBetween(createVector(0, -1), createVector(endX-startX, endY-startY));
-    endAngle ??= p5.Vector.angleBetween(createVector(0, -1), createVector(endX-startX, endY-startY));
-
-    endPressure ??= startPressure;
-  startPressure ??= 0.2;
-    endPressure ??= 0.2;
-
-  const avgPressure = (startPressure + endPressure) / 2;
-
-
-  buffer.noStroke();
-
-  const steps = map(size, 10, 300, 10, 200);
-  for (let i = 0; i < steps; i++) {
-
-    const drawStep = (texture !== "Rake" || i % 3 == 0 || i == steps-1)
-
-    if (drawStep) {
-      const lowerSide = i/steps - 0.5;
-      const higherSide = (i+1)/steps - 0.5;
-  
-      const rf = (i !== 0 && i !== steps-1) ? 0.1 * size * brushColorVar : 0; // randomness matches increasing variation
-
-      const lerpPart = HSLColor.noiseValue(i + (startX !== undefined ? startX + startY : 0));
-      const middleX = lerp(startX, endX, lerpPart);
-      const middleY = lerp(startY, endY, lerpPart);
-
-      startEdgeVectorLower  = p5.Vector.fromAngle(startAngle, lowerSide*size*map(startPressure, 0, 0.3, 0.3, 2.0, true));
-      startEdgeVectorHigher = p5.Vector.fromAngle(startAngle, higherSide*size*map(startPressure, 0, 0.3, 0.3, 2.0, true));
-
-      endEdgeVectorLower    = p5.Vector.fromAngle(endAngle, lowerSide*size*map(endPressure, 0, 0.3, 0.3, 2.0, true));
-      endEdgeVectorHigher   = p5.Vector.fromAngle(endAngle, higherSide*size*map(endPressure, 0, 0.3, 0.3, 2.0, true));
-
-      let avgAngle = lerp(startAngle, endAngle, lerpPart);
-      midEdgeVectorLower    = p5.Vector.fromAngle(avgAngle, lowerSide*size*map(avgPressure, 0, 0.3, 0.3, 2.0, true));
-      midEdgeVectorHigher   = p5.Vector.fromAngle(avgAngle, higherSide*size*map(avgPressure, 0, 0.3, 0.3, 2.0, true));
-
-
-      if (HSLColor.noiseValue(startX * startY * i) < startPressure * 4) {
-        const brushCol = HSLColor.brushWithVar(i + randomID + Math.abs(startX * startY));
-        buffer.fill(brushCol.hex);
-  
-        buffer.beginShape();
-        randomizedVertex(buffer, startX, startEdgeVectorLower.x , startY, startEdgeVectorLower.y , rf);
-        randomizedVertex(buffer, startX, startEdgeVectorHigher.x, startY, startEdgeVectorHigher.y, rf);
-        randomizedVertex(buffer, middleX, midEdgeVectorHigher.x, middleY, midEdgeVectorHigher.y, rf);
-        randomizedVertex(buffer, middleX, midEdgeVectorLower.x, middleY, midEdgeVectorLower.y, rf);
-        buffer.endShape();
-      }
-
-      if (HSLColor.noiseValue(endX * endY * i) < endPressure * 4) {
-        const brushCol2 = HSLColor.brushWithVar(i + randomID + Math.abs(endX * endY) );
-        buffer.fill(brushCol2.hex);
-  
-        buffer.beginShape();
-        randomizedVertex(buffer, middleX,midEdgeVectorLower.x, middleY, midEdgeVectorLower.y, rf);
-        randomizedVertex(buffer, middleX,midEdgeVectorHigher.x, middleY, midEdgeVectorHigher.y, rf);
-        randomizedVertex(buffer, endX  , endEdgeVectorHigher.x  , endY  , endEdgeVectorHigher.y  , rf);
-        randomizedVertex(buffer, endX  , endEdgeVectorLower.x   , endY  , endEdgeVectorLower.y   , rf);
-        buffer.endShape();
-      }
-
-    }
-  }
-
-  function randomizedVertex(buffer, x, xOff, y, yOff, randomFactor) {
-    buffer.vertex(
-      x + xOff + HSLColor.noiseValue(x) * randomFactor, 
-      y + yOff + HSLColor.noiseValue(y) * randomFactor
+      brushToAdjust.color
     );
   }
 }
 
 
-function drawWithPlaceholder(buffer, xa, ya, xb, yb, size) {
-  if (xa === undefined || ya === undefined || xb === undefined || yb === undefined) return;
+// function drawWithPlaceholder(buffer, xa, ya, xb, yb, size) {
+//   if (xa === undefined || ya === undefined || xb === undefined || yb === undefined) return;
 
-  // draw the line rect
-  buffer.strokeWeight(size);
-  buffer.strokeCap(SQUARE);
-  buffer.line(xa, ya, xb, yb);
+//   // draw the line rect
+//   buffer.strokeWeight(size);
+//   buffer.strokeCap(SQUARE);
+//   buffer.line(xa, ya, xb, yb);
 
-  buffer.strokeCap(ROUND);
-  buffer.strokeWeight(6);
-  buffer.noStroke();
-}
-
-
-function drawWithPolygon(buffer, xa, ya, xb, yb, penRecording, sidesCount) {
-  if (xa === undefined || ya === undefined || xb === undefined || yb === undefined) return;
-
-  buffer.noStroke();
-
-  buffer.push();
-  buffer.translate(xa, ya);
-
-  if (penRecording !== undefined && penRecording.length >= sidesCount) {
-
-    const foundPoints = [{x: xa, y:ya, index:0}, {x: xb, y: yb, index: penRecording.length-1}];
-    
-    for (let foundNum = foundPoints.length-1; foundNum < sidesCount; foundNum++) {
-
-      let highestDist = 0;
-      let furthestX = undefined;
-      let furthestY = undefined;
-      let furthestIndex = undefined;
-
-      penRecording.forEach((point, index) => { 
-        if (index > 0 && index < penRecording.length-1) {
-  
-          const totalDist = foundPoints.reduce((sum, foundpoint) => {
-            return sum + dist(foundpoint.x, foundpoint.y, point.x, point.y);
-          }, 0);
-          //print(totalDist, sidesCount, foundNum);
-          if (totalDist > highestDist) {
-            highestDist = totalDist;
-            furthestX = point.x;
-            furthestY = point.y;
-            furthestIndex = index;
-          }
-        }
-      });
-
-      foundPoints.push({x: furthestX, y: furthestY, index: furthestIndex});
-    }
-
-    foundPoints.sort((a, b) => a.index - b.index);
-    print(foundPoints.reduce((text, point) => {return text + ", " + point.index}, ""))
-    
-    buffer.beginShape();
-    buffer.vertex(0,0);
-    for(let drawNum = 2; drawNum < foundPoints.length; drawNum++) {
-      buffer.vertex(foundPoints[drawNum].x-xa, foundPoints[drawNum].y-ya);
-    }
-    
-    buffer.vertex(xb-xa, yb-ya);
-    buffer.endShape();
-
-  } else {
-    
-    // not enough points, just assume triangle as fallback
-    buffer.beginShape();
-    buffer.vertex(0,0);
-    buffer.vertex((xb-xa)*0.5, (xb-xa)*0.3);
-    buffer.vertex(xb-xa, yb-ya);
-    buffer.endShape();
-  }
-
-  buffer.pop();
-}
-
-function simplifyPath(points, epsilon) {
-  let dmax = 0;
-  let index = 0;
-
-  for (let i = 1; i < points.length - 1; i++) {
-    const d = dist(points[i].x, points[i].y, points[0].x, points[0].y);
-
-    if (d > dmax) {
-      index = i;
-      dmax = d;
-    }
-  }
-
-  if (dmax > epsilon) {
-    const recResults1 = simplifyPath(points.slice(0, index + 1), epsilon);
-    const recResults2 = simplifyPath(points.slice(index), epsilon);
-    return recResults1.slice(0, recResults1.length - 1).concat(recResults2);
-  } else {
-    return [points[0], points[points.length - 1]];
-  }
-}
-
-function drawSimplifiedLasso(buffer, xa, ya, xb, yb, penRecording, size) {
-  buffer.noStroke();
-
-  if (penRecording.length <= 2) return;
-  const simplifiedPath = simplifyPath(penRecording, 20.0);
-  print(penRecording.length, simplifiedPath.length)
-
-  // buffer.push();
-  // buffer.translate(xa, ya);
-  if (simplifiedPath !== undefined && simplifiedPath.length > 2) {
-    buffer.beginShape();
-    buffer.curveVertex(xa, ya);
-    simplifiedPath.forEach((point) => { 
-      buffer.curveVertex(point.x, point.y);
-    });
-    buffer.curveVertex(xb, yb);
-    buffer.endShape();
-  }
-
-  // buffer.pop();
-}
-
-function drawwithMirror(buffer, xa, ya, xb, yb, penRecording, size) {
-  if (xa === undefined || ya === undefined || xb === undefined || yb === undefined) return;
-  buffer.noStroke();
-
-  if (penRecording !== undefined && penRecording.length > 2) {
-
-    const slices = [{x: 0, y: 0}]
-
-    penRecording.forEach((point, index) => { 
-      if (index > 0) {
-        // point after start
-        const length = dist(xa, ya, point.x, point.y);
-        const angle = p5.Vector.angleBetween(createVector(xb-xa, yb-ya), createVector(point.x-xa, point.y-ya))
-        const height = length * sin(angle);
-        const baseLength = Math.sqrt( length ** 2 - height ** 2) * ((angle < -HALF_PI) ? -1 : 1);
-        slices.push({x: baseLength, y: height});
-      }
-    });
-
-    buffer.push();
-    buffer.translate(xa, ya);
-    buffer.rotate(p5.Vector.angleBetween(createVector(1, 0), createVector(xb-xa, yb-ya)));
-
-    buffer.beginShape();
-    buffer.vertex(0, 0);
-    slices.forEach((slice) => {
-      buffer.vertex(slice.x, slice.y);
-    });
-    buffer.endShape();
-
-    buffer.beginShape();
-    buffer.vertex(0, 0);
-    slices.forEach((slice) => {
-      buffer.vertex(slice.x, -slice.y);
-    });
-    buffer.endShape();
-
-    buffer.pop();
-  }
-}
-
-function drawwithLasso(buffer, xa, ya, xb, yb, penRecording, size) {
-  if (xa === undefined || ya === undefined || xb === undefined || yb === undefined) return;
-  buffer.noStroke();
-
-  if (penRecording !== undefined && penRecording.length > 2) {
-    buffer.beginShape();
-    buffer.vertex(xa, ya);
-    penRecording.forEach((point, index) => { 
-      if (index > 0 && index < penRecording.length-1) {
-        // point in between start and end
-        buffer.vertex(point.x, point.y);
-      }
-    });
-    buffer.vertex(xb, yb);
-    buffer.endShape();
-  }
-}
+//   buffer.strokeCap(ROUND);
+//   buffer.strokeWeight(6);
+//   buffer.noStroke();
+// }
 
 
 
@@ -1425,48 +1228,18 @@ function redrawInterface(buffer, activeInputGadget) {
   uiColors.fgDisabled = uiColors.fg.copy().setAlpha(0.2);
   uiColors.constrastBg = uiColors.fg.copy()
     .setLuminance(lerp(canvasColor.luminance, canvasColor.luminance > 0.5 ? 1 : 0, 0.7)); 
-  uiColors.onBrush = brushColor.copy()
-    .setLuminance(lerp(brushColor.luminance, (brushColor.luminance>0.5) ? 0:1, 0.7))
-    .setSaturation(brushColor.saturation * 0.5);
-  
-  // correct brush size, calculated with easing function from the raw value
-  const brushSizeWithEasing = easeInCirc(brushSize, 4, 600);
+  uiColors.onBrush = currentBrush.color.copy()
+    .setLuminance(lerp(currentBrush.color.luminance, (currentBrush.color.luminance>0.5) ? 0:1, 0.7))
+    .setSaturation(currentBrush.color.saturation * 0.5);
 
   // Background borders
   buffer.fill(uiColors.bg.hex);
   buffer.rect(0, 0, width, 60);
-
-  // Unfinished brushstroke preview
-  if (pen.isDown && (activeInputGadget === "draw") && !editMode) {
-
-    // change from canvas to screen space
-    buffer.push();
-    buffer.translate(paintingState.x(), paintingState.y());
-
-    if (brushTool === "Round Line Tool") {
-      buffer.stroke(HSLColor.brushWithVar(pen.startX * pen.startY).hex);
-      drawWithLine(buffer, pen.startX, pen.startY, pen.x, pen.y, brushSizeWithEasing);
-    } else if (brushTool === "Sharp Line Tool") { 
-      drawWithConnection(buffer, pen.startX, pen.startY, pen.startAngle, pen.startPressure, pen.x, pen.y, pen.angle, pen.pressure, brushSizeWithEasing, texture);
-    } else if (brushTool === "Triangle Tool") {
-      buffer.fill(HSLColor.brushWithVar(pen.startX * pen.startY).hex);
-      drawWithPolygon(buffer, pen.startX, pen.startY, pen.x, pen.y, penRecording, 3);
-    } else if (brushTool === "Lasso Tool") {
-      buffer.fill(HSLColor.brushWithVar(pen.startX * pen.startY).hex);
-      drawwithLasso(buffer, pen.startX, pen.startY, pen.x, pen.y, penRecording, brushSizeWithEasing);
-    } else if (brushTool === "Mirror Tool") {
-      buffer.fill(HSLColor.brushWithVar(pen.startX * pen.startY).hex);
-      drawwithMirror(buffer, pen.startX, pen.startY, pen.x, pen.y, penRecording, brushSizeWithEasing);
-    }
-
-    buffer.pop();
-  }
   
   // MENUS
   // Corner brush preview
-  const cornerPreviewBrushSize = constrain(brushSizeWithEasing, 8, gadgetRadius/3);
   buffer.noStroke();
-  displayTool(brushTool, texture, 0, 0)
+  displayTool(currentBrush.tool, currentBrush.texture, 0, 0)
 
   if (inputMode() === "cloverMenu") {
     toolPresets.forEach((tool, index) => {
@@ -1481,31 +1254,24 @@ function redrawInterface(buffer, activeInputGadget) {
 
     if (spotY !== 0) {
       // draw example
-      if (menuBrushTool === "Stamp Tool") {
-        for (let x = 0; x <= 40; x += 5) {
-          drawBrushstroke(buffer, x, 0, cornerPreviewBrushSize, pen.angle, pen.pressure, menuTexture);
-        }
-      } else if (menuBrushTool === "Round Line Tool" || menuBrushTool === "Fan Line Tool") {
-        buffer.stroke(brushColor.hex);
-        drawWithLine(buffer, 0, 0, 40, 0, cornerPreviewBrushSize);
-      } else if (menuBrushTool === "Sharp Line Tool" || menuBrushTool === "Brush Tool") {
-        drawWithConnection(buffer, -20, 0, pen.startAngle, pen.startPressure, 60, 0, pen.angle, pen.pressure, cornerPreviewBrushSize, menuTexture, 0);
-      } else {
-        buffer.stroke(brushColor.hex);
-        drawWithPlaceholder(buffer, 0, 0, 40, 0, cornerPreviewBrushSize);
-      }
+      // wip, ignore tool
+      const start = new BrushStrokePoint(-20, 0, pen.startAngle, pen.startPressure);
+      const end = new BrushStrokePoint(60, 0, pen.angle, pen.pressure);
+      const settings = currentBrush.copy();
+      settings.size = constrain(settings.size, 0.1, 0.3);
+      settings.tool = menuBrushTool;
+      settings.texture = menuTexture;
+      
+      new BrushStroke(buffer, settings).renderStrokePart(start, end);
     }
 
     buffer.pop();
 
     if (spotY > 0) {
       buffer.textAlign(CENTER);
-      buffer.stroke(brushColor.hex);
+      buffer.stroke(currentBrush.color.hex);
       buffer.strokeWeight(3);
       buffer.fill(uiColors.onBrush.hex);
-      if (brushTool === menuBrushTool && texture === menuTexture) {
-        
-      }
       buffer.text(menuName, 0, 0 + 60*spotY, 80, 60 - 6);
       buffer.textFont(fontMedium);
       buffer.noStroke();
@@ -1528,8 +1294,9 @@ function redrawInterface(buffer, activeInputGadget) {
 
   const topButtonWidth = 80;
 
-  topButton("undo" , topButtonWidth*0,             penRecording.length === 0 ? uiColors.fgDisabled : uiColors.fg);
-  topButton("edit" , topButtonWidth*1, editMode || penRecording.length === 0 ? uiColors.fgDisabled : uiColors.fg);
+  const noEditableStrokes = (currentPainting.editableStrokesCount === 0);
+  topButton("undo" , topButtonWidth*0,             noEditableStrokes ? uiColors.fgDisabled : uiColors.fg);
+  topButton("edit" , topButtonWidth*1, editMode || noEditableStrokes ? uiColors.fgDisabled : uiColors.fg);
   topButton("clear", width-topButtonWidth*2, uiColors.fg.copy().setHue(0.1).setSaturation(0.8));
   topButton("save" , width-topButtonWidth*1, uiColors.fg);
   
@@ -1543,17 +1310,17 @@ function redrawInterface(buffer, activeInputGadget) {
   const sliderStart = width/2 - 300;
 
   if (drawSliders) {
-    let baseColor = brushColor;
+    let baseColor = currentPainting.brushSettingsToAdjust.color;
     drawGradientSlider(sliderStart, 0, 200, 60,     baseColor.copy().setLuminance(0), baseColor.copy().setLuminance(1), baseColor.luminance);
     drawGradientSlider(sliderStart+200, 0, 200, 60, baseColor.copy().setSaturation(0), baseColor.copy().setSaturation(1), baseColor.saturation);
     drawGradientSlider(sliderStart+400, 0, 200, 60, baseColor.copy().setHue(0), baseColor.copy().setHue(1), baseColor.hue);
-    if (previousColor !== undefined) {
-      baseColor = previousColor;
+    if (previousBrush !== undefined) {
+      baseColor = previousBrush.color;
       drawGradientSlider(sliderStart, 0, 200, 10,     baseColor.copy().setLuminance(0), baseColor.copy().setLuminance(1), baseColor.luminance);
       drawGradientSlider(sliderStart+200, 0, 200, 10, baseColor.copy().setSaturation(0), baseColor.copy().setSaturation(1), baseColor.saturation);
       drawGradientSlider(sliderStart+400, 0, 200, 10, baseColor.copy().setHue(0), baseColor.copy().setHue(1), baseColor.hue);
     }
-    drawRoundColorExampleWithVariation(55, sliderStart - 30, 30);
+    drawRoundColorExampleWithVariation(currentBrush, 55, sliderStart - 30, 30);
   }
 
 
@@ -1568,34 +1335,38 @@ function redrawInterface(buffer, activeInputGadget) {
     let sectionValue = undefined;
     let sectionValueText = "";
 
+    const brushToAdjust = currentPainting.brushSettingsToAdjust;
+
     if (xFromLeftEdgeOfSliders < 60) {
       section = "var";
-      sectionValue = constrain(previousColorVar + menuState.topSliderDeltaX * 0.002, 0, 1);
-      if (!isNaN(sectionValue)) brushColorVar = sectionValue;
-      sectionValueText = Math.floor(brushColorVar * 100) + "%";
+      sectionValue = constrain(previousBrush.colorVar + menuState.topSliderDeltaX * 0.002, 0, 1);
+      if (!isNaN(sectionValue)) brushToAdjust.colorVar = sectionValue;
+      sectionValueText = Math.floor(brushToAdjust.colorVar * 100) + "%";
     } else if (xFromLeftEdgeOfSliders < 260) {
       section = "luminance";
       sectionValue = map(xFromLeftWithDelta, 60, 260, 0, 1.0, true);
-      brushColor.setLuminance(sectionValue);
-      sectionValueText = Math.floor(brushColor.luminance * 100) + "%";
+      brushToAdjust.color.setLuminance(sectionValue);
+      sectionValueText = Math.floor(brushToAdjust.color.luminance * 100) + "%";
     } else if (xFromLeftEdgeOfSliders < 460) {
       section = "saturation";
       sectionValue = map(xFromLeftWithDelta, 260, 460, 0, 1.0, true);
-      brushColor.setSaturation(sectionValue);
-      sectionValueText = Math.floor(brushColor.saturation * 100) + "%";
+      brushToAdjust.color.setSaturation(sectionValue);
+      sectionValueText = Math.floor(brushToAdjust.color.saturation * 100) + "%";
     } else if (xFromLeftEdgeOfSliders < 660) {
       section = "hue";
       sectionValue = map(xFromLeftWithDelta, 460, 660, 0, 1.0);
       if (sectionValue > 1) sectionValue %= 1;
       if (sectionValue < 0) sectionValue = 1-(Math.abs(sectionValue) % 1);
-      brushColor.setHue(sectionValue);
-      sectionValueText = Math.floor(brushColor.hue*360);
+      brushToAdjust.color.setHue(sectionValue);
+      sectionValueText = Math.floor(brushToAdjust.color.hue*360);
     } else {
       section = "size";
-      sectionValue = constrain(previousSize + menuState.topSliderDeltaX * 0.5, 4, 600);
-      if (!isNaN(sectionValue)) brushSize = sectionValue;
-      sectionValueText = Math.round(brushSizeWithEasing);
+      sectionValue = constrain(previousBrush.size + menuState.topSliderDeltaX * 0.002, 0, 1);
+      if (!isNaN(sectionValue)) brushToAdjust.size = sectionValue;
+      sectionValueText = Math.round(brushToAdjust.pxSize);
     }
+
+    if (editMode) currentPainting.redrawLatestStroke();
 
     buffer.textAlign(CENTER);
     const textContent = section + ": " + sectionValueText;
@@ -1612,7 +1383,7 @@ function redrawInterface(buffer, activeInputGadget) {
 
   buffer.textAlign(LEFT);
   buffer.fill(uiColors.fg.hex);
-  const controlsInfo = (isTouchControl !== false) ? "pen required!" : "shortcut list: 1, 2, 3, 4, u, e, c, s";
+  const controlsInfo = (isTouchControl !== false) ? "pen required!" : "SHORTCUTS: 1-[Value] 2-[Hue] 3-[Size] 4-[Eyedrop] U-[Undo] E-[Edit] S-[Save]";
   buffer.text(controlsInfo, 20, height - 20 - 12);
 
   // draw the size indicator
@@ -1622,11 +1393,8 @@ function redrawInterface(buffer, activeInputGadget) {
     buffer.rect(sliderStart + 600, 0, 60, 60, 20, 20, 20, 20);
     buffer.drawingContext.clip();
 
-    buffer.fill(uiColors.fg.toHexWithSetAlpha(0.4));
-    buffer.ellipse(sliderStart + 630, 30, brushSizeWithEasing, brushSizeWithEasing)
-    buffer.fill(uiColors.constrastBg.toHexWithSetAlpha(0.3));
-    buffer.ellipse(sliderStart + 630, 30, brushSizeWithEasing*0.66, brushSizeWithEasing*0.66)
-    buffer.ellipse(sliderStart + 630, 30, brushSizeWithEasing*0.33, brushSizeWithEasing*0.33)
+    drawSizeIndicator(buffer, currentBrush.pxSize, sliderStart + 630, 30);
+
     buffer.drawingContext.restore();
     buffer.noStroke();
   }
@@ -1635,35 +1403,33 @@ function redrawInterface(buffer, activeInputGadget) {
   buffer.textSize((width < height) ? 13 : 16);
 
   // draw rectangle around stroke being edited
-  if (editMode && penRecording.length > 0) {
-    // change from canvas to screen space
-    buffer.push();
-    buffer.translate(paintingState.x(), paintingState.y());
+  if (editMode) {
+    const bounds = currentPainting.latestStroke.bounds;
+    if (bounds.width > 0 && bounds.height > 0) {
+      const topLeft = {x: bounds.x, y: bounds.y};
+      const botRight = {x: bounds.x + bounds.width, y: bounds.y + bounds.height};
 
-    const margin = (["Triangle Tool", "Lasso Tool", "Mirror Tool"].includes(brushTool)) ? 0 : brushSizeWithEasing*0.5;
-    const xmin = penRecording.reduce((a, b) => Math.min(a, b.x),  Infinity) - margin;
-    const xmax = penRecording.reduce((a, b) => Math.max(a, b.x), -Infinity) + margin;
-    const ymin = penRecording.reduce((a, b) => Math.min(a, b.y),  Infinity) - margin;
-    const ymax = penRecording.reduce((a, b) => Math.max(a, b.y), -Infinity) + margin;
+      buffer.push();
+      buffer.translate(paintingState.x(), paintingState.y());
+
+      buffer.stroke(uiColors.constrastBg.hex);
+      buffer.strokeWeight(3);
+      buffer.line(topLeft.x, topLeft.y, botRight.x, topLeft.y);
+      buffer.line(topLeft.x, topLeft.y, topLeft.x, botRight.y);
+      buffer.line(topLeft.x, botRight.y, botRight.x, botRight.y);
+      buffer.line(botRight.x, topLeft.y, botRight.x, botRight.y);
+      buffer.stroke(uiColors.fg.hex);
+      buffer.strokeWeight(1);
+      buffer.line(topLeft.x, topLeft.y, botRight.x, topLeft.y);
+      buffer.line(topLeft.x, topLeft.y, topLeft.x, botRight.y);
+      buffer.line(topLeft.x, botRight.y, botRight.x, botRight.y);
+      buffer.line(botRight.x, topLeft.y, botRight.x, botRight.y);
+      buffer.strokeWeight(6);
+      buffer.noStroke();
   
-    buffer.stroke(uiColors.constrastBg.hex);
-    buffer.strokeWeight(3);
-    buffer.line(xmin, ymin, xmax, ymin);
-    buffer.line(xmin, ymin, xmin, ymax);
-    buffer.line(xmin, ymax, xmax, ymax);
-    buffer.line(xmax, ymin, xmax, ymax);
-    buffer.stroke(uiColors.fg.hex);
-    buffer.strokeWeight(1);
-    buffer.line(xmin, ymin, xmax, ymin);
-    buffer.line(xmin, ymin, xmin, ymax);
-    buffer.line(xmin, ymax, xmax, ymax);
-    buffer.line(xmax, ymin, xmax, ymax);
-    buffer.strokeWeight(6);
-    buffer.noStroke();
-
-    buffer.pop();
+      buffer.pop();
+    }
   }
-
 
   // depending on input mode, draw the right gadget
   drawActiveGadget();
@@ -1672,38 +1438,36 @@ function redrawInterface(buffer, activeInputGadget) {
   if ((activeInputGadget === "draw") && (isTouchControl === false) && !pen.isDown && !editMode && !pointerDown
     && hover.x > 0 && hover.x < paintingState.width() && hover.y > 0 && hover.y < paintingState.height()
   ) {
+    drawHoverBrushStroke(buffer);
+  }
+
+  // end of redrawInterface
+
+  function drawHoverBrushStroke(buffer) {
+    if (hover.lastX === undefined || hover.lastY === undefined) return;
 
     // change from canvas to screen space
     buffer.push();
     buffer.translate(paintingState.x(), paintingState.y());
 
     // draw hover stamp at the pen position
-    if (brushTool === "Stamp Tool") {
-      drawBrushstroke(buffer, hover.x, hover.y, brushSizeWithEasing, hover.angle, undefined, texture);
-    } else if (brushTool === "Round Line Tool" || brushTool === "Fan Line Tool") {
-      drawCrosshair(brushSizeWithEasing, hover.x, hover.y);
-      buffer.stroke(HSLColor.brushWithVar(hover.x * hover.y).hex);
-      drawWithLine(buffer, hover.x, hover.y, hover.x, hover.y, brushSizeWithEasing)
-    } else if (brushTool === "Sharp Line Tool" || brushTool === "Brush Tool") {
-      if (hover.lastX !== undefined && hover.lastY !== undefined) {
-        drawWithConnection(buffer, hover.lastX, hover.lastY, hover.angle, undefined, hover.x, hover.y, hover.angle, undefined, brushSizeWithEasing, texture, 0);
-      }
-    }
+
+    const start = new BrushStrokePoint(hover.lastX, hover.lastY, hover.angle);
+    const end = new BrushStrokePoint(hover.x, hover.y, hover.angle);
+
+    new BrushStroke(buffer, currentBrush.copy()).renderStrokePart(start, end);
+    
     buffer.pop();
   }
-
-
-  // end of redrawInterface
 
   function drawActiveGadget() {
 
     if (activeInputGadget === "eyedropper") {
-      buffer.fill(brushColor.hex);
-      const easedSize = easeInCirc(brushSize, 4, 600);
+      buffer.fill(currentBrush.color.hex);
       const screenX = (!pen.isDown) ? menuState.screenHoverX : menuState.screenPointerX;
       const screenY = (!pen.isDown) ? menuState.screenHoverY : menuState.screenPointerY;
-      if (pen.isDown) drawStamp(buffer, screenX, screenY, easedSize, pen.angle, pen.pressure, texture);
-      drawCrosshair(easedSize, screenX, screenY);
+      if (pen.isDown) drawRoundColorExampleWithVariation(currentBrush, currentBrush.pxSize, screenX, screenY);
+      drawCrosshair(currentBrush.pxSize, screenX, screenY);
     }
 
     // draw the brush setting gadgets
@@ -1712,8 +1476,10 @@ function redrawInterface(buffer, activeInputGadget) {
 
     if (useBaseX === undefined || useBaseY === undefined) return;
 
+    const brushToVisualize = currentPainting.brushSettingsToAdjust;
+
     buffer.noStroke();
-    buffer.fill(brushColor.hex);
+    buffer.fill(brushToVisualize.color.hex);
 
     const sideDist = gadgetRadius; //(Math.max(width, height) > 4* gadgetRadius) ? gadgetRadius : gadgetRadius*0.5;
     const ankerX = constrain(useBaseX, sideDist, width - sideDist);
@@ -1750,10 +1516,10 @@ function redrawInterface(buffer, activeInputGadget) {
         if (text === "H") {
           buffer.strokeWeight(8);
 
-          drawColorAxis(posX, posY - size/3, posX, posY + size/3, brushColor, brushColor, size, 1.0, 0.0);
+          drawColorAxis(posX, posY - size/3, posX, posY + size/3, brushToVisualize.color, brushToVisualize.color, size, 1.0, 0.0);
 
-          const startColorHue = brushColor.copy().setHue(brushColor.hue - 0.5); 
-          const endColorHue   = brushColor.copy().setHue(brushColor.hue + 0.5);
+          const startColorHue = brushToVisualize.color.copy().setHue(brushToVisualize.color.hue - 0.5); 
+          const endColorHue   = brushToVisualize.color.copy().setHue(brushToVisualize.color.hue + 0.5);
           drawColorAxis(posX - size/3, posY, posX + size/3, posY, startColorHue, endColorHue, size);
           
           buffer.noStroke();
@@ -1761,12 +1527,12 @@ function redrawInterface(buffer, activeInputGadget) {
         } else if (text === "LC") {
           buffer.strokeWeight(8);
 
-          const startColorSat = brushColor.copy().setSaturation(0);
-          const endColorSat   = brushColor.copy().setSaturation(1);
+          const startColorSat = brushToVisualize.color.copy().setSaturation(0);
+          const endColorSat   = brushToVisualize.color.copy().setSaturation(1);
           drawColorAxis(posX - size/3, posY, posX + size/3, posY, startColorSat, endColorSat, size);
           
-          const startColorLum = brushColor.copy().setLuminance(1);
-          const endColorLum   = brushColor.copy().setLuminance(0);
+          const startColorLum = brushToVisualize.color.copy().setLuminance(1);
+          const endColorLum   = brushToVisualize.color.copy().setLuminance(0);
           drawColorAxis(posX, posY - size/3, posX, posY + size/3, startColorLum, endColorLum, size);
 
           buffer.noStroke();
@@ -1793,15 +1559,15 @@ function redrawInterface(buffer, activeInputGadget) {
       buffer.translate(ankerX, ankerY);
 
       buffer.fill("black")
-      buffer.ellipse(0, 0, constrain(easeInCirc(brushSize, 4, 600), 8, gadgetRadius/3)+2)
+      buffer.ellipse(0, 0, constrain(brushToVisualize.pxSize, 8, gadgetRadius/3)+2)
 
       // var
       buffer.stroke("black");
       buffer.strokeWeight(16);
-      buffer.line(0, radius*2 * (brushColorVar - 1), 0, radius*2 * brushColorVar);
+      buffer.line(0, radius*2 * (brushToVisualize.colorVar - 1), 0, radius*2 * brushToVisualize.colorVar);
 
       buffer.strokeWeight(14);
-      drawColorAxis(0, radius*2 * (brushColorVar - 1), 0, radius*2 * brushColorVar, brushColor, brushColor, gadgetRadius, 1.0, 0.0);
+      drawColorAxis(0, radius*2 * (brushToVisualize.colorVar - 1), 0, radius*2 * brushToVisualize.colorVar, brushToVisualize.color, brushToVisualize.color, gadgetRadius, 1.0, 0.0);
 
       // hue
       // stay centered since hue is a circle anyway
@@ -1809,16 +1575,16 @@ function redrawInterface(buffer, activeInputGadget) {
       buffer.strokeWeight(16);
       buffer.line(radius*2 * -0.5, 0, radius*2 * (1-0.5), 0);
 
-      const startColorHue = brushColor.copy().setHue(brushColor.hue - 0.5); 
-      const endColorHue   = brushColor.copy().setHue(brushColor.hue + 0.5);
+      const startColorHue = brushToVisualize.color.copy().setHue(brushToVisualize.color.hue - 0.5); 
+      const endColorHue   = brushToVisualize.color.copy().setHue(brushToVisualize.color.hue + 0.5);
       buffer.strokeWeight(14);
       drawColorAxis(radius*2 * -0.5, 0, radius*2 * (1-0.5), 0, startColorHue, endColorHue, gadgetRadius);
 
       buffer.pop();
 
       // Show color at reference position
-      //const currentColorSize = constrain(easeInCirc(brushSize, 4, 600), 8, gadgetRadius/3);
-      drawRoundColorExampleWithVariation(40, ankerX, ankerY);
+      //const currentColorSize = constrain(brushToVisualize.pxSize, 8, gadgetRadius/3);
+      drawRoundColorExampleWithVariation(brushToVisualize, 40, ankerX, ankerY);
 
     } else if (activeInputGadget === "satAndLum") {
 
@@ -1827,73 +1593,72 @@ function redrawInterface(buffer, activeInputGadget) {
       buffer.translate(ankerX, ankerY);
 
       buffer.fill("black")
-      buffer.ellipse(0, 0, constrain(easeInCirc(brushSize, 4, 600), 8, gadgetRadius/3)+2)
+      buffer.ellipse(0, 0, constrain(brushToVisualize.pxSize, 8, gadgetRadius/3)+2)
 
-      const startColorLum = brushColor.copy().setLuminance(1);
-      const endColorLum   = brushColor.copy().setLuminance(0);
+      const startColorLum = brushToVisualize.color.copy().setLuminance(1);
+      const endColorLum   = brushToVisualize.color.copy().setLuminance(0);
       buffer.stroke("black");
       buffer.strokeWeight(16);
-      buffer.line(0, radius*2 * (-1 + brushColor.luminance), 0, radius*2 * brushColor.luminance);
+      buffer.line(0, radius*2 * (-1 + brushToVisualize.color.luminance), 0, radius*2 * brushToVisualize.color.luminance);
       buffer.strokeWeight(14);
-      drawColorAxis(0, radius*2 * (-1 + brushColor.luminance), 0, radius*2 * brushColor.luminance, startColorLum, endColorLum, gadgetRadius);
+      drawColorAxis(0, radius*2 * (-1 + brushToVisualize.color.luminance), 0, radius*2 * brushToVisualize.color.luminance, startColorLum, endColorLum, gadgetRadius);
 
-      const startColorSat = brushColor.copy().setSaturation(0);
-      const endColorSat   = brushColor.copy().setSaturation(1);
+      const startColorSat = brushToVisualize.color.copy().setSaturation(0);
+      const endColorSat   = brushToVisualize.color.copy().setSaturation(1);
       buffer.stroke("black");
       buffer.strokeWeight(16);
-      buffer.line(radius*2 * -brushColor.saturation, 0, radius*2 * (1-brushColor.saturation), 0);
+      buffer.line(radius*2 * -brushToVisualize.color.saturation, 0, radius*2 * (1-brushToVisualize.color.saturation), 0);
       buffer.strokeWeight(14);
-      drawColorAxis(radius*2 * -brushColor.saturation, 0, radius*2 * (1-brushColor.saturation), 0, startColorSat, endColorSat, gadgetRadius);
+      drawColorAxis(radius*2 * -brushToVisualize.color.saturation, 0, radius*2 * (1-brushToVisualize.color.saturation), 0, startColorSat, endColorSat, gadgetRadius);
       
       buffer.pop();
 
       // Show color at reference position
-      //const currentColorSize = constrain(easeInCirc(brushSize, 4, 600), 8, gadgetRadius/3);
-      drawRoundColorExampleWithVariation(40, ankerX, ankerY);
+      //const currentColorSize = constrain(brushToVisualize.pxSize, 8, gadgetRadius/3);
+      drawRoundColorExampleWithVariation(brushToVisualize, 40, ankerX, ankerY);
 
     } else if (activeInputGadget === "size") {
 
-      // scale
-      const lineBaseY = ankerY - gadgetRadius;
-      const lineAddY = gadgetRadius * 2 * map(brushSize, 4, 600, 0, 1);
-      const lineTranslateY = lineBaseY + lineAddY;
 
-      const posX = ankerX - 40;
-      const minDotSize = 4;
-      const maxDotSize = 20;
+      const posX = ankerX;
+      const posY = ankerY - gadgetRadius;
+      const lineAddY = gadgetRadius * 2 * brushToVisualize.size;
+      const lineTranslateY = posY + lineAddY;
 
-      buffer.fill(uiColors.constrastBg.toHexWithSetAlpha(0.3));
-      buffer.ellipse(posX, lineTranslateY + gadgetRadius      , 4 + minDotSize);
-      buffer.ellipse(posX, lineTranslateY + 0.5 * gadgetRadius, 4 + easeInCirc(lerp(minDotSize, maxDotSize, 0.25), minDotSize, maxDotSize));
-      buffer.ellipse(posX, lineTranslateY + 0.0 * gadgetRadius, 4 + easeInCirc(lerp(minDotSize, maxDotSize, 0.5), minDotSize, maxDotSize));
-      buffer.ellipse(posX, lineTranslateY - 0.5 * gadgetRadius, 4 + easeInCirc(lerp(minDotSize, maxDotSize, 0.75), minDotSize, maxDotSize));
-      buffer.ellipse(posX, lineTranslateY - gadgetRadius      , 4 + maxDotSize);
+      buffer.stroke(uiColors.constrastBg.toHexWithSetAlpha(0.3));
+      buffer.strokeWeight(12);
+      buffer.line(posX, lineTranslateY - gadgetRadius,posX, lineTranslateY + gadgetRadius);
+      buffer.strokeWeight(10);
+      buffer.stroke(uiColors.fg.toHexWithSetAlpha(0.3));
+      buffer.line(posX, lineTranslateY - gadgetRadius,posX, lineTranslateY + gadgetRadius);
+      buffer.noStroke();
 
-      buffer.fill(uiColors.fg.toHexWithSetAlpha(0.3));
-      buffer.ellipse(posX, lineTranslateY + gadgetRadius      , minDotSize);
-      buffer.ellipse(posX, lineTranslateY + 0.5 * gadgetRadius, easeInCirc(lerp(minDotSize, maxDotSize, 0.25), minDotSize, maxDotSize));
-      buffer.ellipse(posX, lineTranslateY + 0.0 * gadgetRadius, easeInCirc(lerp(minDotSize, maxDotSize, 0.5), minDotSize, maxDotSize));
-      buffer.ellipse(posX, lineTranslateY - 0.5 * gadgetRadius, easeInCirc(lerp(minDotSize, maxDotSize, 0.75), minDotSize, maxDotSize));
-      buffer.ellipse(posX, lineTranslateY - gadgetRadius      , maxDotSize);
-
-      buffer.fill(brushColor.hex);
-      const easedSize = easeInCirc(brushSize, 4, 600);
-      drawStamp(buffer, posX, ankerY, easedSize, pen.angle, pen.pressure, texture);
-      drawCrosshair(easedSize, posX, ankerY);
+      buffer.fill(brushToVisualize.color.toHexWithSetAlpha(0.5));
+      buffer.ellipse(posX, ankerY, brushToVisualize.pxSize);
+      buffer.fill(brushToVisualize.color.hex);
+      drawCrosshair(brushToVisualize.pxSize, posX, ankerY);
     }
   }
 
-  function drawRoundColorExampleWithVariation(size, x, y) {
-    buffer.fill(brushColor.hex);
+  function drawRoundColorExampleWithVariation(brush, size, x, y) {
+    buffer.fill(brush.color.hex);
     buffer.ellipse(x, y, size);
 
     const varSegments = 48;
     for (let i = 0; i < varSegments; i++) {
       const start = (TWO_PI / varSegments) * i;
       const stop = start + TWO_PI / varSegments; 
-      buffer.fill(HSLColor.brushWithVar(i).hex);
+      buffer.fill(brush.getColorWithVar(i).hex);
       buffer.arc(x, y, size, size, start, stop);
     }
+  }
+
+  function drawSizeIndicator(buffer, size, x, y) {
+    buffer.fill(uiColors.fg.toHexWithSetAlpha(0.4));
+    buffer.ellipse(x, y, size, size)
+    buffer.fill(uiColors.constrastBg.toHexWithSetAlpha(0.3));
+    buffer.ellipse(x, y, size*0.66, size*0.66)
+    buffer.ellipse(x, y, size*0.33, size*0.33)
   }
 
   function drawCrosshair(size, x, y) {
