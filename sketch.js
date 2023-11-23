@@ -138,7 +138,7 @@ class BrushStrokePoint {
     this.y = y;
     this.azimuthAngle = azimuthAngle;
     this.force = force;
-    this.seed = x * 32 + y * 35;
+    this.seed = x * 2 + y * 3;
   }
 
   move(xDelta, yDelta) {
@@ -240,7 +240,7 @@ class BrushStroke {
     
         const rf = 0.1 * brushSize * this.settings.colorVar; // randomness matches increasing variation
 
-        const lerpPart = HSLColor.noiseValue(i*99) * 0.5 + 0.5;
+        const lerpPart = HSLColor.pseudoRandomSymmetricNumber(i) * 0.5 + 0.5;
         const middleX = lerp(start.x, end.x, lerpPart);
         const middleY = lerp(start.y, end.y, lerpPart);
 
@@ -255,7 +255,7 @@ class BrushStroke {
         const midEdgeVectorLower    = p5.Vector.fromAngle(averageDirection, lowerSide*brushSize*map(avgForce, 0, 0.3, 0.3, 2.0, true));
         const midEdgeVectorHigher   = p5.Vector.fromAngle(averageDirection, higherSide*brushSize*map(avgForce, 0, 0.3, 0.3, 2.0, true));
 
-        if (HSLColor.noiseValue(start.seed + i*10) < start.force * 4) {
+        if (HSLColor.pseudoRandomSymmetricNumber(start.seed + i) < start.force * 4) {
           const brushCol = this.settings.getColorWithVar(i + start.seed);
 
           if (this.settings.texture === "Round") {
@@ -280,7 +280,7 @@ class BrushStroke {
           }
         }
 
-        if (HSLColor.noiseValue(end.seed + i*10) < end.force * 4) {
+        if (HSLColor.pseudoRandomSymmetricNumber(end.seed + i) < end.force * 4) {
           const brushCol2 = this.settings.getColorWithVar(i + end.seed);
 
           if (this.settings.texture === "Round") {
@@ -309,8 +309,8 @@ class BrushStroke {
 
     function randomizedVertex(buffer, x, xOff, y, yOff, randomI, randomFactor) {
       buffer.vertex(
-        x + xOff + HSLColor.noiseValue(x*99+y*91+randomI*99) * randomFactor, 
-        y + yOff + HSLColor.noiseValue(x*91+y*99+randomI*99) * randomFactor
+        x + xOff + HSLColor.pseudoRandomSymmetricNumber(x+y*2+randomI) * randomFactor, 
+        y + yOff + HSLColor.pseudoRandomSymmetricNumber(x*2+y+randomI) * randomFactor
       );
     }
   }
@@ -467,6 +467,16 @@ class Painting {
 class HSLColor {
   static RANDOM_VALUES = Array.from({ length: 1024 }, () => Math.random() * 2 - 1);
 
+  // static RANDOM_VALUES = Array.from({ length: 1024 }, (_, index) => {
+  //   const t = (index / (1024 - 1)) * 2 - 1; // Normalize index to the range [-1, 1]
+  //   return Math.sin(t * Math.PI * 0.5); // Use sine function for smooth transition
+  // });
+
+  static pseudoRandomSymmetricNumber(seed) {
+    const randomArray = this.RANDOM_VALUES;
+    return randomArray[Math.floor(Math.abs(xorshift(1030*seed))) % randomArray.length];
+  }
+
   static lerpColorInHSL(color1, color2, lerpAmount) {
     const lerpedH = lerp(color1.h, color2.h, lerpAmount);
     const lerpedS = lerp(color1.s, color2.s, lerpAmount);
@@ -480,11 +490,6 @@ class HSLColor {
     // default to fallback hue if gray
     if (result_array[1] < 0.01) result_array[2] = fallbackColor.h;
     return new HSLColor(result_array[0], result_array[1], result_array[2]);
-  }
-
-  static noiseValue(seed) {
-    seed = Math.floor(Math.abs(seed*1234));
-    return this.RANDOM_VALUES[seed % this.RANDOM_VALUES.length];
   }
 
   /**
@@ -564,14 +569,14 @@ class HSLColor {
 
   varyComponents(seed, chaos = 0.5) {
     if (chaos === 0) return this;
-    seed = Math.abs(seed);
 
     const easedRandomNoise = (value, chaos) => ((1-chaos)*value**3) / 8 + lerp(value**3, value, 0.5)*chaos;
 
     // get random [-1, 1] value from seed for each color parameter
-    const lNoiseValue = HSLColor.RANDOM_VALUES[Math.floor(seed*300   ) % HSLColor.RANDOM_VALUES.length];
-    const hNoiseValue = HSLColor.RANDOM_VALUES[Math.floor(seed*400+500) % HSLColor.RANDOM_VALUES.length];
-    const sNoiseValue = HSLColor.RANDOM_VALUES[Math.floor(seed*555+222) % HSLColor.RANDOM_VALUES.length];
+    const lNoiseValue = HSLColor.pseudoRandomSymmetricNumber(seed);
+    const hNoiseValue = HSLColor.pseudoRandomSymmetricNumber(seed+1);
+    const sNoiseValue = HSLColor.pseudoRandomSymmetricNumber(seed+2);
+
     // each could theoretically vary by +-0.5, but the chaos function never really goes that high.
     this.l += 0.5 * easedRandomNoise(lNoiseValue, chaos*0.8);
     this.h += 0.6 * easedRandomNoise(hNoiseValue, chaos*lerp(1.0, 0.7, easeOutCubic(this.s)));
@@ -1788,4 +1793,11 @@ function tiltToAngle(tiltX, tiltY) {
   if (azimuthRad < 0) azimuthRad += TWO_PI;
 
   return azimuthRad;
+}
+
+function xorshift(seed) {
+  seed ^= (seed << 21);
+  seed ^= (seed >>> 35);
+  seed ^= (seed << 4);
+  return seed;
 }
