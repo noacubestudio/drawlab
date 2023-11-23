@@ -20,6 +20,7 @@ let gadgetRadius; // based on canvas size
 let toolPresets = [
   {brush: "Brush Tool", texture: "Regular", menuName: "Brush"},
   {brush: "Brush Tool", texture: "Rake",    menuName: "Rake" },
+  {brush: "Brush Tool", texture: "Round",   menuName: "Round"},
 ];
 
 // control
@@ -163,11 +164,11 @@ class BrushStroke {
   }
 
   get bounds() {
-    //const margin = (["Triangle Tool", "Lasso Tool", "Mirror Tool"].includes(currentBrush.tool)) ? 0 : currentBrush.pxSize*0.5;
-    const xmin = this.points.reduce((a, b) => Math.min(a, b.x),  Infinity); //- margin;
-    const xmax = this.points.reduce((a, b) => Math.max(a, b.x), -Infinity); //+ margin;
-    const ymin = this.points.reduce((a, b) => Math.min(a, b.y),  Infinity) //- margin;
-    const ymax = this.points.reduce((a, b) => Math.max(a, b.y), -Infinity) //+ margin;
+    const margin = this.settings.pxSize*0.5;
+    const xmin = this.points.reduce((a, b) => Math.min(a, b.x),  Infinity) - margin;
+    const xmax = this.points.reduce((a, b) => Math.max(a, b.x), -Infinity) + margin;
+    const ymin = this.points.reduce((a, b) => Math.min(a, b.y),  Infinity) - margin;
+    const ymax = this.points.reduce((a, b) => Math.max(a, b.y), -Infinity) + margin;
     return {x: xmin, y:ymin, width: xmax-xmin, height: ymax-ymin};
   }
 
@@ -220,14 +221,16 @@ class BrushStroke {
       end.azimuthAngle ??= p5.Vector.angleBetween(createVector(0, -1), createVector(end.x-start.x, end.y-start.y));
 
       end.force ??= start.force;
-    start.force ??= 0.2;
-      end.force ??= 0.2;
+    start.force ??= 0.1;
+      end.force ??= 0.1;
 
     const avgPressure = (start.force + end.force) / 2;
 
     this.buffer.noStroke();
 
-    const steps = map(this.settings.pxSize, 10, 300, 10, 200);
+    const brushSize = this.settings.pxSize * (this.settings.texture === "Round" ? 0.7 : 1);
+    const steps = Math.floor(map(brushSize, 10, 300, 10, 200) * (this.settings.texture === "Round" ? 0.3 : 1));
+
     for (let i = 0; i < steps; i++) {
 
       const drawStep = (this.settings.texture !== "Rake" || i % 3 == 0 || i == steps-1)
@@ -236,47 +239,72 @@ class BrushStroke {
         const lowerSide = i/steps - 0.5;
         const higherSide = (i+1)/steps - 0.5;
     
-        const rf = (i !== 0 && i !== steps-1) ? 0.1 * this.settings.pxSize * this.settings.colorVar : 0; // randomness matches increasing variation
+        const rf = (i !== 0 && i !== steps-1) ? 0.1 * brushSize * this.settings.colorVar : 0; // randomness matches increasing variation
 
         const lerpPart = HSLColor.noiseValue(i + (start.x !== undefined ? start.x + start.y : 0));
         const middleX = lerp(start.x, end.x, lerpPart);
         const middleY = lerp(start.y, end.y, lerpPart);
 
-        const startEdgeVectorLower  = p5.Vector.fromAngle(start.azimuthAngle, lowerSide*this.settings.pxSize*map(start.force, 0, 0.3, 0.3, 2.0, true));
-        const startEdgeVectorHigher = p5.Vector.fromAngle(start.azimuthAngle, higherSide*this.settings.pxSize*map(start.force, 0, 0.3, 0.3, 2.0, true));
+        const startEdgeVectorLower  = p5.Vector.fromAngle(start.azimuthAngle, lowerSide*brushSize*map(start.force, 0, 0.3, 0.3, 2.0, true));
+        const startEdgeVectorHigher = p5.Vector.fromAngle(start.azimuthAngle, higherSide*brushSize*map(start.force, 0, 0.3, 0.3, 2.0, true));
 
-        const endEdgeVectorLower    = p5.Vector.fromAngle(end.azimuthAngle, lowerSide*this.settings.pxSize*map(end.force, 0, 0.3, 0.3, 2.0, true));
-        const endEdgeVectorHigher   = p5.Vector.fromAngle(end.azimuthAngle, higherSide*this.settings.pxSize*map(end.force, 0, 0.3, 0.3, 2.0, true));
+        const endEdgeVectorLower    = p5.Vector.fromAngle(end.azimuthAngle, lowerSide*brushSize*map(end.force, 0, 0.3, 0.3, 2.0, true));
+        const endEdgeVectorHigher   = p5.Vector.fromAngle(end.azimuthAngle, higherSide*brushSize*map(end.force, 0, 0.3, 0.3, 2.0, true));
 
         let avgAngle = lerp(start.azimuthAngle, end.azimuthAngle, lerpPart);
-        const midEdgeVectorLower    = p5.Vector.fromAngle(avgAngle, lowerSide*this.settings.pxSize*map(avgPressure, 0, 0.3, 0.3, 2.0, true));
-        const midEdgeVectorHigher   = p5.Vector.fromAngle(avgAngle, higherSide*this.settings.pxSize*map(avgPressure, 0, 0.3, 0.3, 2.0, true));
+        const midEdgeVectorLower    = p5.Vector.fromAngle(avgAngle, lowerSide*brushSize*map(avgPressure, 0, 0.3, 0.3, 2.0, true));
+        const midEdgeVectorHigher   = p5.Vector.fromAngle(avgAngle, higherSide*brushSize*map(avgPressure, 0, 0.3, 0.3, 2.0, true));
 
 
         if (HSLColor.noiseValue(start.seed * i) < start.force * 4) {
           const brushCol = this.settings.getColorWithVar(i + start.seed);
-          this.buffer.fill(brushCol.hex);
-    
-          this.buffer.beginShape();
-          randomizedVertex(this.buffer, start.x, startEdgeVectorLower.x , start.y, startEdgeVectorLower.y , rf);
-          randomizedVertex(this.buffer, start.x, startEdgeVectorHigher.x, start.y, startEdgeVectorHigher.y, rf);
-          randomizedVertex(this.buffer, middleX, midEdgeVectorHigher.x, middleY, midEdgeVectorHigher.y, rf);
-          randomizedVertex(this.buffer, middleX, midEdgeVectorLower.x, middleY, midEdgeVectorLower.y, rf);
-          this.buffer.endShape();
+
+          if (this.settings.texture === "Round") {
+            this.buffer.stroke(brushCol.hex);
+            this.buffer.strokeWeight(2 * brushSize / steps);
+            this.buffer.line(
+              start.x + startEdgeVectorLower.x, start.y + startEdgeVectorLower.y, 
+              middleX + midEdgeVectorLower.x, middleY + midEdgeVectorLower.y
+            );
+            this.buffer.line(
+              start.x + startEdgeVectorHigher.x, start.y + startEdgeVectorHigher.y, 
+              middleX + midEdgeVectorHigher.x, middleY + midEdgeVectorHigher.y
+            );
+          } else {
+            this.buffer.fill(brushCol.hex);
+            this.buffer.beginShape();
+            randomizedVertex(this.buffer, start.x, startEdgeVectorLower.x , start.y, startEdgeVectorLower.y , rf);
+            randomizedVertex(this.buffer, start.x, startEdgeVectorHigher.x, start.y, startEdgeVectorHigher.y, rf);
+            randomizedVertex(this.buffer, middleX, midEdgeVectorHigher.x, middleY, midEdgeVectorHigher.y, rf);
+            randomizedVertex(this.buffer, middleX, midEdgeVectorLower.x, middleY, midEdgeVectorLower.y, rf);
+            this.buffer.endShape();
+          }
         }
 
         if (HSLColor.noiseValue(end.seed * i) < end.force * 4) {
           const brushCol2 = this.settings.getColorWithVar(i + end.seed);
-          this.buffer.fill(brushCol2.hex);
-    
-          this.buffer.beginShape();
-          randomizedVertex(this.buffer, middleX, midEdgeVectorLower.x , middleY, midEdgeVectorLower.y , rf);
-          randomizedVertex(this.buffer, middleX, midEdgeVectorHigher.x, middleY, midEdgeVectorHigher.y, rf);
-          randomizedVertex(this.buffer, end.x  , endEdgeVectorHigher.x, end.y  , endEdgeVectorHigher.y, rf);
-          randomizedVertex(this.buffer, end.x  , endEdgeVectorLower.x , end.y  , endEdgeVectorLower.y , rf);
-          this.buffer.endShape();
-        }
 
+          if (this.settings.texture === "Round") {
+            this.buffer.stroke(brushCol2.hex);
+            this.buffer.strokeWeight(2 * brushSize / steps);
+            this.buffer.line(
+              middleX + midEdgeVectorLower.x, middleY + midEdgeVectorLower.y, 
+              end.x + endEdgeVectorLower.x, end.y + endEdgeVectorLower.y
+            );
+            this.buffer.line(
+              middleX + midEdgeVectorHigher.x, middleY + midEdgeVectorHigher.y, 
+              end.x + endEdgeVectorHigher.x, end.y + endEdgeVectorHigher.y
+            );
+          } else {
+            this.buffer.fill(brushCol2.hex);
+            this.buffer.beginShape();
+            randomizedVertex(this.buffer, middleX, midEdgeVectorLower.x , middleY, midEdgeVectorLower.y , rf);
+            randomizedVertex(this.buffer, middleX, midEdgeVectorHigher.x, middleY, midEdgeVectorHigher.y, rf);
+            randomizedVertex(this.buffer, end.x  , endEdgeVectorHigher.x, end.y  , endEdgeVectorHigher.y, rf);
+            randomizedVertex(this.buffer, end.x  , endEdgeVectorLower.x , end.y  , endEdgeVectorLower.y , rf);
+            this.buffer.endShape();
+          }
+        }
       }
     }
 
@@ -582,7 +610,7 @@ function setup() {
 
   currentBrush = new BrushSettings(
     new HSLColor(0.6, 0.6, 0.7), 
-    0.3, 0.5, 
+    0.35, 0.5, 
     toolPresets[0].brush, toolPresets[0].texture
   );
 
@@ -1254,9 +1282,9 @@ function redrawInterface(buffer, activeInputGadget) {
 
     if (spotY !== 0) {
       // draw example
-      // wip, ignore tool
-      const start = new BrushStrokePoint(-20, 0, pen.startAngle, pen.startPressure);
-      const end = new BrushStrokePoint(60, 0, pen.angle, pen.pressure);
+      // wip, not sure why the angle 86 even makes sense.
+      const start = new BrushStrokePoint(-20, 0, 86, undefined);
+      const end = new BrushStrokePoint(60, 0, 86, undefined);
       const settings = currentBrush.copy();
       settings.size = constrain(settings.size, 0.1, 0.3);
       settings.tool = menuBrushTool;
