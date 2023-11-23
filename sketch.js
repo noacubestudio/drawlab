@@ -138,7 +138,7 @@ class BrushStrokePoint {
     this.y = y;
     this.azimuthAngle = azimuthAngle;
     this.force = force;
-    this.seed = x * y;
+    this.seed = x * 32 + y * 35;
   }
 
   move(xDelta, yDelta) {
@@ -223,25 +223,24 @@ class BrushStroke {
       end.force ??= start.force;
     start.force ??= 0.1;
       end.force ??= 0.1;
-
-    const avgPressure = (start.force + end.force) / 2;
+    const avgForce = (start.force + end.force) / 2;
 
     this.buffer.noStroke();
 
     const brushSize = this.settings.pxSize * (this.settings.texture === "Round" ? 0.7 : 1);
-    const steps = Math.floor(map(brushSize, 10, 300, 10, 200) * (this.settings.texture === "Round" ? 0.3 : 1));
+    const strips = Math.floor(map(brushSize, 10, 300, 10, 200) * (this.settings.texture === "Round" ? 0.3 : 1));
 
-    for (let i = 0; i < steps; i++) {
+    for (let i = 0; i < strips; i++) {
 
-      const drawStep = (this.settings.texture !== "Rake" || i % 3 == 0 || i == steps-1)
+      const drawThisStrip = (this.settings.texture !== "Rake" || i % 3 == 0 || i == strips-1)
 
-      if (drawStep) {
-        const lowerSide = i/steps - 0.5;
-        const higherSide = (i+1)/steps - 0.5;
+      if (drawThisStrip) {
+        const lowerSide = i/strips - 0.5;
+        const higherSide = (i+1)/strips - 0.5;
     
-        const rf = (i !== 0 && i !== steps-1) ? 0.1 * brushSize * this.settings.colorVar : 0; // randomness matches increasing variation
+        const rf = 0.1 * brushSize * this.settings.colorVar; // randomness matches increasing variation
 
-        const lerpPart = HSLColor.noiseValue(i + (start.x !== undefined ? start.x + start.y : 0));
+        const lerpPart = HSLColor.noiseValue(i*99) * 0.5 + 0.5;
         const middleX = lerp(start.x, end.x, lerpPart);
         const middleY = lerp(start.y, end.y, lerpPart);
 
@@ -251,17 +250,17 @@ class BrushStroke {
         const endEdgeVectorLower    = p5.Vector.fromAngle(end.azimuthAngle, lowerSide*brushSize*map(end.force, 0, 0.3, 0.3, 2.0, true));
         const endEdgeVectorHigher   = p5.Vector.fromAngle(end.azimuthAngle, higherSide*brushSize*map(end.force, 0, 0.3, 0.3, 2.0, true));
 
-        let avgAngle = lerp(start.azimuthAngle, end.azimuthAngle, lerpPart);
-        const midEdgeVectorLower    = p5.Vector.fromAngle(avgAngle, lowerSide*brushSize*map(avgPressure, 0, 0.3, 0.3, 2.0, true));
-        const midEdgeVectorHigher   = p5.Vector.fromAngle(avgAngle, higherSide*brushSize*map(avgPressure, 0, 0.3, 0.3, 2.0, true));
+        const averageDirection = atan2(sin(start.azimuthAngle)+sin(end.azimuthAngle), cos(start.azimuthAngle)+cos(end.azimuthAngle));
 
+        const midEdgeVectorLower    = p5.Vector.fromAngle(averageDirection, lowerSide*brushSize*map(avgForce, 0, 0.3, 0.3, 2.0, true));
+        const midEdgeVectorHigher   = p5.Vector.fromAngle(averageDirection, higherSide*brushSize*map(avgForce, 0, 0.3, 0.3, 2.0, true));
 
-        if (HSLColor.noiseValue(start.seed * i) < start.force * 4) {
+        if (HSLColor.noiseValue(start.seed + i*10) < start.force * 4) {
           const brushCol = this.settings.getColorWithVar(i + start.seed);
 
           if (this.settings.texture === "Round") {
             this.buffer.stroke(brushCol.hex);
-            this.buffer.strokeWeight(2 * brushSize / steps);
+            this.buffer.strokeWeight(2 * brushSize / strips);
             this.buffer.line(
               start.x + startEdgeVectorLower.x, start.y + startEdgeVectorLower.y, 
               middleX + midEdgeVectorLower.x, middleY + midEdgeVectorLower.y
@@ -273,20 +272,20 @@ class BrushStroke {
           } else {
             this.buffer.fill(brushCol.hex);
             this.buffer.beginShape();
-            randomizedVertex(this.buffer, start.x, startEdgeVectorLower.x , start.y, startEdgeVectorLower.y , rf);
-            randomizedVertex(this.buffer, start.x, startEdgeVectorHigher.x, start.y, startEdgeVectorHigher.y, rf);
-            randomizedVertex(this.buffer, middleX, midEdgeVectorHigher.x, middleY, midEdgeVectorHigher.y, rf);
-            randomizedVertex(this.buffer, middleX, midEdgeVectorLower.x, middleY, midEdgeVectorLower.y, rf);
+            randomizedVertex(this.buffer, start.x, startEdgeVectorLower.x , start.y, startEdgeVectorLower.y , i, rf);
+            randomizedVertex(this.buffer, start.x, startEdgeVectorHigher.x, start.y, startEdgeVectorHigher.y, i, rf);
+            randomizedVertex(this.buffer, middleX, midEdgeVectorHigher.x,   middleY, midEdgeVectorHigher.y,   i, rf);
+            randomizedVertex(this.buffer, middleX, midEdgeVectorLower.x,    middleY, midEdgeVectorLower.y,    i, rf);
             this.buffer.endShape();
           }
         }
 
-        if (HSLColor.noiseValue(end.seed * i) < end.force * 4) {
+        if (HSLColor.noiseValue(end.seed + i*10) < end.force * 4) {
           const brushCol2 = this.settings.getColorWithVar(i + end.seed);
 
           if (this.settings.texture === "Round") {
             this.buffer.stroke(brushCol2.hex);
-            this.buffer.strokeWeight(2 * brushSize / steps);
+            this.buffer.strokeWeight(2 * brushSize / strips);
             this.buffer.line(
               middleX + midEdgeVectorLower.x, middleY + midEdgeVectorLower.y, 
               end.x + endEdgeVectorLower.x, end.y + endEdgeVectorLower.y
@@ -298,20 +297,20 @@ class BrushStroke {
           } else {
             this.buffer.fill(brushCol2.hex);
             this.buffer.beginShape();
-            randomizedVertex(this.buffer, middleX, midEdgeVectorLower.x , middleY, midEdgeVectorLower.y , rf);
-            randomizedVertex(this.buffer, middleX, midEdgeVectorHigher.x, middleY, midEdgeVectorHigher.y, rf);
-            randomizedVertex(this.buffer, end.x  , endEdgeVectorHigher.x, end.y  , endEdgeVectorHigher.y, rf);
-            randomizedVertex(this.buffer, end.x  , endEdgeVectorLower.x , end.y  , endEdgeVectorLower.y , rf);
+            randomizedVertex(this.buffer, middleX, midEdgeVectorLower.x , middleY, midEdgeVectorLower.y , i, rf);
+            randomizedVertex(this.buffer, middleX, midEdgeVectorHigher.x, middleY, midEdgeVectorHigher.y, i, rf);
+            randomizedVertex(this.buffer, end.x  , endEdgeVectorHigher.x, end.y  , endEdgeVectorHigher.y, i, rf);
+            randomizedVertex(this.buffer, end.x  , endEdgeVectorLower.x , end.y  , endEdgeVectorLower.y , i, rf);
             this.buffer.endShape();
           }
         }
       }
     }
 
-    function randomizedVertex(buffer, x, xOff, y, yOff, randomFactor) {
+    function randomizedVertex(buffer, x, xOff, y, yOff, randomI, randomFactor) {
       buffer.vertex(
-        x + xOff + HSLColor.noiseValue(x) * randomFactor, 
-        y + yOff + HSLColor.noiseValue(y) * randomFactor
+        x + xOff + HSLColor.noiseValue(x*99+y*91+randomI*99) * randomFactor, 
+        y + yOff + HSLColor.noiseValue(x*91+y*99+randomI*99) * randomFactor
       );
     }
   }
@@ -466,7 +465,7 @@ class Painting {
 
 // Main color representation in OKHSL. Converted to hex color using the helper file.
 class HSLColor {
-  static RANDOM_VALUES = Array.from({ length: 256 }, () => Math.random() * 2 - 1);
+  static RANDOM_VALUES = Array.from({ length: 1024 }, () => Math.random() * 2 - 1);
 
   static lerpColorInHSL(color1, color2, lerpAmount) {
     const lerpedH = lerp(color1.h, color2.h, lerpAmount);
@@ -484,7 +483,7 @@ class HSLColor {
   }
 
   static noiseValue(seed) {
-    seed = Math.floor(Math.abs(seed));
+    seed = Math.floor(Math.abs(seed*1234));
     return this.RANDOM_VALUES[seed % this.RANDOM_VALUES.length];
   }
 
@@ -563,20 +562,23 @@ class HSLColor {
     return new HSLColor(this.h, Math.min(this.s, 0.2), this.l * 0.8, this.a);
   }
 
-  varyComponents(seed, strength = 0.5) {
-    if (strength === 0) return this;
+  varyComponents(seed, chaos = 0.5) {
+    if (chaos === 0) return this;
     seed = Math.abs(seed);
-    //seed += this.h*this.s*this.l*100;
 
-    // add noise
+    const easedRandomNoise = (value, chaos) => ((1-chaos)*value**3) / 8 + lerp(value**3, value, 0.5)*chaos;
+
+    // get random [-1, 1] value from seed for each color parameter
     const lNoiseValue = HSLColor.RANDOM_VALUES[Math.floor(seed*300   ) % HSLColor.RANDOM_VALUES.length];
-    const hNoiseValue = HSLColor.RANDOM_VALUES[Math.floor(seed*400+50) % HSLColor.RANDOM_VALUES.length];
-    this.l += lNoiseValue * lerp(easeInCirc(strength), strength, 0.1);
-    this.h += hNoiseValue * lerp(strength, easeInCirc(strength), easeOutCubic(this.s));
-    
+    const hNoiseValue = HSLColor.RANDOM_VALUES[Math.floor(seed*400+500) % HSLColor.RANDOM_VALUES.length];
+    const sNoiseValue = HSLColor.RANDOM_VALUES[Math.floor(seed*555+222) % HSLColor.RANDOM_VALUES.length];
+    // each could theoretically vary by +-0.5, but the chaos function never really goes that high.
+    this.l += 0.5 * easedRandomNoise(lNoiseValue, chaos*0.8);
+    this.h += 0.6 * easedRandomNoise(hNoiseValue, chaos*lerp(1.0, 0.7, easeOutCubic(this.s)));
+    this.s += 0.5 * easedRandomNoise(sNoiseValue, chaos*0.5);
     // make sure the components are still in range
     this.l = Math.max(0, Math.min(1, this.l));
-    this.s = Math.min(1, this.s);
+    this.s = Math.max(0, Math.min(1, this.s));
 
     return this;
   }
