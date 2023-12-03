@@ -14,72 +14,14 @@ const paintingState = {
   x: () => Math.floor((width - paintingState.width())/2),
   y: () => Math.floor((height - paintingState.height())/2),
 }
-let gadgetRadius; // based on canvas size
+let GIZMO_SIZE; // based on canvas size
 
 // menu
 let toolPresets = [
-  {brush: "Brush Tool", texture: "Regular", menuName: "Brush"},
+  {brush: "Brush Tool", texture: "Regular", menuName: "Default"},
   {brush: "Brush Tool", texture: "Rake",    menuName: "Rake" },
   {brush: "Brush Tool", texture: "Round",   menuName: "Round"},
 ];
-
-// control
-let isTouchControl = undefined;
-let ongoingTouches = []; 
-let pointerDown = false;
-
-const pen = {
-  x: undefined,
-  y: undefined,
-  startX: undefined,
-  startY: undefined,
-  startAngle: undefined,
-  startPressure: undefined,
-  startTimeStamp: undefined,
-  lastX: undefined,
-  lastY: undefined,
-  lastAngle: undefined,
-  lastPressure: undefined,
-  started: false,
-  wasDown: false,
-  isDown: false,
-  angle: undefined,
-  altitude: undefined,
-  pressure: undefined
-};
-const hover = {
-  x: undefined,
-  y: undefined,
-  angle: undefined,
-  lastX: undefined,
-  lastY: undefined
-};
-// state
-let currentInputMode;
-let editMode = false;
-
-// touch control state
-const menuState = {
-  onPage: 0,
-  hoverPage: null,
-  lastGadgetPage: undefined,
-  topSliderStartX: undefined,
-  topSliderDeltaX: undefined,
-  startedEventOnMenu: false,
-  screenPointerX: null,
-  screenPointerY: null,
-  screenHoverX: undefined,
-  screenHoverY: undefined
-};
-let gadgetStartX;
-let gadgetStartY;
-
-const editState = {
-  lastX: undefined,
-  lastY: undefined
-}
-
-let drawSliders = true;
 
 let fontRegular; let fontItalic; let fontMedium;
 function preload() {
@@ -130,14 +72,14 @@ class BrushStrokePoint {
    * Creates an instance of BrushStrokePoint.
    * @param {number} x The x coordinate of the point.
    * @param {number} y The y coordinate of the point.
-   * @param {number|undefined} azimuthAngle The angle of the pen at this point.
-   * @param {number|undefined} force The pen pressure detected at this point.
+   * @param {number|undefined} azimuth The angle of the pen at this point.
+   * @param {number|undefined} pressure The pen pressure detected at this point.
    */
-  constructor(x, y, azimuthAngle, force) {
+  constructor(x, y, azimuth, pressure) {
     this.x = x;
     this.y = y;
-    this.azimuthAngle = azimuthAngle;
-    this.force = force;
+    this.azimuth = azimuth;
+    this.pressure = pressure;
     this.seed = x * 2 + y * 3;
   }
 
@@ -173,7 +115,7 @@ class BrushStroke {
   }
 
   addPoint(point) {
-    this.points.push(new BrushStrokePoint(point.x,  point.y,  point.azimuthAngle, point.force));
+    this.points.push(new BrushStrokePoint(point.x,  point.y,  point.azimuth, point.pressure));
   }
 
   movePoints(xDelta, yDelta) {
@@ -216,14 +158,14 @@ class BrushStroke {
     } 
     if (start.x === end.x && start.y === end.y) return;
 
-    start.azimuthAngle ??= end.azimuthAngle;
-    start.azimuthAngle ??= p5.Vector.angleBetween(createVector(0, -1), createVector(end.x-start.x, end.y-start.y));
-      end.azimuthAngle ??= p5.Vector.angleBetween(createVector(0, -1), createVector(end.x-start.x, end.y-start.y));
+    start.azimuth ??= end.azimuth;
+    start.azimuth ??= p5.Vector.angleBetween(createVector(0, -1), createVector(end.x-start.x, end.y-start.y));
+      end.azimuth ??= p5.Vector.angleBetween(createVector(0, -1), createVector(end.x-start.x, end.y-start.y));
 
-      end.force ??= start.force;
-    start.force ??= 0.1;
-      end.force ??= 0.1;
-    const avgForce = (start.force + end.force) / 2;
+      end.pressure ??= start.pressure;
+      end.pressure ??= 0.5;
+    start.pressure ??= 0.5;
+    const avgPressure = (start.pressure + end.pressure) / 2;
 
     this.buffer.noStroke();
 
@@ -238,24 +180,24 @@ class BrushStroke {
         const lowerSide = i/strips - 0.5;
         const higherSide = (i+1)/strips - 0.5;
     
-        const rf = 0.1 * brushSize * this.settings.colorVar; // randomness matches increasing variation
+        const rf = 0.1 * brushSize * map(avgPressure, 0, 1, 0.1, 2.0, true) * this.settings.colorVar; // randomness matches increasing variation
 
         const lerpPart = HSLColor.pseudoRandomSymmetricNumber(i) * 0.5 + 0.5;
         const middleX = lerp(start.x, end.x, lerpPart);
         const middleY = lerp(start.y, end.y, lerpPart);
 
-        const startEdgeVectorLower  = p5.Vector.fromAngle(start.azimuthAngle, lowerSide*brushSize*map(start.force, 0, 0.3, 0.3, 2.0, true));
-        const startEdgeVectorHigher = p5.Vector.fromAngle(start.azimuthAngle, higherSide*brushSize*map(start.force, 0, 0.3, 0.3, 2.0, true));
+        const startEdgeVectorLower  = p5.Vector.fromAngle(start.azimuth, lowerSide*brushSize*map(start.pressure, 0, 1, 0.1, 2.0, true));
+        const startEdgeVectorHigher = p5.Vector.fromAngle(start.azimuth, higherSide*brushSize*map(start.pressure, 0, 1, 0.1, 2.0, true));
 
-        const endEdgeVectorLower    = p5.Vector.fromAngle(end.azimuthAngle, lowerSide*brushSize*map(end.force, 0, 0.3, 0.3, 2.0, true));
-        const endEdgeVectorHigher   = p5.Vector.fromAngle(end.azimuthAngle, higherSide*brushSize*map(end.force, 0, 0.3, 0.3, 2.0, true));
+        const endEdgeVectorLower    = p5.Vector.fromAngle(end.azimuth, lowerSide*brushSize*map(end.pressure, 0, 1, 0.1, 2.0, true));
+        const endEdgeVectorHigher   = p5.Vector.fromAngle(end.azimuth, higherSide*brushSize*map(end.pressure, 0, 1, 0.1, 2.0, true));
 
-        const averageDirection = atan2(sin(start.azimuthAngle)+sin(end.azimuthAngle), cos(start.azimuthAngle)+cos(end.azimuthAngle));
+        const averageDirection = atan2(sin(start.azimuth)+sin(end.azimuth), cos(start.azimuth)+cos(end.azimuth));
 
-        const midEdgeVectorLower    = p5.Vector.fromAngle(averageDirection, lowerSide*brushSize*map(avgForce, 0, 0.3, 0.3, 2.0, true));
-        const midEdgeVectorHigher   = p5.Vector.fromAngle(averageDirection, higherSide*brushSize*map(avgForce, 0, 0.3, 0.3, 2.0, true));
+        const midEdgeVectorLower    = p5.Vector.fromAngle(averageDirection, lowerSide*brushSize*map(avgPressure, 0, 1, 0.1, 2.0, true));
+        const midEdgeVectorHigher   = p5.Vector.fromAngle(averageDirection, higherSide*brushSize*map(avgPressure, 0, 1, 0.1, 2.0, true));
 
-        if (HSLColor.pseudoRandomSymmetricNumber(start.seed + i) < start.force * 4) {
+        if (HSLColor.pseudoRandomSymmetricNumber(start.seed + i) < start.pressure * 4) {
           const brushCol = this.settings.getColorWithVar(i + start.seed);
 
           if (this.settings.texture === "Round") {
@@ -280,7 +222,7 @@ class BrushStroke {
           }
         }
 
-        if (HSLColor.pseudoRandomSymmetricNumber(end.seed + i) < end.force * 4) {
+        if (HSLColor.pseudoRandomSymmetricNumber(end.seed + i) < end.pressure * 4) {
           const brushCol2 = this.settings.getColorWithVar(i + end.seed);
 
           if (this.settings.texture === "Round") {
@@ -356,7 +298,7 @@ class Painting {
   }
 
   get brushSettingsToAdjust() {
-    return editMode ? this.latestStroke.settings : currentBrush;
+    return Interaction.modifyLastStroke ? this.latestStroke.settings : currentBrush;
   }
 
   clearWithColor(color) {
@@ -393,12 +335,18 @@ class Painting {
     currentStroke.reset();
   }
 
-  updateStroke(newPoint) {
+  updateStroke(newInteraction) {
     if (this.editableStrokesInUse === 0) {
       console.log("nothing to update!");
       return;
     }
-    this.latestStroke.addPoint(newPoint);
+
+    this.latestStroke.addPoint({
+      x: newInteraction.x,
+      y: newInteraction.y,
+      azimuth: newInteraction.azimuth,
+      pressure: newInteraction.pressure
+    });
   }
 
   popLatestStroke() {
@@ -445,21 +393,792 @@ class Painting {
       //console.log("nothing to draw yet, only contains:", this.latestStroke.points.length, this.latestStroke)
       return;
     }
-    const start = this.latestStroke.points[0];
-    const newPoint = this.latestStroke.points[this.latestStroke.points.length-1];
 
-    //draw to the stroke buffer immediately
-    if (["Stamp Tool", "Fan Line Tool", "Brush Tool"].includes(this.latestStroke.settings.tool)) {
-    
-      const lastPoint = this.latestStroke.points[this.latestStroke.points.length - 2];
-      this.latestStroke.renderStrokePart(lastPoint, newPoint);
+    // draw to the stroke buffer immediately
+    // wip, some tools would be drawn in interface buffer instead and
+    // only added fully when the pen is lifted.
 
-    } else if (!pen.isDown && pen.wasDown) {
-      
-      // drawn when pen lifted
-      this.latestStroke.buffer.clear();
-      this.latestStroke.renderStrokePart(start, newPoint);
+    const lastPoint = this.latestStroke.points[this.latestStroke.points.length-2];
+    const newPoint  = this.latestStroke.points[this.latestStroke.points.length-1];
+
+    this.latestStroke.renderStrokePart(lastPoint, newPoint);
+  }
+
+  getPointRGB(point) {
+    // update eyedropper
+    currentPainting.applyAllStrokes();
+    const buffer = currentPainting.oldStrokesBuffer;
+
+    // go through a few pixels
+    const addRadiusPx = 2;
+    const colorsArr = [];
+    for (let x = -addRadiusPx; x <= addRadiusPx; x++) {
+      for (let y = -addRadiusPx; y <= addRadiusPx; y++) {
+        const rgbaColor = buffer.get(point.x + x, point.y + y);
+        if (rgbaColor[3] !==0) colorsArr.push(rgbaColor);
+      }
     }
+    if (colorsArr.length === 0) return;
+
+    let accumulatingRGB = [0, 0, 0];
+    for (const rgb of colorsArr) {
+      accumulatingRGB[0] += rgb[0];
+      accumulatingRGB[1] += rgb[1];
+      accumulatingRGB[2] += rgb[2];
+    }
+
+    return accumulatingRGB.map((component) => component / colorsArr.length);
+  }
+}
+
+
+// this is where most state should go, besides anything
+// that would be saved with the painting.
+
+class Interaction {
+
+  // WIP, just defaults. these should really adapt
+  static viewTransform = {
+    x: () => Math.floor((width - currentPainting.width)/2),
+    y: () => Math.floor((height - currentPainting.height)/2),
+    scale: 1
+  };
+
+  // temporary edit mode.
+  // if true, sliders and gizmos etc. will modify the last stroke
+  // rather than the brush settings for the upcoming one
+  static modifyLastStroke = false;
+  static UI_STATES = {
+    nothing_open: 'default',
+    eyedropper_open: 'eyedropper',
+    clover_open: 'clover',
+    hueAndVar_open: 'hueAndVar',
+    satAndLum_open: 'satAndLum',
+    size_open: 'size',
+  }
+  static currentUI = Interaction.UI_STATES.nothing_open;
+
+  // store just the current interaction sequence
+  // clear array if the type changes or pointers are added/removed
+  static currentType = null;
+  static currentSequence = [];
+  static lastInteractionEnd = null;
+
+  // 'enum' of possible current interactions that gestures belong to
+  static TYPES = {
+    painting: {
+      hover: 'hover',
+      initStroke: 'initStroke', // either leads to draw/move or menu opening
+      draw: 'draw',
+      move: 'move',
+      eyedropper: 'eyedropper',
+      zoom: 'zoom'
+    },
+    button: {
+      undo: 'undoButton',
+      edit: 'editButton',
+      clear: 'clearButton',
+      save: 'saveButton',
+      tool0: '0',
+      tool1: '1',
+      tool2: '2'
+    },
+    knob: {
+      jitter: 'jitterKnob',
+      size: 'sizeKnob'
+    },
+    slider: {
+      hue: 'hueSlider',
+      saturation: 'saturationSlider',
+      luminance: 'luminanceSlider'
+    },
+    gizmo: {
+      hueAndVar: 'hueAndVarGizmo',
+      satAndLum: 'satAndLumGizmo',
+      size: 'sizeGizmo',
+    }
+  };
+
+  static get isAlreadyDown() {
+    return (Interaction.currentType !== null && Interaction.currentType !== Interaction.TYPES.painting.hover);
+  }
+
+  static get referencePosition() {
+    return Interaction.lastInteractionEnd ?? Interaction.currentSequence[0];
+  }
+
+  static lostFocus() {
+    Interaction.currentType = null;
+    Interaction.currentSequence = [];
+    Interaction.currentUI = Interaction.UI_STATES.nothing_open;
+  }
+
+  static keyStart(key) {
+    if (key === "c") {
+      //Interaction.clearAction();
+    } else if (key === "s") {
+      Interaction.saveAction();
+      Interaction.resetCurrentSequence();
+    } else if (key === "u") {
+      Interaction.undoAction();
+      Interaction.resetCurrentSequence();
+    } else if (key === "e") {
+      Interaction.editAction();
+      Interaction.resetCurrentSequence();
+    } else if (key === "1") {
+      previousBrush = currentBrush.copy();
+      Interaction.currentUI = Interaction.UI_STATES.satAndLum_open;
+      Interaction.resetCurrentSequence();
+    } else if (key === "2") {
+      previousBrush = currentBrush.copy();
+      Interaction.currentUI = Interaction.UI_STATES.hueAndVar_open;
+      Interaction.resetCurrentSequence();
+    } else if (key === "3") {
+      previousBrush = currentBrush.copy();
+      Interaction.currentUI = Interaction.UI_STATES.size_open;
+      Interaction.resetCurrentSequence();
+    } else if (key === "4") {
+      previousBrush = currentBrush.copy();
+      Interaction.currentUI = Interaction.UI_STATES.eyedropper_open;
+    }
+  }
+
+  static resetCurrentSequence() {
+    Interaction.currentType = null;
+    if (Interaction.currentSequence.length > 0) {
+      Interaction.lastInteractionEnd = Interaction.currentSequence[Interaction.currentSequence.length-1];
+    }
+    Interaction.currentSequence = [];
+  }
+
+  static keyEnd(key) {
+    Interaction.currentUI = Interaction.UI_STATES.nothing_open;
+
+    if (key === "4") {
+      //eyedropper keeps hover state
+      return; 
+    }
+
+    if (key !== "e") {
+      Interaction.modifyLastStroke = false;
+    }
+
+    Interaction.currentType = null;
+    Interaction.currentSequence = [];
+  }
+
+  static saveAction() {
+    // commit strokes to the painting
+    currentPainting.applyAllStrokes();
+    currentPainting.download();
+  }
+
+  static clearAction() {
+    const prevCanvasColor = canvasColor.copy();
+    canvasColor = currentBrush.color.copy();
+    currentBrush.color = prevCanvasColor.copy();
+
+    currentPainting.clearWithColor(canvasColor);
+    document.body.style.backgroundColor = canvasColor.behind().hex;
+  }
+
+  static undoAction() {
+    currentPainting.popLatestStroke();
+    Interaction.modifyLastStroke = false;
+  }
+
+  static editAction() {
+    Interaction.modifyLastStroke = !Interaction.modifyLastStroke;
+    if (currentPainting.editableStrokesCount === 0) Interaction.modifyLastStroke = false;
+  }
+
+  static pickToolAction(index) {
+    const modifyBrush = currentPainting.brushSettingsToAdjust;
+    modifyBrush.tool = toolPresets[index].brush;
+    modifyBrush.texture = toolPresets[index].texture;
+
+    if (Interaction.modifyLastStroke) {
+      currentPainting.redrawLatestStroke();
+      Interaction.modifyLastStroke = false;
+    }
+    Interaction.currentUI = Interaction.UI_STATES.nothing_open;
+  }
+
+  static wasSurfaceType(x, y) {
+    if (y < 60) {
+      const button_width = 80;
+      const middle_width = 720;
+
+      if (x < button_width) {
+        // first button
+        return Interaction.TYPES.button.undo;
+
+      } else if (x < button_width * 2) {
+        // second button
+        return Interaction.TYPES.button.edit;
+
+      } else if (x > width - button_width) {
+        // rightmost button
+        return Interaction.TYPES.button.save;
+
+      } else if (x > width - button_width*2) {
+        // second to last
+        return Interaction.TYPES.button.clear;
+
+      } else {
+
+        const xInMiddleSection = x - width/2 + middle_width/2;
+        if (xInMiddleSection > 0) {
+
+          if (xInMiddleSection < 60) {
+            //var
+            return Interaction.TYPES.knob.jitter;
+
+          } else if (xInMiddleSection < 260) {
+            // luminance
+            return Interaction.TYPES.slider.luminance;
+
+          } else if (xInMiddleSection < 460) {
+            // luminance
+            return Interaction.TYPES.slider.saturation;
+
+          } else if (xInMiddleSection < 660) {
+            // hue
+            return Interaction.TYPES.slider.hue;
+
+          } else if (xInMiddleSection < 720) {
+            // size
+            return Interaction.TYPES.knob.size;
+
+          }
+        }
+      }
+    }
+
+    if (x < 80 && Interaction.currentUI === Interaction.UI_STATES.clover_open) {
+      const toolsY = y - height/2 + (toolPresets.length * 60)/2;
+      const toolIndex = Math.floor(toolsY / 60);
+
+      if (toolIndex === 0) {
+        return Interaction.TYPES.button.tool0;
+      } else if (toolIndex === 1) {
+        return Interaction.TYPES.button.tool1;
+      } else if (toolIndex === 2) {
+        return Interaction.TYPES.button.tool2;
+      }
+    }
+
+    return null;
+  }
+
+  static pointerStart(event) {
+
+    const new_interaction = Interaction.fromEvent(event);
+
+    if (!event.isPrimary && event.pointerType === "touch") {
+      if (Interaction.currentType === Interaction.TYPES.painting.initStroke) {
+        Interaction.currentType = Interaction.TYPES.painting.zoom;
+        Interaction.currentSequence.push(new_interaction);
+      }
+      return;
+    }
+
+    // tapped menu buttons
+    const surfaceType = Interaction.wasSurfaceType(new_interaction.x, new_interaction.y) ?? null;
+    // when no second pointer was already down
+    if (surfaceType !== null && !Interaction.isAlreadyDown) {
+
+      Interaction.currentType = surfaceType;
+      if (Object.values(Interaction.TYPES.knob).includes(Interaction.currentType)) {
+        // started on a knob
+        previousBrush = currentBrush.copy();
+        Interaction.currentSequence = [new_interaction];
+      } else if (Object.values(Interaction.TYPES.slider).includes(Interaction.currentType)) {
+        // started on a slider
+        previousBrush = currentBrush.copy();
+        Interaction.currentSequence = [new_interaction];
+      }
+      return;
+    }
+
+    if (!Interaction.isAlreadyDown) {
+      // new pointer down! no existing mode.
+
+      if (Interaction.currentUI === Interaction.UI_STATES.satAndLum_open) {
+
+        Interaction.currentSequence = [new_interaction];
+        Interaction.currentType = Interaction.TYPES.gizmo.satAndLum;
+
+      } else if (Interaction.currentUI === Interaction.UI_STATES.hueAndVar_open) {
+
+        Interaction.currentSequence = [new_interaction];
+        Interaction.currentType = Interaction.TYPES.gizmo.hueAndVar;
+        
+      } else if (Interaction.currentUI === Interaction.UI_STATES.size_open) {
+
+        Interaction.currentSequence = [new_interaction];
+        Interaction.currentType = Interaction.TYPES.gizmo.size;
+        
+      } else if (Interaction.currentUI === Interaction.UI_STATES.eyedropper_open) {
+
+        Interaction.currentSequence = [new_interaction];
+        Interaction.currentType = Interaction.TYPES.painting.eyedropper;
+        
+      } else {
+
+        // brushstroke
+        Interaction.currentSequence = [new_interaction];
+        Interaction.currentType = Interaction.TYPES.painting.initStroke;
+      }
+
+    } else {
+
+      // WIP...
+      console.log('something was already pressed, weird');
+
+    }
+  }
+
+  static pointerMove(event) {
+
+    const new_interaction = Interaction.fromEvent(event);
+
+    if (Interaction.currentType === Interaction.TYPES.painting.zoom) {
+      // either pointer moving produces a result
+      if (Interaction.currentSequence.length !== 2) {
+        console.log("wrong number of starting points for zoom...");
+        return;
+      }
+      const previousDistance = Interaction.distance2d(Interaction.currentSequence[0], Interaction.currentSequence[1]);
+      // replace a point
+      if (Interaction.currentSequence[0].id === event.pointerId) {
+        Interaction.currentSequence[0] = new_interaction;
+      } else if (Interaction.currentSequence[1].id === event.pointerId) {
+        Interaction.currentSequence[1] = new_interaction;
+      } else {
+        console.log("could not find a point that corredsponds to one of the zoom touches!")
+        return;
+      }
+      const newDistance = Interaction.distance2d(Interaction.currentSequence[0], Interaction.currentSequence[1]);
+      const distanceRatio = newDistance / previousDistance;
+      Interaction.viewTransform.scale *= distanceRatio;
+      return;
+    }
+
+    if (!event.isPrimary && event.pointerType === "touch") return;
+
+    if (Object.values(Interaction.TYPES.button).includes(Interaction.currentType)) {
+
+      // started on a button
+      const surfaceType = Interaction.wasSurfaceType(new_interaction.x, new_interaction.y);
+      if (surfaceType !== Interaction.currentType) {
+        // if no longer on the button, reset 
+        console.log("left the button")
+        Interaction.currentType = null;
+      }
+
+    } else if (Object.values(Interaction.TYPES.knob).includes(Interaction.currentType)) {
+
+      // started on a knob
+      const deltaX = new_interaction.x - Interaction.currentSequence[0].x;
+
+      if (deltaX === 0) return;
+      const brushToAdjust = currentPainting.brushSettingsToAdjust;
+      const deltaValue = deltaX * 0.002;
+      if (Interaction.currentType === Interaction.TYPES.knob.jitter) {
+        brushToAdjust.colorVar = constrain(previousBrush.colorVar + deltaValue, 0, 1);
+      } else if (Interaction.currentType === Interaction.TYPES.knob.size) {
+        brushToAdjust.size = constrain(previousBrush.size + deltaValue, 0, 1);
+      }
+
+    } else if (Object.values(Interaction.TYPES.slider).includes(Interaction.currentType)) {
+
+      // started on a slider
+      const middle_width = 720;
+      let xInMiddleSection = new_interaction.x - width/2 + middle_width/2;
+      const brushToAdjust = currentPainting.brushSettingsToAdjust;
+
+      if (Interaction.currentType === Interaction.TYPES.slider.luminance) {
+        const newValue = constrain((xInMiddleSection - 60) / 200, 0, 1);
+        brushToAdjust.color.setLuminance(newValue);
+      } else if (Interaction.currentType === Interaction.TYPES.slider.saturation) {
+        const newValue = constrain((xInMiddleSection - 260) / 200, 0, 1);
+        brushToAdjust.color.setSaturation(newValue);
+      } else if (Interaction.currentType === Interaction.TYPES.slider.hue) {
+        let newValue = (xInMiddleSection - 460) / 200;
+        if (newValue > 1) newValue %= 1;
+        if (newValue < 0) newValue = 1-(Math.abs(newValue) % 1);
+        brushToAdjust.color.setHue(newValue);
+      }
+
+    } else if (Interaction.currentType === null) {
+
+      // default, because no pointer down or last interaction was cancelled.
+      // if pointerMove happens in this state, it starts the hover interaction which leaves a trace behind
+
+      // check if over a button
+      const surfaceType = Interaction.wasSurfaceType(new_interaction.x, new_interaction.y) ?? null;
+      if (surfaceType !== null) {
+        return;
+      }
+
+      // start hover
+      Interaction.currentType = Interaction.TYPES.painting.hover;
+      Interaction.currentSequence.push(new_interaction);
+
+
+    } else if (Interaction.currentType === Interaction.TYPES.painting.hover) {
+
+      // check if hover over a button
+      const surfaceType = Interaction.wasSurfaceType(new_interaction.x, new_interaction.y) ?? null;
+      if (surfaceType !== null) {
+        Interaction.currentType = null;
+        Interaction.currentSequence = [];
+        return;
+      }
+
+      // continue hover sequence if beyond minimum distance travelled from last point.
+      const last_interaction = Interaction.currentSequence[Interaction.currentSequence.length-1];
+      if (Interaction.distance2d(last_interaction, new_interaction) > 2) {
+
+        if (Interaction.currentSequence.length >= 64) Interaction.currentSequence.shift();
+        Interaction.currentSequence.push(new_interaction);
+      }
+
+
+    } else if (Interaction.currentType === Interaction.TYPES.painting.initStroke) { 
+
+      // dragging over the canvas first starts this mode.
+      // switch to brushstroke/move/gizmo if moved far enough.
+      // otherwise, the interaction counts as a click: the clover gizmo will open/ close when the interaction ends.
+
+      const totalDeltaTime = new_interaction.timeStamp - Interaction.currentSequence[0].timeStamp;
+      const boxDistance = Interaction.distance2d(new_interaction, Interaction.currentSequence[0]);
+      const totalDistance = Interaction.currentSequence.reduce((sum, currentPoint, index, arr) => {
+        if (index < arr.length - 1) {
+          return sum + Interaction.distance2d(currentPoint, arr[index + 1]);
+        }
+        return sum;
+      }, 0);
+
+      // WIP, this needs tweaking
+      // and maybe putting elsewhere as a special constant
+      if (totalDeltaTime > 200 || totalDistance > 10 || boxDistance > 4) {
+        // was a drag, not a click
+
+        // dragging inside the clover menu starts a new interaction depending on the delta position
+        if (Interaction.currentUI === Interaction.UI_STATES.clover_open) {
+
+          // open specific gizmo
+          const basePosition = Interaction.referencePosition;
+          const deltaPos = {
+            x: new_interaction.x - basePosition.x,
+            y: new_interaction.y - basePosition.y
+          }
+
+          if (Math.abs(deltaPos.x) > 10 || Math.abs(deltaPos.y) > 10) {
+            if (Math.abs(deltaPos.x) > Math.abs(deltaPos.y)) {
+              // horizontal
+              if (deltaPos.x < 0) {
+                // start size gizmo
+                previousBrush = currentBrush.copy();
+                Interaction.currentUI = Interaction.UI_STATES.size_open;
+                Interaction.currentType = Interaction.TYPES.gizmo.size;
+              } else {
+                // start hue and var
+                previousBrush = currentBrush.copy();
+                Interaction.currentUI = Interaction.UI_STATES.hueAndVar_open;
+                Interaction.currentType = Interaction.TYPES.gizmo.hueAndVar;
+              }
+            } else {
+              // vertical
+              if (deltaPos.y < 0) {
+                // start eyedropper
+                Interaction.currentType = Interaction.TYPES.painting.eyedropper;
+                Interaction.currentUI = Interaction.UI_STATES.nothing_open;
+              } else {
+                // start lum and sat
+                previousBrush = currentBrush.copy();
+                Interaction.currentUI = Interaction.UI_STATES.satAndLum_open;
+                Interaction.currentType = Interaction.TYPES.gizmo.satAndLum;
+              }
+            }  
+          }
+
+          // wip, clicks in middle should open the last used gizmo immediately?
+
+        } else if (Interaction.modifyLastStroke) {
+          // move brushstroke
+          Interaction.currentType = Interaction.TYPES.painting.move;
+          // WIP actually do something
+
+        } else {
+          // start brushstroke
+          Interaction.currentType = Interaction.TYPES.painting.draw;
+          currentPainting.startStroke();
+
+          // draw the existing segments that have not been drawn yet all at once
+          // this code isn't pretty but seems to works
+          const segmentsToAddImmediately = [...Interaction.currentSequence, new_interaction];
+          let lastIndex = 0;
+          segmentsToAddImmediately.forEach((step, index) => {
+            if (index > 0) {
+              const lastStep = segmentsToAddImmediately[lastIndex];
+
+              if (Interaction.distance2d(lastStep, step) > 2) {
+                lastIndex = index - 1;
+                
+                currentPainting.updateStroke(step.addPaintingTransform());
+                currentPainting.continueDrawing();
+              }
+            } else {
+              currentPainting.updateStroke(step.addPaintingTransform());
+              currentPainting.continueDrawing();
+            }
+          })
+        }
+      }
+
+      Interaction.currentSequence.push(new_interaction);
+
+
+    } else if (Interaction.currentType === Interaction.TYPES.painting.draw) { 
+
+      // continue drag gesture
+      const last_interaction = Interaction.currentSequence[Interaction.currentSequence.length-1];
+      if (Interaction.distance2d(last_interaction, new_interaction) > 2) {
+        Interaction.currentSequence.push(new_interaction);
+        currentPainting.updateStroke(new_interaction.addPaintingTransform());
+        currentPainting.continueDrawing();
+      }
+
+    } else if (Interaction.currentType === Interaction.TYPES.painting.move) { 
+
+      const last_interaction = Interaction.currentSequence[Interaction.currentSequence.length-1];
+      const deltaMove = {
+        x: new_interaction.x - last_interaction.x,
+        y: new_interaction.y - last_interaction.y
+      }
+      currentPainting.moveLatestStroke(deltaMove.x, deltaMove.y);
+      Interaction.currentSequence.push(new_interaction);
+
+    } else if (Interaction.currentType === Interaction.TYPES.painting.eyedropper) {
+
+      Interaction.currentSequence = [new_interaction];
+      const brushToAdjust = currentPainting.brushSettingsToAdjust;
+      const combinedRGB = currentPainting.getPointRGB(new_interaction.addPaintingTransform());
+      brushToAdjust.color = HSLColor.fromRGBwithFallback(combinedRGB[0], combinedRGB[1], combinedRGB[2], brushToAdjust.color);
+      if (Interaction.modifyLastStroke) currentPainting.redrawLatestStroke();
+
+    } else if (Interaction.currentType === Interaction.TYPES.gizmo.satAndLum) { 
+
+      const brushToAdjust = currentPainting.brushSettingsToAdjust;
+      const brushToReference = previousBrush;
+
+      const deltaX = new_interaction.x - Interaction.currentSequence[0].x;
+      const deltaY = new_interaction.y - Interaction.currentSequence[0].y;
+      const rangeX = GIZMO_SIZE * 2;
+      const rangeY = GIZMO_SIZE * 2;
+
+      // Map to chroma and luminance
+      brushToAdjust.color.setSaturation(map( deltaX + rangeX * brushToReference.color.saturation, 0, rangeX, 0, 1, true));
+      brushToAdjust.color.setLuminance(map(-deltaY + rangeY * brushToReference.color.luminance, 0, rangeY, 0, 1, true));
+      if (Interaction.modifyLastStroke) currentPainting.redrawLatestStroke();
+
+    } else if (Interaction.currentType === Interaction.TYPES.gizmo.hueAndVar) { 
+
+      const brushToAdjust = currentPainting.brushSettingsToAdjust;
+      const brushToReference = previousBrush;
+
+      const deltaX = new_interaction.x - Interaction.currentSequence[0].x;
+      const deltaY = new_interaction.y - Interaction.currentSequence[0].y;
+      const rangeX = GIZMO_SIZE * 2;
+      const rangeY = GIZMO_SIZE * 2;
+
+      let newHue = map(deltaX + rangeX * brushToReference.color.hue, 0, rangeX, 0, 1);
+      if (newHue > 1) newHue %= 1;
+      if (newHue < 0) newHue = 1-(Math.abs(newHue) % 1);
+      brushToAdjust.color.setHue(newHue);
+      brushToAdjust.colorVar = map(-deltaY + rangeY * brushToReference.colorVar, 0, rangeY, 0, 1, true);
+      if (Interaction.modifyLastStroke) currentPainting.redrawLatestStroke();
+      
+    } else if (Interaction.currentType === Interaction.TYPES.gizmo.size) { 
+
+      const brushToAdjust = currentPainting.brushSettingsToAdjust;
+      const brushToReference = previousBrush;
+
+      const deltaY = new_interaction.y - Interaction.currentSequence[0].y;
+      const rangeY = GIZMO_SIZE * 2;
+      
+      brushToAdjust.size = map(-deltaY + rangeY * brushToReference.size, 0, rangeY, 0, 1, true);
+      if (Interaction.modifyLastStroke) currentPainting.redrawLatestStroke();
+    }
+  }
+
+  static pointerEnd(event) {
+
+    if (Interaction.currentType === Interaction.TYPES.painting.zoom) {
+      Interaction.currentType = null;
+      Interaction.currentSequence = [];
+      // other pointer end will be ignored
+    }
+
+    if (!event.isPrimary && event.pointerType === "touch") return;
+
+    const new_interaction = Interaction.fromEvent(event);
+    previousBrush = undefined;
+
+    if (Object.values(Interaction.TYPES.button).includes(Interaction.currentType)) {
+
+      // ended on button
+      if (Interaction.currentType === Interaction.TYPES.button.undo) {
+        Interaction.undoAction();
+      } else if (Interaction.currentType === Interaction.TYPES.button.edit) {
+        Interaction.editAction();
+      } else if (Interaction.currentType === Interaction.TYPES.button.clear) {
+        Interaction.clearAction();
+      } else if (Interaction.currentType === Interaction.TYPES.button.save) {
+        Interaction.saveAction();
+      } if (Interaction.currentType === Interaction.TYPES.button.tool0) {
+        Interaction.pickToolAction(0);
+      } if (Interaction.currentType === Interaction.TYPES.button.tool1) {
+        Interaction.pickToolAction(1);
+      } if (Interaction.currentType === Interaction.TYPES.button.tool2) {
+        Interaction.pickToolAction(2);
+      }
+      Interaction.currentType = null;
+      
+    } else if (Object.values(Interaction.TYPES.knob).includes(Interaction.currentType)) {
+
+      // started on a knob
+      Interaction.currentType = null;
+      Interaction.currentSequence = [];
+
+    } else if (Object.values(Interaction.TYPES.slider).includes(Interaction.currentType)) {
+
+      // started on a slider
+      Interaction.currentType = null;
+      Interaction.currentSequence = [];
+
+    } else if (Interaction.currentType === Interaction.TYPES.painting.draw) {
+
+      // try drawing here still,wip?
+      Interaction.currentType = null;
+      Interaction.lastInteractionEnd = Interaction.currentSequence[Interaction.currentSequence.length-1];
+      Interaction.currentSequence = [];
+
+    } else if (Interaction.currentType === Interaction.TYPES.painting.move) {
+
+      // try moving here still,wip?
+      Interaction.currentType = null;
+      Interaction.currentSequence = [];
+      Interaction.modifyLastStroke = false;
+
+    } else if (Interaction.currentType === Interaction.TYPES.painting.initStroke) {
+
+      // open menu
+      if (Interaction.currentUI === Interaction.UI_STATES.nothing_open) {
+        Interaction.currentUI = Interaction.UI_STATES.clover_open;
+      } else {
+        Interaction.currentUI = Interaction.UI_STATES.nothing_open;
+      }
+
+      Interaction.currentType = null;
+      Interaction.lastInteractionEnd = Interaction.currentSequence[Interaction.currentSequence.length-1]
+      Interaction.currentSequence = [];
+
+    } else if (Interaction.currentType === Interaction.TYPES.gizmo.size) {
+
+      Interaction.currentType = null;
+      Interaction.currentSequence = [];
+      Interaction.currentUI = Interaction.UI_STATES.nothing_open;
+      Interaction.modifyLastStroke = false;
+
+    } else if (Interaction.currentType === Interaction.TYPES.gizmo.hueAndVar) {
+
+      Interaction.currentType = null;
+      Interaction.currentSequence = [];
+      Interaction.currentUI = Interaction.UI_STATES.nothing_open;
+      Interaction.modifyLastStroke = false;
+
+    } else if (Interaction.currentType === Interaction.TYPES.gizmo.satAndLum) {
+
+      Interaction.currentType = null;
+      Interaction.currentSequence = [];
+      Interaction.currentUI = Interaction.UI_STATES.nothing_open;
+      Interaction.modifyLastStroke = false;
+
+    } else if (Interaction.currentType === Interaction.TYPES.painting.eyedropper) {
+
+      // actually pick the color again, wip?
+      Interaction.currentType = null;
+      Interaction.currentSequence = [];
+      Interaction.currentUI = Interaction.UI_STATES.nothing_open;
+      Interaction.modifyLastStroke = false;
+
+    } else {
+
+      console.log("unprocessed pointerEnd, interaction type was: " + Interaction.currentType);
+    
+    }
+  }
+
+  static pointerCancel(event) {
+
+    if (!event.isPrimary && event.pointerType === "touch") return;
+
+    if (Interaction.currentType !== null && Interaction.currentType !== Interaction.TYPES.painting.hover) {
+      console.log('pointer event cancelled.')
+    }
+
+    Interaction.currentType = null;
+    Interaction.currentSequence = [];
+  }
+
+  static fromEvent(event) {
+    return new Interaction( // WIP! needs to actually process event and generate these
+      event.clientX,
+      event.clientY,
+      event.azimuthAngle ?? tiltToAngle(event.tiltX, event.tiltY),
+      event.altitudeAngle,
+      (event.pointerType === 'mouse' || event.pointerType === 'touch') ? 0.5 : event.pressure,
+      event.timeStamp,
+      event.pointerId
+    );
+  }
+
+  static distance2d(interaction1, interaction2) {
+    const dx = interaction2.x - interaction1.x;
+    const dy = interaction2.y - interaction1.y;
+    return Math.hypot(dx, dy);
+  }
+
+  constructor(x, y, azimuth, altitude, pressure, timeStamp, id) {
+    this.x = x;
+    this.y = y;
+    this.azimuth = azimuth;
+    this.altitude = altitude;
+    this.pressure = pressure;
+    this.timeStamp = timeStamp;
+    this.id = id;
+  }
+
+  copy() {
+    return new Interaction(
+      this.x,
+      this.y,
+      this.azimuth,
+      this.altitude,
+      this.pressure,
+      this.timeStamp
+    );
+  }
+
+  addPaintingTransform() {
+    const modifiedInteraction = this.copy();
+    modifiedInteraction.x -= Interaction.viewTransform.x();
+    modifiedInteraction.y -= Interaction.viewTransform.y();
+    return modifiedInteraction;
   }
 }
 
@@ -624,20 +1343,22 @@ function setup() {
   cnv = createCanvas(windowWidth - 10, windowHeight - 10);
   newCanvasSize();
   cnv.id("myCanvas");
-  const el = document.getElementById("myCanvas");
-  el.addEventListener("touchstart", handleTouchStart);
-  el.addEventListener("touchmove", handleTouchMove);
-  el.addEventListener("touchend", handleTouchEnd);
-  el.addEventListener("pointerdown", handlePointerChangeEvent);
-  el.addEventListener("pointerup", handlePointerChangeEvent);
-  el.addEventListener("pointercancel", handlePointerChangeEvent);
-  el.addEventListener("pointermove", handlePointerMoveEvent);
-  noLoop();
-  
-  pen.x = width/2;
-  pen.y = height/2;
-  gadgetStartX = pen.x;
-  gadgetStartY = pen.y;
+  const canvasElement = document.getElementById("myCanvas");
+
+  canvasElement.addEventListener("pointerdown", Interaction.pointerStart);
+  canvasElement.addEventListener("pointerup", Interaction.pointerEnd);
+  canvasElement.addEventListener("pointercancel", Interaction.pointerCancel);
+  canvasElement.addEventListener("pointermove", Interaction.pointerMove);
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) {
+      Interaction.lostFocus();
+    }
+  });
+  canvasElement.addEventListener("pointerout", (event) => {
+    Interaction.pointerCancel(event);
+  });
+
+  // noLoop();
 
   currentPainting = new Painting(paintingState.width(), paintingState.height(), canvasColor);
 
@@ -650,19 +1371,26 @@ function setup() {
   interfaceBuffer.textAlign(LEFT, CENTER);
   newInterfaceSize();
   
-  draw();
+  // draw();
+}
+
+function keyPressed() {
+  Interaction.keyStart(key);
+}
+function keyReleased() {
+  Interaction.keyEnd(key);
 }
 
 function windowResized() {
   newCanvasSize();
   newInterfaceSize();
-  draw();
+  // draw();
 }
 
 function newCanvasSize() {
-  const scrollBarMargin = (isTouchControl === false) ? 10 : 0;
-  resizeCanvas(windowWidth - scrollBarMargin, windowHeight - 0);
-  gadgetRadius = (width > 300) ? 120 : 60;
+  //const scrollBarMargin = (isTouchControl === false) ? 10 : 0;
+  resizeCanvas(windowWidth - 10, windowHeight - 0);
+  GIZMO_SIZE = (width > 300) ? 120 : 60;
   print("Window size now", width, height, "Canvas size", paintingState.width(), paintingState.height());
 }
 
@@ -671,430 +1399,13 @@ function newInterfaceSize() {
   interfaceBuffer.textSize((width < height) ? 13 : 16);
 }
 
-function handleTouchStart(event) {
-  event.preventDefault();
-  if (isTouchControl === undefined) {
-    isTouchControl = true;
-    print("Device detected as touch-screen (use pencil and fingers if enabled)");
-  }
-  event.changedTouches.forEach((touch) => {
-    ongoingTouches.push(copyTouch(touch));
-  });
-  updateInput(event);
-  draw();
-}
-
-function handleTouchMove(event) { 
-  event.preventDefault();
-  event.changedTouches.forEach((touch) => {
-    let idx = ongoingTouchIndexById(touch.identifier);
-    if (idx >= 0) {
-      ongoingTouches.splice(idx, 1, copyTouch(touch)); // swap in the new touch record
-    }
-  });
-  updateInput(event);
-  draw();
-}
-function handleTouchEnd(event) { 
-  event.preventDefault();
-  event.changedTouches.forEach((touch) => {
-    let idx = ongoingTouchIndexById(touch.identifier);
-    ongoingTouches.splice(idx, 1); // remove it; we're done
-  });
-  if (event.touches.length === 0) {
-    ongoingTouches = [];
-  }
-  updateInput(event);
-  draw();
-}
-function copyTouch({identifier, clientX, clientY, force, touchType, azimuthAngle, altitudeAngle}) {
-  return {identifier, clientX, clientY, force, touchType, azimuthAngle, altitudeAngle};
-}
-
-function ongoingTouchIndexById(idToFind) {
-  for (let i = 0; i < ongoingTouches.length; i++) {
-    const id = ongoingTouches[i].identifier;
-
-    if (id === idToFind) {
-      return i;
-    }
-  }
-  return -1; // not found
-}
-
-function handlePointerChangeEvent(event) {
-  event.preventDefault();
-  if (isTouchControl === undefined) {
-    if (event.pointerType === "pen" || event.pointerType === "touch") {
-      isTouchControl = true;
-      print("Device detected as touch-screen (use pencil and fingers if enabled)");
-    }
-  }
-  if (isTouchControl) return;
-  updateInput(event);
-  draw();
-}
-
-function handlePointerMoveEvent(event) {
-  event.preventDefault();
-  if (event.pointerType === "mouse" && isTouchControl !== false) {
-    isTouchControl = false;
-    newCanvasSize();
-    newInterfaceSize();
-    print("Device detected as desktop due to pointer move");
-  }
-  if (event.pointerType === "pen" && isTouchControl === undefined) {
-    isTouchControl = false;
-    newCanvasSize();
-    newInterfaceSize();
-    print("Device detected as desktop due to pen move");
-  }
-  if (isTouchControl) return;
-  updateInput(event);
-  draw();
-}
-
-function updateInput(event) {
-
-  const startEventTypes = ["pointerdown", "touchstart"];
-  const endEventTypes = ["pointerup", "pointercancel", "touchend", "touchcancel"];
-
-  // menu first
-  const menuW = 80;
-  const menuH = 60 + ((inputMode() === "cloverMenu") ? 60 * toolPresets.length : 0);
-  
-  function tappedInMenu(x, y) {
-    if (!startEventTypes.includes(event.type)) return;
-
-    if (x < menuW && y < menuH && y > 60) {
-      const spot = Math.floor(y/60) - 1;
-      if (spot >= 0) {
-        const modifyBrush = currentPainting.brushSettingsToAdjust;
-        modifyBrush.tool = toolPresets[spot].brush;
-        modifyBrush.texture = toolPresets[spot].texture;
-        if (editMode) {
-          pen.lastX = undefined;
-          pen.lastY = undefined;
-          editMode = false;
-          currentPainting.redrawLatestStroke();
-        }
-      }
-      menuState.startedEventOnMenu = true;
-      menuState.onPage = 0;
-      return true;
-    }
-
-    // anything besides tools menu
-    if (y < 60) {
-      if (x > menuW*0 && x < menuW*1) {
-        doAction("undo");
-      } else if (x > menuW*1 && x < menuW*2) {
-        doAction("edit");
-      } else if (x > width-menuW*1 && x < width-menuW*0) {
-        doAction("save");
-      } else if (x > width-menuW*2 && x < width-menuW*1) {
-        doAction("clear");
-      } else if (x > width/2 - 360 && x < width/2 + 360) {
-        menuState.topSliderStartX = x;
-        updateBrushReferenceFromInput();
-      }
-      menuState.startedEventOnMenu = true;
-      return true;
-    }
-  }
-
-  if (!isTouchControl && ["touchstart", "touchmove", "touchend"].includes(event.type)) return;
-
-  // process touch/pen/mouse events on the canvas
-
-  pen.wasDown = pen.isDown;
-  pen.started = false;
-  //print(event.type + event.changedTouches[0].identifier + " ");
-
-  // desktop device could have a pen pointer device or mouse, also hover
-  if (isTouchControl === false) {
-
-    if (startEventTypes.includes(event.type)) {
-      pointerDown = true;
-    } else if (endEventTypes.includes(event.type)) {
-      pointerDown = false;
-    }
-
-    if (tappedInMenu(event.clientX, event.clientY)) return;
-    if (menuState.startedEventOnMenu && pointerDown) {
-      if (menuState.topSliderStartX !== undefined) {
-        menuState.topSliderDeltaX = event.clientX - menuState.topSliderStartX;
-      }
-      return;
-    }
-
-    if (startEventTypes.includes(event.type)) {
-      pen.isDown = true;
-    } else if (endEventTypes.includes(event.type)) {
-      pen.isDown = false;
-    }
-
-    pen.lastX = pen.x;
-    pen.lastY = pen.y;
-    pen.lastAngle = pen.angle;
-    pen.lastPressure = pen.pressure;
-    
-    hover.lastX = hover.x;
-    hover.lastY = hover.y;
-    hover.x = undefined;
-    hover.y = undefined;
-
-    if (pen.isDown) {
-      menuState.screenPointerX = event.clientX;
-      menuState.screenPointerY = event.clientY;
-      pen.x = event.clientX - paintingState.x();
-      pen.y = event.clientY - paintingState.y();
-  
-      // update pressure and angle
-      if (event.pointerType === "pen") {
-        if (event.pressure > 0) pen.pressure = event.pressure;
-        pen.angle = tiltToAngle(event.tiltX, event.tiltY);
-        // altitude, wip
-      }
-    } else if (!pointerDown) {
-      menuState.screenHoverX = event.clientX;
-      menuState.screenHoverY = event.clientY;
-      hover.x = event.clientX - paintingState.x();
-      hover.y = event.clientY - paintingState.y();
-      if (event.pointerType === "pen") {
-        
-        hover.angle = tiltToAngle(event.tiltX, event.tiltY);
-        // altitude, wip
-      }
-    }
-
-  } else {
-
-    // assume touch device without hover, look for stylus (apple pencil) pointer type
-
-    let containedPen = false;
-    ongoingTouches.forEach((touch) => {
-      if (tappedInMenu(touch.clientX, touch.clientY)) return;
-      if (menuState.startedEventOnMenu) {
-        if (menuState.topSliderStartX !== undefined) {
-          menuState.topSliderDeltaX = touch.clientX - menuState.topSliderStartX;
-        }
-        return;
-      }
-      if (touch.touchType === "stylus") {
-        // must be Pencil
-        pen.lastX = pen.x;
-        pen.lastY = pen.y;
-        pen.lastAngle = pen.angle;
-        pen.lastPressure = pen.pressure;
-        menuState.screenPointerX = touch.clientX;
-        menuState.screenPointerY = touch.clientY;
-        pen.x = touch.clientX - paintingState.x();
-        pen.y = touch.clientY - paintingState.y();
-        containedPen = true;
-        pen.angle = touch.azimuthAngle;
-        pen.altitude = touch.altitudeAngle;
-        pen.pressure = touch.force;
-      }
-    });
-    pen.isDown = containedPen;
-
-  }
-    
-
-  if (event === undefined) return;
-
-  // update state based on the result
-
-  if (endEventTypes.includes(event.type)) {
-    if (menuState.topSliderDeltaX !== undefined && editMode) editMode = false; // exit edit mode after using the slider
-    menuState.topSliderDeltaX = undefined;
-    menuState.topSliderStartX = undefined;
-    menuState.startedEventOnMenu = false;
-  }
-
-  // pen down
-  if (startEventTypes.includes(event.type) && pen.isDown) {
-    pen.startX = pen.x;
-    pen.startY = pen.y;
-    pen.startAngle = pen.angle;
-    pen.startPressure = pen.pressure;
-    pen.started = true;
-    pen.startTimeStamp = event.timeStamp;
-    if (!editMode && inputMode() === "draw") {
-      currentPainting.startStroke();
-    }
-    return;
-  }
-
-  // record
-  if (pen.isDown && !editMode && inputMode() === "draw") {
-    const addedPoint = {
-      x: pen.x,
-      y: pen.y,
-      azimuthAngle: pen.angle,
-      force: pen.pressure
-    }
-    currentPainting.updateStroke(addedPoint);
-  }
-
-  // pen lifted
-  if (pen.wasDown && !pen.isDown) {
-
-    pen.lastX = undefined;
-    pen.lastY = undefined;
-
-    const penDownDuration = event.timeStamp - pen.startTimeStamp;
-    const penDownBounds = dist(pen.startX, pen.startY, pen.x, pen.y);
-
-    const didNotDraw = (penDownDuration < 200 && penDownBounds < 20) || (penDownDuration < 400 && penDownBounds < 2);
-
-    // was drawing, but only short
-    if (inputMode() === 'draw' && didNotDraw) {
-
-      // this currently eats the undo. maybe bad...
-      if (!editMode) {
-        doAction("undo");
-      }
-      
-      menuState.onPage = 1;
-    } else if (inputMode() !== 'draw') {
-      if (menuState.onPage > 1) menuState.lastGadgetPage = menuState.onPage;
-      menuState.onPage = 0;
-    }
-    
-    if (!didNotDraw && editMode) {
-      // leave edit mode
-      // don't even send this as a confirm to draw
-      editMode = false;
-      pen.wasDown = false;
-    }
-
-    return;
-  }
-}
-
-function keyPressed() {
-  if (key === "c") {
-    //doAction("clear");
-  } else if (key === "s") {
-    doAction("save");
-  } else if (key === "u") {
-    doAction("undo");
-  } else if (key === "e") {
-    doAction("edit");
-  }
-  if (key !== undefined) draw();
-}
-
-function doAction(action) {
-
-  if (action === "undo") {
-
-    currentPainting.popLatestStroke();
-    editMode = false;
-
-  } else if (action === "clear") {
-
-    const prevCanvasColor = canvasColor.copy();
-    canvasColor = currentBrush.color.copy();
-    currentBrush.color = prevCanvasColor.copy();
-
-    currentPainting.clearWithColor(canvasColor);
-    document.body.style.backgroundColor = canvasColor.behind().hex;
-
-  } else if (action === "save") {
-
-    // commit strokes to the painting
-    currentPainting.applyAllStrokes();
-    currentPainting.download();
-
-  } else if (action === "edit") {
-
-    editMode = !editMode;
-    if (currentPainting.editableStrokesCount === 0) editMode = false;
-  }
-}
-
-function keyReleased() {
-  draw();
-}
-
-function inputMode() {
-  if (menuState.onPage === 1) {
-    return "cloverMenu";
-  }
-  //'1'
-  if (keyIsDown(49) || menuState.onPage === 2) {
-    return "satAndLum";
-  }
-  //'2'
-  if (keyIsDown(50) || menuState.onPage === 3) {
-    return "hue";
-  }
-  //'3'
-  if (keyIsDown(51) || menuState.onPage === 4) {
-    return "size";
-  }
-  //'4'
-  if (keyIsDown(52) || menuState.onPage === 5) {
-    return "eyedropper";
-  }
-
-  return "draw";
-}
-
 
 function draw() {
 
   background(canvasColor.behind().hex);
 
-  const wasInMenu = (currentInputMode !== "draw");
-  currentInputMode = inputMode();
-
-  if (currentInputMode !== "draw") { // menu opened
-
-    // save the old brush values as a reference when opening a menu
-    updateBrushReferenceFromInput();
-    // get the new changed brush values
-    updateBrushSettingsFromInput(currentInputMode);
-
-    if (editMode) currentPainting.redrawLatestStroke();
-
-  } else {
-    // clear the reference values so they could be changed again when opening a menu
-    if (menuState.startedEventOnMenu !== true) clearBrushReference();
-
-    if (!editMode && !wasInMenu) {
-      if (!pen.started && pen.isDown) {
-        
-        // draw brushstroke
-        currentPainting.continueDrawing();
-        // WIP
-        // or
-        // currentPainting.redrawLatestStroke();
-
-      }
-    } else if (editMode && pen.isDown) {
-      editState.lastX ??= pen.x;
-      editState.lastY ??= pen.y;
-
-      const deltaX = pen.x-editState.lastX;
-      const deltaY = pen.y-editState.lastY;
-
-      editState.lastX = pen.x;
-      editState.lastY = pen.y;
-
-      currentPainting.moveLatestStroke(deltaX, deltaY);
-
-    } else if (editMode) {
-      editState.lastX = undefined;
-      editState.lastY = undefined;
-    }
-  }
-
   // draw the UI to the ui buffer
-  redrawInterface(interfaceBuffer, currentInputMode); 
+  redrawInterface(interfaceBuffer); 
 
   // draw the painting buffer
   image(currentPainting.oldStrokesBuffer, paintingState.x(), paintingState.y());
@@ -1108,148 +1419,8 @@ function draw() {
   image(interfaceBuffer, 0, 0);
 }
 
-function clearBrushReference() {
-  gadgetStartX = undefined;
-  gadgetStartY = undefined;
 
-  previousBrush = undefined;
-
-  refHoverX = undefined;
-  refHoverY = undefined;
-  refScreenPointerX = undefined;
-  refScreenPointerY = undefined;
-  refScreenHoverX = undefined;
-  refScreenHoverY = undefined;
-}
-
-function updateBrushReferenceFromInput() {
-  // starting position
-  gadgetStartX ??= pen.x;
-  gadgetStartY ??= pen.y;
-  refHoverX ??= hover.x;
-  refHoverY ??= hover.y;
-  refScreenPointerX ??= menuState.screenPointerX;
-  refScreenPointerY ??= menuState.screenPointerY;
-  refScreenHoverX ??= menuState.screenHoverX;
-  refScreenHoverY ??= menuState.screenHoverY;
-
-  previousBrush ??= currentBrush.copy();
-}
-
-
-function updateBrushSettingsFromInput(currentInputMode) {
-
-  const penMode = (pen.startX !== undefined && pen.startY !== undefined)
-
-  if (currentInputMode === "cloverMenu") {
-
-    const affectedPageType = (pen.isDown) ? "onPage" : "hoverPage";
-
-    // Get positions
-    const deltaX = (pen.isDown ? pen.x : hover.x) - gadgetStartX;
-    const deltaY = (pen.isDown ? pen.y : hover.y) - gadgetStartY;
-
-    if (Math.abs(deltaX) > 10 || Math.abs(deltaY) > 10) {
-      if (Math.abs(deltaX) > Math.abs(deltaY)) {
-        // horizontal
-        menuState[affectedPageType] = (deltaX < 0) ? 4 : 3;
-      } else {
-        // vertical
-        menuState[affectedPageType] = (deltaY < 0) ? 5 : 2;
-      }  
-    } else if ((Math.abs(deltaX) > 0 || Math.abs(deltaY) > 0) && menuState.lastGadgetPage > 1) {
-      menuState[affectedPageType] = menuState.lastGadgetPage;
-    }
-    return;
-  } 
-  
-  if (!pen.isDown) return;
-
-  // which brush settings to take as the reference/starting point and which to write to
-  const brushToAdjust = currentPainting.brushSettingsToAdjust;
-  const brushToReference = previousBrush;
-
-  if (currentInputMode === "satAndLum") {
-
-    // Get positions
-    let deltaX = pen.x - (penMode ? pen.startX : gadgetStartX);
-    let deltaY = pen.y - (penMode ? pen.startY : gadgetStartY);
-
-    let rangeX = gadgetRadius * 2;
-    let rangeY = gadgetRadius * 2;
-
-    // Map to chroma and luminance
-    brushToAdjust.color.setSaturation(map( deltaX + rangeX * brushToReference.color.saturation, 0, rangeX, 0, 1, true));
-    brushToAdjust.color.setLuminance(map(-deltaY + rangeY * brushToReference.color.luminance, 0, rangeY, 0, 1, true));
-
-  } else if (currentInputMode === "hue") { // '1', hue and hue variation
-
-    // Get positions
-    let deltaX = pen.x - (penMode ? pen.startX : gadgetStartX);
-    let deltaY = pen.y - (penMode ? pen.startY : gadgetStartY);
-
-    let rangeX = gadgetRadius * 2;
-    let rangeY = gadgetRadius * 2;
-
-    brushToAdjust.color.setHue(map(deltaX + rangeX * brushToReference.color.hue, 0, rangeX, 0, 1));
-    brushToAdjust.colorVar = map(-deltaY + rangeY * brushToReference.colorVar, 0, rangeY, 0, 1, true);
-
-  } else if (currentInputMode === "size") {
-
-    const deltaY = pen.y - (penMode ? pen.startY : gadgetStartY);
-    const rangeY = gadgetRadius * 2;
-    
-    brushToAdjust.size = map(-deltaY + rangeY * brushToReference.size, 0, rangeY, 0, 1, true);
-  
-  } else if (currentInputMode === "eyedropper") {
-    currentPainting.applyAllStrokes();
-    const buffer = currentPainting.oldStrokesBuffer;
-
-    // go through a few pixels
-    const addRadiusPx = 2;
-    const colorsArr = [];
-    for (x = -addRadiusPx; x <= addRadiusPx; x++) {
-      for (y = -addRadiusPx; y <= addRadiusPx; y++) {
-        const rgbaColor = buffer.get(pen.x + x, pen.y + y);
-        if (rgbaColor[3] !==0) colorsArr.push(rgbaColor);
-      }
-    }
-    if (colorsArr.length === 0) return;
-
-    let accumulatingRGB = [0, 0, 0];
-    for (const rgb of colorsArr) {
-      accumulatingRGB[0] += rgb[0];
-      accumulatingRGB[1] += rgb[1];
-      accumulatingRGB[2] += rgb[2];
-    }
-
-    // set new color
-    brushToAdjust.color = HSLColor.fromRGBwithFallback(
-      accumulatingRGB[0] / colorsArr.length, 
-      accumulatingRGB[1] / colorsArr.length, 
-      accumulatingRGB[2] / colorsArr.length, 
-      brushToAdjust.color
-    );
-  }
-}
-
-
-// function drawWithPlaceholder(buffer, xa, ya, xb, yb, size) {
-//   if (xa === undefined || ya === undefined || xb === undefined || yb === undefined) return;
-
-//   // draw the line rect
-//   buffer.strokeWeight(size);
-//   buffer.strokeCap(SQUARE);
-//   buffer.line(xa, ya, xb, yb);
-
-//   buffer.strokeCap(ROUND);
-//   buffer.strokeWeight(6);
-//   buffer.noStroke();
-// }
-
-
-
-function redrawInterface(buffer, activeInputGadget) {
+function redrawInterface(buffer) {
   if (buffer === undefined) return;
 
   // Clear the UI buffer
@@ -1259,8 +1430,8 @@ function redrawInterface(buffer, activeInputGadget) {
   const uiColors = {};
   uiColors.bg = canvasColor.behind();
   uiColors.fg = uiColors.bg.copy()
-    .setLuminance(lerp(canvasColor.luminance, (canvasColor.luminance>0.5) ? 0 : 1, 0.7)); 
-  uiColors.fgDisabled = uiColors.fg.copy().setAlpha(0.2);
+    .setLuminance(lerp(canvasColor.luminance, (canvasColor.luminance>0.5) ? 0 : 1, 0.8)); 
+  uiColors.fgDisabled = uiColors.fg.copy().setAlpha(0.4);
   uiColors.constrastBg = uiColors.fg.copy()
     .setLuminance(lerp(canvasColor.luminance, canvasColor.luminance > 0.5 ? 1 : 0, 0.7)); 
   uiColors.onBrush = currentBrush.color.copy()
@@ -1272,46 +1443,51 @@ function redrawInterface(buffer, activeInputGadget) {
   buffer.rect(0, 0, width, 60);
   
   // MENUS
-  // Corner brush preview
+  // brush menu
   buffer.noStroke();
-  displayTool(currentBrush.tool, currentBrush.texture, 0, 0)
+  //displayTool(currentBrush.tool, currentBrush.texture, 0, 0)
 
-  if (inputMode() === "cloverMenu") {
+  if (Interaction.currentUI === Interaction.UI_STATES.clover_open) {
     toolPresets.forEach((tool, index) => {
-      displayTool(tool.brush, tool.texture, 0, index+1, tool.menuName);
+      const x = 0;
+      const y = height/2 + 60 * (-toolPresets.length*0.5 + index);
+      displayTool(tool.brush, tool.texture, x, y, tool.menuName);
     });
   }
 
-  function displayTool(menuBrushTool, menuTexture, spotX, spotY, menuName) {
+  function displayTool(menuBrushTool, menuTexture, x, y, menuName) {
+
+    const settings = currentBrush.copy();
+    settings.size = constrain(settings.size, 0.1, 0.3);
+    settings.tool = menuBrushTool;
+    settings.texture = menuTexture;
+    const isSelected = (currentBrush.tool === settings.tool && currentBrush.texture === settings.texture);
 
     buffer.push();
-    buffer.translate(30 + 80*spotX, 30 + 60*spotY);
+    buffer.translate(x, y);
 
-    if (spotY !== 0) {
-      // draw example
-      // wip, not sure why the angle 86 even makes sense.
-      const start = new BrushStrokePoint(-20, 0, 86, undefined);
-      const end = new BrushStrokePoint(60, 0, 86, undefined);
-      const settings = currentBrush.copy();
-      settings.size = constrain(settings.size, 0.1, 0.3);
-      settings.tool = menuBrushTool;
-      settings.texture = menuTexture;
-      
-      new BrushStroke(buffer, settings).renderStrokePart(start, end);
-    }
+    buffer.fill(uiColors.constrastBg.toHexWithSetAlpha(isSelected ? 0.2 : 1));
+    buffer.rect(0, 2, 100, 60-4, 0, 20, 20, 0);
 
+    // draw example
+    // wip, not sure why the angle 86 even makes sense.
+    const start = new BrushStrokePoint(0, 30, 86, undefined);
+    const end = new BrushStrokePoint(80, 30, 86, undefined);
+    
+    new BrushStroke(buffer, settings).renderStrokePart(start, end);
+
+    buffer.noStroke();
+    buffer.fill(uiColors.constrastBg.toHexWithSetAlpha(isSelected ? 0.8 : 0.3));
+    buffer.rect(0, 2, 100, 60-4, 0, 20, 20, 0);
+
+    buffer.textAlign(CENTER);
+    buffer.fill(isSelected ? uiColors.fgDisabled.hex : uiColors.fg.hex);
+    buffer.text(menuName, 40, 30-4);
+    buffer.textFont(fontMedium);
+    
+  
     buffer.pop();
 
-    if (spotY > 0) {
-      buffer.textAlign(CENTER);
-      buffer.stroke(currentBrush.color.hex);
-      buffer.strokeWeight(3);
-      buffer.fill(uiColors.onBrush.hex);
-      buffer.text(menuName, 0, 0 + 60*spotY, 80, 60 - 6);
-      buffer.textFont(fontMedium);
-      buffer.noStroke();
-      buffer.strokeWeight(6);
-    }
     buffer.textAlign(LEFT);
   }
 
@@ -1331,114 +1507,90 @@ function redrawInterface(buffer, activeInputGadget) {
 
   const noEditableStrokes = (currentPainting.editableStrokesCount === 0);
   topButton("undo" , topButtonWidth*0,             noEditableStrokes ? uiColors.fgDisabled : uiColors.fg);
-  topButton("edit" , topButtonWidth*1, editMode || noEditableStrokes ? uiColors.fgDisabled : uiColors.fg);
-  topButton("clear", width-topButtonWidth*2, uiColors.fg.copy().setHue(0.1).setSaturation(0.8));
+  topButton("edit" , topButtonWidth*1, Interaction.modifyLastStroke || noEditableStrokes ? uiColors.fgDisabled : uiColors.fg);
+  topButton("clear", width-topButtonWidth*2, new HSLColor(0.1, 0.8, (uiColors.fg.luminance > 0.5) ? 0.7 : 0.4));
   topButton("save" , width-topButtonWidth*1, uiColors.fg);
   
   buffer.fill(uiColors.fg.hex);
   buffer.textAlign(LEFT);
   buffer.textFont(fontMedium);
 
-
   // draw the sliders at the top
-  const drawSliders = (width > 980);
   const sliderStart = width/2 - 300;
-
-  if (drawSliders) {
+  if (width > 980) {
     let baseColor = currentPainting.brushSettingsToAdjust.color;
     drawGradientSlider(sliderStart, 0, 200, 60,     baseColor.copy().setLuminance(0), baseColor.copy().setLuminance(1), baseColor.luminance);
     drawGradientSlider(sliderStart+200, 0, 200, 60, baseColor.copy().setSaturation(0), baseColor.copy().setSaturation(1), baseColor.saturation);
     drawGradientSlider(sliderStart+400, 0, 200, 60, baseColor.copy().setHue(0), baseColor.copy().setHue(1), baseColor.hue);
+
+    // show difference
     if (previousBrush !== undefined) {
-      baseColor = previousBrush.color;
-      drawGradientSlider(sliderStart, 0, 200, 10,     baseColor.copy().setLuminance(0), baseColor.copy().setLuminance(1), baseColor.luminance);
-      drawGradientSlider(sliderStart+200, 0, 200, 10, baseColor.copy().setSaturation(0), baseColor.copy().setSaturation(1), baseColor.saturation);
-      drawGradientSlider(sliderStart+400, 0, 200, 10, baseColor.copy().setHue(0), baseColor.copy().setHue(1), baseColor.hue);
+      const prevColor = previousBrush.color;
+
+      if (prevColor.luminance !== baseColor.luminance) {
+        showGradientSliderDifference(
+          sliderStart, 0, 200, 60, 
+          prevColor.copy().setLuminance(0), prevColor.copy().setLuminance(1), 
+          prevColor.luminance, baseColor.luminance, 
+          "L: " + Math.floor(baseColor.luminance * 100) + "%"
+        );
+      }
+      if (prevColor.saturation !== baseColor.saturation) {
+        showGradientSliderDifference(
+          sliderStart + 200, 0, 200, 60, 
+          prevColor.copy().setSaturation(0), prevColor.copy().setSaturation(1), 
+          prevColor.saturation, baseColor.saturation, 
+          "S: " + Math.floor(baseColor.saturation * 100) + "%"
+        );
+      }
+      if (prevColor.hue !== baseColor.hue) {
+        showGradientSliderDifference(
+          sliderStart + 400, 0, 200, 60, 
+          prevColor.copy().setHue(0), prevColor.copy().setHue(1), 
+          prevColor.hue, baseColor.hue, 
+          "H:" + Math.floor(baseColor.hue*360) + "°"
+        );
+      }
+
+      if (previousBrush.colorVar !== currentBrush.colorVar) {
+        drawTooltipBelow(sliderStart - 30, 60, Math.round(currentBrush.colorVar * 100) + "%");
+      }
+      if (previousBrush.size !== currentBrush.size) {
+        drawTooltipBelow(sliderStart + 630, 60, Math.round(currentBrush.pxSize) + "px");
+      }
     }
+
+    // draw the variation indicator
     drawRoundColorExampleWithVariation(currentBrush, 55, sliderStart - 30, 30);
-  }
 
-
-  // bottom left/ top middle text
-  buffer.fill(uiColors.fg.hex);
-
-  // set new values
-  if (menuState.topSliderDeltaX !== undefined) {
-    const xFromLeftEdgeOfSliders = menuState.topSliderStartX + 360 - width/2;
-    const xFromLeftWithDelta = xFromLeftEdgeOfSliders + menuState.topSliderDeltaX;
-    let section = undefined;
-    let sectionValue = undefined;
-    let sectionValueText = "";
-
-    const brushToAdjust = currentPainting.brushSettingsToAdjust;
-
-    if (xFromLeftEdgeOfSliders < 60) {
-      section = "var";
-      sectionValue = constrain(previousBrush.colorVar + menuState.topSliderDeltaX * 0.002, 0, 1);
-      if (!isNaN(sectionValue)) brushToAdjust.colorVar = sectionValue;
-      sectionValueText = Math.floor(brushToAdjust.colorVar * 100) + "%";
-    } else if (xFromLeftEdgeOfSliders < 260) {
-      section = "luminance";
-      sectionValue = map(xFromLeftWithDelta, 60, 260, 0, 1.0, true);
-      brushToAdjust.color.setLuminance(sectionValue);
-      sectionValueText = Math.floor(brushToAdjust.color.luminance * 100) + "%";
-    } else if (xFromLeftEdgeOfSliders < 460) {
-      section = "saturation";
-      sectionValue = map(xFromLeftWithDelta, 260, 460, 0, 1.0, true);
-      brushToAdjust.color.setSaturation(sectionValue);
-      sectionValueText = Math.floor(brushToAdjust.color.saturation * 100) + "%";
-    } else if (xFromLeftEdgeOfSliders < 660) {
-      section = "hue";
-      sectionValue = map(xFromLeftWithDelta, 460, 660, 0, 1.0);
-      if (sectionValue > 1) sectionValue %= 1;
-      if (sectionValue < 0) sectionValue = 1-(Math.abs(sectionValue) % 1);
-      brushToAdjust.color.setHue(sectionValue);
-      sectionValueText = Math.floor(brushToAdjust.color.hue*360);
-    } else {
-      section = "size";
-      sectionValue = constrain(previousBrush.size + menuState.topSliderDeltaX * 0.002, 0, 1);
-      if (!isNaN(sectionValue)) brushToAdjust.size = sectionValue;
-      sectionValueText = Math.round(brushToAdjust.pxSize);
-    }
-
-    if (editMode) currentPainting.redrawLatestStroke();
-
-    buffer.textAlign(CENTER);
-    const textContent = section + ": " + sectionValueText;
-    const textPos = {
-      x: menuState.topSliderStartX + menuState.topSliderDeltaX,
-      y: 60 + 14
-    }
-    let bbox = fontMedium.textBounds(textContent, textPos.x, textPos.y);
-    buffer.fill(uiColors.constrastBg.toHexWithSetAlpha(0.5));
-    buffer.rect(bbox.x - bbox.w/2 - 13, bbox.y + bbox.h/2 - 4, bbox.w+26, bbox.h+12, 20);
-    buffer.fill(uiColors.fg.hex);
-    buffer.text(textContent, textPos.x, textPos.y);
-  }
-
-  buffer.textAlign(LEFT);
-  buffer.fill(uiColors.fg.hex);
-  const controlsInfo = (isTouchControl !== false) ? "pen required!" : "SHORTCUTS: 1-[Value] 2-[Hue] 3-[Size] 4-[Eyedrop] U-[Undo] E-[Edit] S-[Save]";
-  buffer.text(controlsInfo, 20, height - 20 - 12);
-
-  // draw the size indicator
-  if (drawSliders) {
+    // draw the size indicator
     buffer.drawingContext.save();
     buffer.fill(uiColors.constrastBg.toHexWithSetAlpha(0.5));
     buffer.rect(sliderStart + 600, 0, 60, 60, 20, 20, 20, 20);
     buffer.drawingContext.clip();
-
     drawSizeIndicator(buffer, currentBrush.pxSize, sliderStart + 630, 30);
-
     buffer.drawingContext.restore();
     buffer.noStroke();
   }
+
+  function showGradientSliderDifference(x, y, w, h, start, end, componentBefore, componentAfter, componentName) {
+    drawGradientSlider(x, 0, w, h/6, start, end, componentBefore);
+    drawTooltipBelow(x + componentAfter * w, h, componentName);
+  }
+
+  // bottom left/ top middle text
+  buffer.fill(uiColors.fg.hex);
+
+  buffer.textAlign(LEFT);
+  buffer.fill(uiColors.fg.hex);
+  const controlsInfo = "Keyboard: 1-[Value] 2-[Hue] 3-[Size] 4-[Eyedrop] U-[Undo] E-[Edit] S-[Save]";
+  buffer.text(controlsInfo, 20, height - 20 - 12);
 
   //reset text size
   buffer.textSize((width < height) ? 13 : 16);
 
   // draw rectangle around stroke being edited
-  if (editMode) {
+  if (Interaction.modifyLastStroke) {
     const bounds = currentPainting.latestStroke.bounds;
     if (bounds.width > 0 && bounds.height > 0) {
       const topLeft = {x: bounds.x, y: bounds.y};
@@ -1466,66 +1618,96 @@ function redrawInterface(buffer, activeInputGadget) {
     }
   }
 
-  // depending on input mode, draw the right gadget
-  drawActiveGadget();
-
-  // draw the hover preview
-  if ((activeInputGadget === "draw") && (isTouchControl === false) && !pen.isDown && !editMode && !pointerDown
-    && hover.x > 0 && hover.x < paintingState.width() && hover.y > 0 && hover.y < paintingState.height()
-  ) {
-    drawHoverBrushStroke(buffer);
+  // draw the right gadget
+  if (Interaction.currentUI !== Interaction.UI_STATES.nothing_open) {
+    drawActiveGadget();
   }
+  
+  // DEV STUFF, WIP
+  if (false) {
+    buffer.strokeWeight(2);
+    buffer.fill(uiColors.fg.hex)
+    buffer.text('ui: '         + (Interaction.currentUI ?? 'none'),              20,  80);
+    buffer.text('gesture: '    + (Interaction.currentType ?? 'none'),            20, 100);
+    buffer.text('points: '     + (Interaction.currentSequence.length ?? 'none'), 20, 120);
+    buffer.text('zoom: '       + (Interaction.viewTransform.scale ?? 'none'),    20, 140);
+
+  
+    if (Interaction.referencePosition !== undefined) {
+      buffer.stroke(new HSLColor(0.1, 1, 1.0).hex);
+      buffer.push();
+      buffer.translate(Interaction.referencePosition.x, Interaction.referencePosition.y);
+      buffer.line(-4, -4, 4, 4);
+      buffer.line(-4, 4, 4, -4);
+      buffer.pop();
+    }
+    
+    // Interaction.lastInteractionEnd.forEach((point) => {
+    //   buffer.fill(new HSLColor(0.6, 1, 1.0).hex);
+    //   buffer.rect(point.x, point.y, 2, 2)
+    // })
+    buffer.strokeWeight(2);
+    Interaction.currentSequence.forEach((point) => {
+      
+      buffer.stroke(new HSLColor(0.1, 1, 1.0).hex);
+      buffer.rect(point.x, point.y, 2, 2)
+      buffer.fill(new HSLColor(0.1, 1, 0.4).hex);
+      buffer.noStroke()
+      buffer.rect(point.x, point.y, 2, 2)
+    })
+  }
+
+
+  // hover indicator
+  if (Interaction.currentType === Interaction.TYPES.painting.hover 
+    && Interaction.currentSequence.length > 1
+    && !Interaction.modifyLastStroke
+    && Interaction.currentUI === Interaction.UI_STATES.nothing_open) {
+    const startInteraction = Interaction.currentSequence[Interaction.currentSequence.length-2];
+    const endInteraction = Interaction.currentSequence[Interaction.currentSequence.length-1];
+
+    const start = new BrushStrokePoint(startInteraction.x, startInteraction.y, startInteraction.angle);
+    const end = new BrushStrokePoint(endInteraction.x, endInteraction.y, endInteraction.angle);
+
+    new BrushStroke(buffer, currentBrush.copy()).renderStrokePart(start, end);
+  }
+  buffer.noStroke();
 
   // end of redrawInterface
 
-  function drawHoverBrushStroke(buffer) {
-    if (hover.lastX === undefined || hover.lastY === undefined) return;
 
-    // change from canvas to screen space
-    buffer.push();
-    buffer.translate(paintingState.x(), paintingState.y());
-
-    // draw hover stamp at the pen position
-
-    const start = new BrushStrokePoint(hover.lastX, hover.lastY, hover.angle);
-    const end = new BrushStrokePoint(hover.x, hover.y, hover.angle);
-
-    new BrushStroke(buffer, currentBrush.copy()).renderStrokePart(start, end);
-    
-    buffer.pop();
-  }
 
   function drawActiveGadget() {
 
-    if (activeInputGadget === "eyedropper") {
+    if (Interaction.currentUI === Interaction.UI_STATES.eyedropper_open) {
+
       buffer.fill(currentBrush.color.hex);
-      const screenX = (!pen.isDown) ? menuState.screenHoverX : menuState.screenPointerX;
-      const screenY = (!pen.isDown) ? menuState.screenHoverY : menuState.screenPointerY;
-      if (pen.isDown) drawRoundColorExampleWithVariation(currentBrush, currentBrush.pxSize, screenX, screenY);
-      drawCrosshair(currentBrush.pxSize, screenX, screenY);
+      const position = Interaction.currentSequence[Interaction.currentSequence.length-1];
+
+      // when actually eyedropping
+      if (Interaction.currentType === Interaction.TYPES.painting.eyedropper) {
+        drawRoundColorExampleWithVariation(currentBrush, currentBrush.pxSize, position.x, position.y);
+      }
+      
+      drawCrosshair(currentBrush.pxSize, position.x, position.y);
+
     }
 
     // draw the brush setting gadgets
-    const useBaseX = (refScreenHoverX !== undefined) ? refScreenHoverX : refScreenPointerX;
-    const useBaseY = (refScreenHoverY !== undefined) ? refScreenHoverY : refScreenPointerY;
+    const basePosition = Interaction.referencePosition;
 
-    if (useBaseX === undefined || useBaseY === undefined) return;
+    if (basePosition === undefined) return;
 
     const brushToVisualize = currentPainting.brushSettingsToAdjust;
 
     buffer.noStroke();
     buffer.fill(brushToVisualize.color.hex);
 
-    const sideDist = gadgetRadius; //(Math.max(width, height) > 4* gadgetRadius) ? gadgetRadius : gadgetRadius*0.5;
-    const ankerX = constrain(useBaseX, sideDist, width - sideDist);
-    const ankerY = constrain(useBaseY, sideDist, height - sideDist);
+    const sideDist = GIZMO_SIZE; //(Math.max(width, height) > 4* gadgetRadius) ? gadgetRadius : gadgetRadius*0.5;
+    const ankerX = constrain(basePosition.x, sideDist, width - sideDist);
+    const ankerY = constrain(basePosition.y, sideDist, height - sideDist);
 
-    if (activeInputGadget === "cloverMenu") {
-
-      // buffer.stroke(visHex);
-      // buffer.strokeWeight(2);
-      // buffer.line(ankerX-10, ankerY, ankerX+10, ankerY);
-      // buffer.line(ankerX, ankerY-10, ankerX, ankerY+10);
+    if (Interaction.currentUI === Interaction.UI_STATES.clover_open) {
 
       buffer.textAlign(CENTER);
       buffer.textStyle(BOLD);
@@ -1580,21 +1762,22 @@ function redrawInterface(buffer, activeInputGadget) {
         }
       }
 
-      const highlightedGadget = (menuState.hoverPage === null) ? menuState.lastGadgetPage : menuState.hoverPage;
+      const highlightedGadget = 0 // (menuState.hoverPage === null) ? menuState.lastGadgetPage : menuState.hoverPage;
+      // WIP, could reintroduce hover later
 
-      drawGadgetDirection(useBaseX, useBaseY, -1,  0, highlightedGadget === 4, "S");
-      drawGadgetDirection(useBaseX, useBaseY,  1,  0, highlightedGadget === 3, "H");
-      drawGadgetDirection(useBaseX, useBaseY,  0, -1, highlightedGadget === 5, "I");
-      drawGadgetDirection(useBaseX, useBaseY,  0,  1, highlightedGadget === 2, "LC");
+      drawGadgetDirection(basePosition.x, basePosition.y, -1,  0, highlightedGadget === 4, "S");
+      drawGadgetDirection(basePosition.x, basePosition.y,  1,  0, highlightedGadget === 3, "H");
+      drawGadgetDirection(basePosition.x, basePosition.y,  0, -1, highlightedGadget === 5, "I");
+      drawGadgetDirection(basePosition.x, basePosition.y,  0,  1, highlightedGadget === 2, "LC");
     
-    } else if (activeInputGadget === "hue") {
+    } else if (Interaction.currentUI === Interaction.UI_STATES.hueAndVar_open) {
 
-      const radius = gadgetRadius;
+      const radius = GIZMO_SIZE;
       buffer.push();
       buffer.translate(ankerX, ankerY);
 
       buffer.fill("black")
-      buffer.ellipse(0, 0, constrain(brushToVisualize.pxSize, 8, gadgetRadius/3)+2)
+      buffer.ellipse(0, 0, constrain(brushToVisualize.pxSize, 8, GIZMO_SIZE/3)+2)
 
       // var
       buffer.stroke("black");
@@ -1602,7 +1785,7 @@ function redrawInterface(buffer, activeInputGadget) {
       buffer.line(0, radius*2 * (brushToVisualize.colorVar - 1), 0, radius*2 * brushToVisualize.colorVar);
 
       buffer.strokeWeight(14);
-      drawColorAxis(0, radius*2 * (brushToVisualize.colorVar - 1), 0, radius*2 * brushToVisualize.colorVar, brushToVisualize.color, brushToVisualize.color, gadgetRadius, 1.0, 0.0);
+      drawColorAxis(0, radius*2 * (brushToVisualize.colorVar - 1), 0, radius*2 * brushToVisualize.colorVar, brushToVisualize.color, brushToVisualize.color, GIZMO_SIZE, 1.0, 0.0);
 
       // hue
       // stay centered since hue is a circle anyway
@@ -1613,7 +1796,7 @@ function redrawInterface(buffer, activeInputGadget) {
       const startColorHue = brushToVisualize.color.copy().setHue(brushToVisualize.color.hue - 0.5); 
       const endColorHue   = brushToVisualize.color.copy().setHue(brushToVisualize.color.hue + 0.5);
       buffer.strokeWeight(14);
-      drawColorAxis(radius*2 * -0.5, 0, radius*2 * (1-0.5), 0, startColorHue, endColorHue, gadgetRadius);
+      drawColorAxis(radius*2 * -0.5, 0, radius*2 * (1-0.5), 0, startColorHue, endColorHue, GIZMO_SIZE);
 
       buffer.pop();
 
@@ -1621,14 +1804,14 @@ function redrawInterface(buffer, activeInputGadget) {
       //const currentColorSize = constrain(brushToVisualize.pxSize, 8, gadgetRadius/3);
       drawRoundColorExampleWithVariation(brushToVisualize, 40, ankerX, ankerY);
 
-    } else if (activeInputGadget === "satAndLum") {
+    } else if (Interaction.currentUI === Interaction.UI_STATES.satAndLum_open) {
 
-      const radius = gadgetRadius;
+      const radius = GIZMO_SIZE;
       buffer.push();
       buffer.translate(ankerX, ankerY);
 
       buffer.fill("black")
-      buffer.ellipse(0, 0, constrain(brushToVisualize.pxSize, 8, gadgetRadius/3)+2)
+      buffer.ellipse(0, 0, constrain(brushToVisualize.pxSize, 8, GIZMO_SIZE/3)+2)
 
       const startColorLum = brushToVisualize.color.copy().setLuminance(1);
       const endColorLum   = brushToVisualize.color.copy().setLuminance(0);
@@ -1636,7 +1819,7 @@ function redrawInterface(buffer, activeInputGadget) {
       buffer.strokeWeight(16);
       buffer.line(0, radius*2 * (-1 + brushToVisualize.color.luminance), 0, radius*2 * brushToVisualize.color.luminance);
       buffer.strokeWeight(14);
-      drawColorAxis(0, radius*2 * (-1 + brushToVisualize.color.luminance), 0, radius*2 * brushToVisualize.color.luminance, startColorLum, endColorLum, gadgetRadius);
+      drawColorAxis(0, radius*2 * (-1 + brushToVisualize.color.luminance), 0, radius*2 * brushToVisualize.color.luminance, startColorLum, endColorLum, GIZMO_SIZE);
 
       const startColorSat = brushToVisualize.color.copy().setSaturation(0);
       const endColorSat   = brushToVisualize.color.copy().setSaturation(1);
@@ -1644,7 +1827,7 @@ function redrawInterface(buffer, activeInputGadget) {
       buffer.strokeWeight(16);
       buffer.line(radius*2 * -brushToVisualize.color.saturation, 0, radius*2 * (1-brushToVisualize.color.saturation), 0);
       buffer.strokeWeight(14);
-      drawColorAxis(radius*2 * -brushToVisualize.color.saturation, 0, radius*2 * (1-brushToVisualize.color.saturation), 0, startColorSat, endColorSat, gadgetRadius);
+      drawColorAxis(radius*2 * -brushToVisualize.color.saturation, 0, radius*2 * (1-brushToVisualize.color.saturation), 0, startColorSat, endColorSat, GIZMO_SIZE);
       
       buffer.pop();
 
@@ -1652,20 +1835,19 @@ function redrawInterface(buffer, activeInputGadget) {
       //const currentColorSize = constrain(brushToVisualize.pxSize, 8, gadgetRadius/3);
       drawRoundColorExampleWithVariation(brushToVisualize, 40, ankerX, ankerY);
 
-    } else if (activeInputGadget === "size") {
-
+    } else if (Interaction.currentUI === Interaction.UI_STATES.size_open) {
 
       const posX = ankerX;
-      const posY = ankerY - gadgetRadius;
-      const lineAddY = gadgetRadius * 2 * brushToVisualize.size;
+      const posY = ankerY - GIZMO_SIZE;
+      const lineAddY = GIZMO_SIZE * 2 * brushToVisualize.size;
       const lineTranslateY = posY + lineAddY;
 
       buffer.stroke(uiColors.constrastBg.toHexWithSetAlpha(0.3));
       buffer.strokeWeight(12);
-      buffer.line(posX, lineTranslateY - gadgetRadius,posX, lineTranslateY + gadgetRadius);
+      buffer.line(posX, lineTranslateY - GIZMO_SIZE,posX, lineTranslateY + GIZMO_SIZE);
       buffer.strokeWeight(10);
       buffer.stroke(uiColors.fg.toHexWithSetAlpha(0.3));
-      buffer.line(posX, lineTranslateY - gadgetRadius,posX, lineTranslateY + gadgetRadius);
+      buffer.line(posX, lineTranslateY - GIZMO_SIZE,posX, lineTranslateY + GIZMO_SIZE);
       buffer.noStroke();
 
       buffer.fill(brushToVisualize.color.toHexWithSetAlpha(0.5));
@@ -1686,6 +1868,19 @@ function redrawInterface(buffer, activeInputGadget) {
       buffer.fill(brush.getColorWithVar(i).hex);
       buffer.arc(x, y, size, size, start, stop);
     }
+  }
+
+  function drawTooltipBelow(x, y, text) {
+    buffer.textAlign(CENTER);
+    const textPos = {
+      x: x,
+      y: y + 14
+    }
+    let bbox = fontMedium.textBounds(text, textPos.x, textPos.y);
+    buffer.fill(uiColors.constrastBg.toHexWithSetAlpha(0.5));
+    buffer.rect(bbox.x - bbox.w/2 - 13, bbox.y + bbox.h/2 - 4, bbox.w+26, bbox.h+12, 20);
+    buffer.fill(uiColors.fg.hex);
+    buffer.text(text, textPos.x, textPos.y);
   }
 
   function drawSizeIndicator(buffer, size, x, y) {
