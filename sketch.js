@@ -2,20 +2,92 @@
 let openPainting = undefined;
 
 // based on canvas size
-let GIZMO_SIZE; 
+let GIZMO_SIZE = undefined; 
 
 // menu
-const drawingTools = [
+const PRESET_TOOLS = [
   {tool: "Brush Tool", texture: "Regular", menuName: "Default"},
   {tool: "Brush Tool", texture: "Rake",    menuName: "Rake" },
   {tool: "Brush Tool", texture: "Round",   menuName: "Round"},
 ];
 
-let fontRegular; let fontItalic; let fontMedium;
+let FONT_REGULAR; let FONT_ITALIC; let FONT_MEDIUM;
 function preload() {
-  fontRegular = loadFont('assets/IBMPlexSans-Regular.ttf');
-  fontItalic = loadFont('assets/IBMPlexSans-Italic.ttf');
-  fontMedium = loadFont('assets/IBMPlexSans-Medium.ttf');
+  FONT_REGULAR = loadFont('assets/IBMPlexSans-Regular.ttf');
+  FONT_ITALIC = loadFont('assets/IBMPlexSans-Italic.ttf');
+  FONT_MEDIUM = loadFont('assets/IBMPlexSans-Medium.ttf');
+}
+
+function setup() {
+  const cnv = createCanvas(windowWidth - 10, windowHeight - 10);
+  cnv.id("myCanvas");
+
+  // Create a graphics buffer for the indicator
+  UI.buffer = createGraphics(width, height);
+  Interaction.adjustCanvasSize(windowWidth, windowHeight);
+
+  // event listeners on the entire canvas element
+  const canvasElement = document.getElementById("myCanvas");
+  canvasElement.addEventListener("pointerdown", Interaction.pointerStart);
+  canvasElement.addEventListener("pointerup", Interaction.pointerEnd);
+  canvasElement.addEventListener("pointercancel", Interaction.pointerCancel);
+  canvasElement.addEventListener("pointermove", Interaction.pointerMove);
+  canvasElement.addEventListener("wheel", Interaction.wheelScrolled);
+  canvasElement.addEventListener("pointerout", (event) => {
+    Interaction.pointerCancel(event);
+  });
+
+  // event listeners on the document
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) { Interaction.lostFocus(); }
+  });
+  document.addEventListener("keydown", (event) => Interaction.keyStart(event.key));
+  document.addEventListener("keyup", (event) => Interaction.keyEnd(event.key));
+  window.addEventListener("resize", () => Interaction.adjustCanvasSize(windowWidth, windowHeight));
+
+  // initialize new painting
+  const INITIAL_CANVAS_COLOR = new HSLColor(0.6, 0.1, 0.15);
+  const INITIAL_CANVAS_DIMENSIONS = {
+    x: Math.min(width, height)-150,
+    y: Math.min(width, height)-150
+  }
+  const INITIAL_BRUSH_SETTINGS = new BrushSettings(
+    new HSLColor(0.6, 0.6, 0.7), 
+    0.35, 0.5, 
+    PRESET_TOOLS[0].tool, PRESET_TOOLS[0].texture
+  );
+  openPainting = new Painting(INITIAL_CANVAS_DIMENSIONS.x, INITIAL_CANVAS_DIMENSIONS.y, INITIAL_CANVAS_COLOR, INITIAL_BRUSH_SETTINGS);
+  document.body.style.backgroundColor = INITIAL_CANVAS_COLOR.behind().hex;
+}
+
+function draw() {
+  // behind everything
+  background(openPainting.canvasColor.behind().hex);
+
+  // draw the painting buffers
+  drawCenteredCanvas(openPainting.oldStrokesBuffer);
+  openPainting.usedEditableStrokes.forEach((stroke) => {
+    drawCenteredCanvas(stroke.buffer);
+  });
+
+  // draw the new UI to the buffer, then show on top of the screen
+  UI.redrawInterface(); 
+  image(UI.buffer, 0, 0);
+
+
+  function drawCenteredCanvas(buffer) {
+    if (Interaction.viewTransform.scale === 1) {
+      image(buffer, Interaction.viewTransform.flooredCornerX(), Interaction.viewTransform.flooredCornerY());
+      return;
+    }
+    const scaledSize = {
+      x: Math.round(Interaction.viewTransform.scale * openPainting.width),
+      y: Math.round(Interaction.viewTransform.scale * openPainting.height)
+    };
+    image(buffer, Interaction.viewTransform.flooredCornerX(), Interaction.viewTransform.flooredCornerY(), 
+      scaledSize.x, scaledSize.y
+    );
+  }
 }
 
 
@@ -44,7 +116,7 @@ class BrushSettings {
    * Get the actual size in pixels from the abstract 0-1 size value. Not linear.
    */
   get pxSize() {
-    const pxSize = map(easeInCirc(this.size, 0, 1), 0, 1, 4, 600);
+    const pxSize = map(easeInCirc(this.size), 0, 1, 4, 600);
     return pxSize;
   }
 
@@ -641,8 +713,8 @@ class Interaction {
 
   static pickToolAction(index) {
     const modifyBrush = openPainting.brushSettingsToAdjust;
-    modifyBrush.tool = drawingTools[index].tool;
-    modifyBrush.texture = drawingTools[index].texture;
+    modifyBrush.tool = PRESET_TOOLS[index].tool;
+    modifyBrush.texture = PRESET_TOOLS[index].texture;
 
     if (Interaction.modifyLastStroke) {
       openPainting.redrawLatestStroke();
@@ -703,7 +775,7 @@ class Interaction {
     }
 
     if (x < 80 && Interaction.currentUI === Interaction.UI_STATES.clover_open) {
-      const toolsY = y - height/2 + (drawingTools.length * 60)/2;
+      const toolsY = y - height/2 + (PRESET_TOOLS.length * 60)/2;
       const toolIndex = Math.floor(toolsY / 60);
 
       if (toolIndex === 0) {
@@ -749,6 +821,7 @@ class Interaction {
         // started on a slider
         Interaction.addToBrushHistory();
         Interaction.currentSequence = [new_interaction];
+        Interaction.currentUI = Interaction.UI_STATES.nothing_open;
       }
       return;
     }
@@ -851,6 +924,7 @@ class Interaction {
     } else if (Object.values(Interaction.TYPES.knob).includes(Interaction.currentType)) {
 
       // started on a knob
+      Interaction.currentUI = Interaction.UI_STATES.nothing_open;
       const deltaX = new_interaction.x - Interaction.currentSequence[0].x;
 
       if (deltaX === 0) return;
@@ -1229,12 +1303,33 @@ class Interaction {
     return new Interaction(
       event.clientX,
       event.clientY,
-      event.azimuthAngle ?? tiltToAngle(event.tiltX, event.tiltY),
+      event.azimuthAngle ?? Interaction.tiltToAngle(event.tiltX, event.tiltY),
       event.altitudeAngle,
       event.pressure,
       event.timeStamp,
       event.pointerId
     );
+  }
+
+  static tiltToAngle(tiltX, tiltY) {
+    // perpendicular
+    if (tiltX === 0 && tiltY === 0) return undefined;
+    if (tiltX === undefined || tiltY === undefined) return undefined;
+  
+    //converts to radians
+    radX = map(tiltX, -90, 90, -HALF_PI, HALF_PI)
+    radY = map(tiltY, -90, 90,  HALF_PI, -HALF_PI)
+  
+    // from https://gist.github.com/k3a/2903719bb42b48c9198d20c2d6f73ac1
+    const y =  Math.cos(radX) * Math.sin(radY); 
+    const x = -Math.sin(radX) * -Math.cos(radY); 
+    //const z = -Math.cos(radX) * -Math.cos(radY); 
+    let azimuthRad = -Math.atan2(y, x); //+ HALF_PI;
+  
+    // to range 0 to TWO_PI
+    if (azimuthRad < 0) azimuthRad += TWO_PI;
+  
+    return azimuthRad;
   }
 
   static distance2d(interaction1, interaction2) {
@@ -1436,7 +1531,7 @@ class UI {
   static redrawInterface() {
     // reset
     UI.buffer.clear();
-    UI.buffer.textFont(fontMedium);
+    UI.buffer.textFont(FONT_MEDIUM);
     UI.buffer.textAlign(LEFT, CENTER);
     UI.buffer.noStroke();
   
@@ -1454,16 +1549,16 @@ class UI {
     // MENUS
     // brush menu
     if (Interaction.currentUI === Interaction.UI_STATES.clover_open) {
-      drawingTools.forEach((preset, index) => {
+      PRESET_TOOLS.forEach((preset, index) => {
         const x = 0;
-        const y = height/2 + 60 * (-drawingTools.length*0.5 + index);
+        const y = height/2 + 60 * (-PRESET_TOOLS.length*0.5 + index);
         UI.displayTool(preset.tool, preset.texture, x, y, preset.menuName);
       });
     }
   
     // top menu buttons
     UI.buffer.textAlign(CENTER);
-    UI.buffer.textFont(fontMedium);
+    UI.buffer.textFont(FONT_MEDIUM);
   
     const noEditableStrokes = (openPainting.editableStrokesCount === 0);
     UI.drawButton("undo" ,       UI.BUTTON_WIDTH*0, 0, noEditableStrokes ? UI.palette.fgDisabled : UI.palette.fg);
@@ -1475,7 +1570,7 @@ class UI {
     
     UI.buffer.fill(UI.palette.fg.hex);
     UI.buffer.textAlign(LEFT);
-    UI.buffer.textFont(fontMedium);
+    UI.buffer.textFont(FONT_MEDIUM);
   
     // draw the sliders at the top
     const sliderStart = width/2 - 300;
@@ -1649,7 +1744,7 @@ class UI {
     UI.buffer.textAlign(CENTER);
     UI.buffer.fill(isSelected ? UI.palette.fgDisabled.hex : UI.palette.fg.hex);
     UI.buffer.text(menuName, 40, 30-4);
-    UI.buffer.textFont(fontMedium);
+    UI.buffer.textFont(FONT_MEDIUM);
     
   
     UI.buffer.pop();
@@ -1783,7 +1878,7 @@ class UI {
       x: x,
       y: y + 14
     }
-    let bbox = fontMedium.textBounds(text, textPos.x, textPos.y);
+    let bbox = FONT_MEDIUM.textBounds(text, textPos.x, textPos.y);
     UI.buffer.fill(UI.palette.constrastBg.toHexWithSetAlpha(0.5));
     UI.buffer.rect(bbox.x - bbox.w/2 - 13, bbox.y + bbox.h/2 - 4, bbox.w+26, bbox.h+12, 20);
     UI.buffer.fill(UI.palette.fg.hex);
@@ -2031,114 +2126,11 @@ class UI {
   }
 }
 
-function setup() {
-  
-  const cnv = createCanvas(windowWidth - 10, windowHeight - 10);
-  cnv.id("myCanvas");
 
-  // Create a graphics buffer for the indicator
-  UI.buffer = createGraphics(width, height);
-  Interaction.adjustCanvasSize(windowWidth, windowHeight);
-
-  // event listeners on the entire canvas element
-  const canvasElement = document.getElementById("myCanvas");
-  canvasElement.addEventListener("pointerdown", Interaction.pointerStart);
-  canvasElement.addEventListener("pointerup", Interaction.pointerEnd);
-  canvasElement.addEventListener("pointercancel", Interaction.pointerCancel);
-  canvasElement.addEventListener("pointermove", Interaction.pointerMove);
-  canvasElement.addEventListener("wheel", Interaction.wheelScrolled);
-  canvasElement.addEventListener("pointerout", (event) => {
-    Interaction.pointerCancel(event);
-  });
-
-  // event listeners on the document
-  document.addEventListener("visibilitychange", () => {
-    if (document.hidden) { Interaction.lostFocus(); }
-  });
-  document.addEventListener("keydown", (event) => Interaction.keyStart(event.key));
-  document.addEventListener("keyup", (event) => Interaction.keyEnd(event.key));
-  window.addEventListener("resize", () => Interaction.adjustCanvasSize(windowWidth, windowHeight));
-
-  // initialize new painting
-  const INITIAL_CANVAS_COLOR = new HSLColor(0.6, 0.1, 0.15);
-  const INITIAL_CANVAS_DIMENSIONS = {
-    x: Math.min(width, height)-150,
-    y: Math.min(width, height)-150
-  }
-  const INITIAL_BRUSH_SETTINGS = new BrushSettings(
-    new HSLColor(0.6, 0.6, 0.7), 
-    0.35, 0.5, 
-    drawingTools[0].tool, drawingTools[0].texture
-  );
-  openPainting = new Painting(INITIAL_CANVAS_DIMENSIONS.x, INITIAL_CANVAS_DIMENSIONS.y, INITIAL_CANVAS_COLOR, INITIAL_BRUSH_SETTINGS);
-  document.body.style.backgroundColor = INITIAL_CANVAS_COLOR.behind().hex;
-}
-
-function draw() {
-
-  background(openPainting.canvasColor.behind().hex);
-
-  // draw the painting buffers
-  drawCenteredCanvas(openPainting.oldStrokesBuffer);
-  openPainting.usedEditableStrokes.forEach((stroke) => {
-    drawCenteredCanvas(stroke.buffer);
-  });
-
-  // draw the new UI to the buffer
-  // show on top
-  UI.redrawInterface(); 
-  image(UI.buffer, 0, 0);
-}
-
-
-function drawCenteredCanvas(buffer) {
-  if (Interaction.viewTransform.scale === 1) {
-    image(buffer, Interaction.viewTransform.flooredCornerX(), Interaction.viewTransform.flooredCornerY());
-    return;
-  }
-  const scaledSize = {
-    x: Math.round(Interaction.viewTransform.scale * openPainting.width),
-    y: Math.round(Interaction.viewTransform.scale * openPainting.height)
-  };
-  image(buffer, Interaction.viewTransform.flooredCornerX(), Interaction.viewTransform.flooredCornerY(), 
-    scaledSize.x, scaledSize.y
-  );
-}
-
-
-function easeInCirc(x, from, to) {
-  if (from === undefined) {
-    return 1 - Math.sqrt(1 - Math.pow(x, 2));
-  }
-  return ((1 - Math.sqrt(1 - Math.pow((x - from) / (to - from), 2))) * (to - from) +from);
-}
-
-function easeOutCubic(x) {
-  return 1 - Math.pow(1 - x, 3);
-}
-
-function tiltToAngle(tiltX, tiltY) {
-  // perpendicular
-  if (tiltX === 0 && tiltY === 0) return undefined;
-  if (tiltX === undefined || tiltY === undefined) return undefined;
-
-  //converts to radians
-  radX = map(tiltX, -90, 90, -HALF_PI, HALF_PI)
-  radY = map(tiltY, -90, 90,  HALF_PI, -HALF_PI)
-
-  // from https://gist.github.com/k3a/2903719bb42b48c9198d20c2d6f73ac1
-  const y =  Math.cos(radX) * Math.sin(radY); 
-  const x = -Math.sin(radX) * -Math.cos(radY); 
-  //const z = -Math.cos(radX) * -Math.cos(radY); 
-  let azimuthRad = -Math.atan2(y, x); //+ HALF_PI;
-
-  // to range 0 to TWO_PI
-  if (azimuthRad < 0) azimuthRad += TWO_PI;
-
-  return azimuthRad;
-}
-
-function xorshift(seed) {
+// math utils
+const easeInCirc = (x) => 1 - Math.sqrt(1 - Math.pow(x, 2));
+const easeOutCubic = (x) => 1 - Math.pow(1 - x, 3);
+const xorshift = (seed) => {
   seed ^= (seed << 21);
   seed ^= (seed >>> 35);
   seed ^= (seed << 4);
