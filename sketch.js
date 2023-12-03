@@ -478,7 +478,8 @@ class Interaction {
       save: 'saveButton',
       tool0: '0',
       tool1: '1',
-      tool2: '2'
+      tool2: '2',
+      help: 'helpButton'
     },
     knob: {
       jitter: 'jitterKnob',
@@ -505,9 +506,7 @@ class Interaction {
   }
 
   static adjustCanvasSize(windowWidth, windowHeight) {
-    //const scrollBarMargin = (isTouchControl === false) ? 10 : 0;
-    resizeCanvas(windowWidth - 10, windowHeight - 0);
-  
+    resizeCanvas(windowWidth, windowHeight);
     UI.buffer.resizeCanvas(width, height);
     UI.buffer.textSize((width < height) ? 13 : 16);
     GIZMO_SIZE = (width > 300) ? 120 : 60;
@@ -592,6 +591,10 @@ class Interaction {
     // commit strokes to the painting
     openPainting.applyAllStrokes();
     openPainting.download();
+  }
+
+  static toggleHelp() {
+    UI.showingHelp = !UI.showingHelp;
   }
 
   static clearAction() {
@@ -687,6 +690,10 @@ class Interaction {
       } else if (toolIndex === 2) {
         return Interaction.TYPES.button.tool2;
       }
+    }
+
+    if (x > width - UI.BUTTON_WIDTH && y > height - 60) {
+      return Interaction.TYPES.button.help;
     }
 
     return null;
@@ -1065,7 +1072,9 @@ class Interaction {
         Interaction.clearAction();
       } else if (Interaction.currentType === Interaction.TYPES.button.save) {
         Interaction.saveAction();
-      } if (Interaction.currentType === Interaction.TYPES.button.tool0) {
+      } else if (Interaction.currentType === Interaction.TYPES.button.help) {
+        Interaction.toggleHelp();
+      }if (Interaction.currentType === Interaction.TYPES.button.tool0) {
         Interaction.pickToolAction(0);
       } if (Interaction.currentType === Interaction.TYPES.button.tool1) {
         Interaction.pickToolAction(1);
@@ -1360,11 +1369,13 @@ class HSLColor {
   }
 }
 
-
+// Drawn to a buffer every frame - anything on top of the painting.
+// Buttons etc. are realized here, not in HTML/CSS for extra control.
 class UI {
 
-  static TOP_BUTTON_WIDTH = 80;
+  static BUTTON_WIDTH = 80;
 
+  static showingHelp = false;
   static buffer = undefined;
   static palette = {};
 
@@ -1401,10 +1412,12 @@ class UI {
     UI.buffer.textFont(fontMedium);
   
     const noEditableStrokes = (openPainting.editableStrokesCount === 0);
-    UI.drawTopButton("undo" , UI.TOP_BUTTON_WIDTH*0, noEditableStrokes ? UI.palette.fgDisabled : UI.palette.fg);
-    UI.drawTopButton("edit" , UI.TOP_BUTTON_WIDTH*1, Interaction.modifyLastStroke || noEditableStrokes ? UI.palette.fgDisabled : UI.palette.fg);
-    UI.drawTopButton("clear", width-UI.TOP_BUTTON_WIDTH*2, new HSLColor(0.1, 0.8, (UI.palette.fg.luminance > 0.5) ? 0.7 : 0.4));
-    UI.drawTopButton("save" , width-UI.TOP_BUTTON_WIDTH*1, UI.palette.fg);
+    UI.drawButton("undo" ,       UI.BUTTON_WIDTH*0, 0, noEditableStrokes ? UI.palette.fgDisabled : UI.palette.fg);
+    UI.drawButton("edit" ,       UI.BUTTON_WIDTH*1, 0, Interaction.modifyLastStroke || noEditableStrokes ? UI.palette.fgDisabled : UI.palette.fg);
+    UI.drawButton("clear", width-UI.BUTTON_WIDTH*2, 0, new HSLColor(0.1, 0.8, (UI.palette.fg.luminance > 0.5) ? 0.7 : 0.4));
+    UI.drawButton("save" , width-UI.BUTTON_WIDTH*1, 0, UI.palette.fg);
+
+    UI.drawButton("help" , width-UI.BUTTON_WIDTH*1, height-60, UI.showingHelp ? UI.palette.fgDisabled : UI.palette.fg);
     
     UI.buffer.fill(UI.palette.fg.hex);
     UI.buffer.textAlign(LEFT);
@@ -1478,11 +1491,14 @@ class UI {
     }
   
     // bottom left/ top middle text
-    UI.buffer.fill(UI.palette.fg.hex);
     UI.buffer.textAlign(LEFT);
-    UI.buffer.fill(UI.palette.fg.hex);
-    const controlsInfo = "Keyboard: 1-[Value] 2-[Hue] 3-[Size] 4-[Eyedrop] U-[Undo] E-[Edit] S-[Save]";
-    UI.buffer.text(controlsInfo, 20, height - 20 - 12);
+
+    if (UI.showingHelp) {
+      UI.buffer.fill(UI.palette.fg.hex);
+      const controlsInfo = "Keyboard: 1-[Value] 2-[Hue] 3-[Size] 4-[Eyedrop] U-[Undo] E-[Edit] S-[Save]";
+      UI.buffer.text(controlsInfo, 20, height - 20 - 12);
+    }
+
   
     //reset text size
     UI.buffer.textSize((width < height) ? 13 : 16);
@@ -1608,11 +1624,11 @@ class UI {
     UI.buffer.drawingContext.restore();
   }
 
-  static drawTopButton(text, x, textColor) {
+  static drawButton(text, x, y, textColor) {
     UI.buffer.fill(UI.palette.constrastBg.toHexWithSetAlpha(0.5));
-    UI.buffer.rect(x+3, 0, UI.TOP_BUTTON_WIDTH-6, 60, 0, 0, 20, 20);
+    UI.buffer.rect(x+3, y+4, UI.BUTTON_WIDTH-6, 60-8, 20, 20, 20, 20);
     UI.buffer.fill(textColor.hex);
-    UI.buffer.text(text, x, 0, UI.TOP_BUTTON_WIDTH, 60 - 8);
+    UI.buffer.text(text, x, y, UI.BUTTON_WIDTH, 60 - 8);
   }
 
   static drawVariedColorCircle(brush, size, x, y) {
