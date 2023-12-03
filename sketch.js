@@ -436,9 +436,11 @@ class Interaction {
 
   // WIP, just defaults. these should really adapt
   static viewTransform = {
-    x: () => Math.floor((width - Math.round(openPainting.width*Interaction.viewTransform.scale))/2),
-    y: () => Math.floor((height - Math.round(openPainting.height*Interaction.viewTransform.scale))/2),
-    scale: 1
+    scale: 1,
+    panX: 0,
+    panY: 0,
+    flooredCornerX: () => Math.floor(Interaction.viewTransform.panX + width /2 - (Math.round(openPainting.width*Interaction.viewTransform.scale))/2),
+    flooredCornerY: () => Math.floor(Interaction.viewTransform.panY + height/2 - (Math.round(openPainting.height*Interaction.viewTransform.scale))/2)
   };
 
   // temporary edit mode.
@@ -519,11 +521,32 @@ class Interaction {
   }
 
   static wheelScrolled(event) {
-
     event.preventDefault();
+    const new_interaction = Interaction.fromEvent(event);
 
-    Interaction.viewTransform.scale += event.deltaY * -0.002;
-    Interaction.viewTransform.scale = Math.min(Math.max(Interaction.viewTransform.scale, 0.1), 3.0);
+    const zoomFactor = Math.pow(1.002, -event.deltaY);
+
+    Interaction.zoomTo(new_interaction.x, new_interaction.y, zoomFactor);
+  }
+
+  static zoomTo(screenX, screenY, factor) {
+
+    // do the zoom
+    Interaction.viewTransform.scale *= factor;
+
+    // reset all if the zoom was too far out
+    if (Interaction.viewTransform.scale < 0.3) {
+      Interaction.viewTransform.scale = 1;
+      Interaction.viewTransform.panX = 0;
+      Interaction.viewTransform.panY = 0;
+      return;
+    }
+
+    // add offset - subtract zoom position, scale, then add again.
+    const screenXfromCenter = screenX - width / 2;
+    const screenYfromCenter = screenY - height / 2;
+    Interaction.viewTransform.panX = (Interaction.viewTransform.panX - screenXfromCenter) * factor + screenXfromCenter;
+    Interaction.viewTransform.panY = (Interaction.viewTransform.panY - screenYfromCenter) * factor + screenYfromCenter;
   }
 
   static keyStart(key) {
@@ -779,7 +802,15 @@ class Interaction {
         console.log("wrong number of starting points for zoom...");
         return;
       }
+
+      // get distance and average of the points.
       const previousDistance = Interaction.distance2d(Interaction.currentSequence[0], Interaction.currentSequence[1]);
+      const previousAverage = {
+        x: (Interaction.currentSequence[0].x + Interaction.currentSequence[1].x) / 2,
+        y: (Interaction.currentSequence[0].y + Interaction.currentSequence[1].y) / 2,
+      }
+
+      // update the points.
       // replace a point
       if (Interaction.currentSequence[0].id === event.pointerId) {
         Interaction.currentSequence[0] = new_interaction;
@@ -789,9 +820,19 @@ class Interaction {
         console.log("could not find a point that corredsponds to one of the zoom touches!")
         return;
       }
+
+      // get distance and average of the new points.
       const newDistance = Interaction.distance2d(Interaction.currentSequence[0], Interaction.currentSequence[1]);
-      const distanceRatio = newDistance / previousDistance;
-      Interaction.viewTransform.scale *= distanceRatio;
+      const newAverage = {
+        x: (Interaction.currentSequence[0].x + Interaction.currentSequence[1].x) / 2,
+        y: (Interaction.currentSequence[0].y + Interaction.currentSequence[1].y) / 2,
+      }
+
+      // zoom on new center
+      Interaction.zoomTo(newAverage.x, newAverage.y,  newDistance / previousDistance);
+      // pan.
+      Interaction.viewTransform.panX += newAverage.x - previousAverage.x;
+      Interaction.viewTransform.panY += newAverage.y - previousAverage.y;
       return;
     }
 
@@ -1172,12 +1213,25 @@ class Interaction {
   }
 
   static fromEvent(event) {
-    return new Interaction( // WIP! needs to actually process event and generate these
+    if (event.pointerType === 'mouse' || event.pointerType === 'touch') {
+      // don't trust angle and pressure data. just send undefined, since it might default to a value like 0.5.
+      return new Interaction(
+        event.clientX,
+        event.clientY,
+        undefined,
+        undefined,
+        undefined,
+        event.timeStamp,
+        event.pointerId
+      );
+    }
+    // this is a pen, probably. if angles aren't directly provided, calculate from tilt.
+    return new Interaction(
       event.clientX,
       event.clientY,
       event.azimuthAngle ?? tiltToAngle(event.tiltX, event.tiltY),
       event.altitudeAngle,
-      (event.pointerType === 'mouse' || event.pointerType === 'touch') ? 0.5 : event.pressure,
+      event.pressure,
       event.timeStamp,
       event.pointerId
     );
@@ -1212,8 +1266,8 @@ class Interaction {
 
   addPaintingTransform() {
     const modifiedInteraction = this.copy();
-    modifiedInteraction.x -= Interaction.viewTransform.x();
-    modifiedInteraction.y -= Interaction.viewTransform.y();
+    modifiedInteraction.x -= Interaction.viewTransform.flooredCornerX();
+    modifiedInteraction.y -= Interaction.viewTransform.flooredCornerY();
     modifiedInteraction.x /= Interaction.viewTransform.scale;
     modifiedInteraction.y /= Interaction.viewTransform.scale;
     return modifiedInteraction;
@@ -1932,6 +1986,13 @@ class UI {
     UI.buffer.noStroke();
   }
 
+  static screenToViewTransform() {
+    // WIP. consider that this could be done by actually changing the coords, not using scale.
+    // then these UI elements would stay crisp and lines equally sized on screen.
+    UI.buffer.translate(Interaction.viewTransform.flooredCornerX(), Interaction.viewTransform.flooredCornerY());
+    UI.buffer.scale(Interaction.viewTransform.scale)
+  }
+
   static drawBounds(bounds) {
     if (bounds.width === 0 || bounds.height === 0) return;
 
@@ -1939,8 +2000,7 @@ class UI {
     const botRight = {x: bounds.x + bounds.width, y: bounds.y + bounds.height};
 
     UI.buffer.push();
-    UI.buffer.translate(Interaction.viewTransform.x(), Interaction.viewTransform.y());
-
+    UI.screenToViewTransform();
     UI.buffer.stroke(UI.palette.constrastBg.hex);
     UI.buffer.strokeWeight(3);
     UI.buffer.line(topLeft.x, topLeft.y, botRight.x, topLeft.y);
@@ -2022,14 +2082,14 @@ function draw() {
 
 function drawCenteredCanvas(buffer) {
   if (Interaction.viewTransform.scale === 1) {
-    image(buffer, Interaction.viewTransform.x(), Interaction.viewTransform.y());
+    image(buffer, Interaction.viewTransform.flooredCornerX(), Interaction.viewTransform.flooredCornerY());
     return;
   }
   const scaledSize = {
     x: Math.round(Interaction.viewTransform.scale * openPainting.width),
     y: Math.round(Interaction.viewTransform.scale * openPainting.height)
   };
-  image(buffer, Interaction.viewTransform.x(), Interaction.viewTransform.y(), 
+  image(buffer, Interaction.viewTransform.flooredCornerX(), Interaction.viewTransform.flooredCornerY(), 
     scaledSize.x, scaledSize.y
   );
 }
@@ -2049,6 +2109,7 @@ function easeOutCubic(x) {
 function tiltToAngle(tiltX, tiltY) {
   // perpendicular
   if (tiltX === 0 && tiltY === 0) return undefined;
+  if (tiltX === undefined || tiltY === undefined) return undefined;
 
   //converts to radians
   radX = map(tiltX, -90, 90, -HALF_PI, HALF_PI)
