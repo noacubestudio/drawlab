@@ -8,12 +8,6 @@ let canvasColor = undefined;
 let currentBrush = undefined;
 let previousBrush = undefined;
 
-const paintingState = {
-  width: () => Math.min(width, height)-150,
-  height: () => Math.min(width, height)-150,
-  x: () => Math.floor((width - paintingState.width())/2),
-  y: () => Math.floor((height - paintingState.height())/2),
-}
 let GIZMO_SIZE; // based on canvas size
 
 // menu
@@ -439,8 +433,8 @@ class Interaction {
 
   // WIP, just defaults. these should really adapt
   static viewTransform = {
-    x: () => Math.floor((width - currentPainting.width)/2),
-    y: () => Math.floor((height - currentPainting.height)/2),
+    x: () => Math.floor((width - Math.round(currentPainting.width*Interaction.viewTransform.scale))/2),
+    y: () => Math.floor((height - Math.round(currentPainting.height*Interaction.viewTransform.scale))/2),
     scale: 1
   };
 
@@ -511,6 +505,14 @@ class Interaction {
     Interaction.currentType = null;
     Interaction.currentSequence = [];
     Interaction.currentUI = Interaction.UI_STATES.nothing_open;
+  }
+
+  static wheelScrolled(event) {
+
+    event.preventDefault();
+
+    Interaction.viewTransform.scale += event.deltaY * -0.002;
+    Interaction.viewTransform.scale = Math.min(Math.max(Interaction.viewTransform.scale, 0.1), 3.0);
   }
 
   static keyStart(key) {
@@ -673,6 +675,7 @@ class Interaction {
 
   static pointerStart(event) {
 
+    event.preventDefault();
     const new_interaction = Interaction.fromEvent(event);
 
     if (!event.isPrimary && event.pointerType === "touch") {
@@ -741,6 +744,7 @@ class Interaction {
 
   static pointerMove(event) {
 
+    event.preventDefault();
     const new_interaction = Interaction.fromEvent(event);
 
     if (Interaction.currentType === Interaction.TYPES.painting.zoom) {
@@ -1017,6 +1021,7 @@ class Interaction {
 
   static pointerEnd(event) {
 
+    event.preventDefault();
     if (Interaction.currentType === Interaction.TYPES.painting.zoom) {
       Interaction.currentType = null;
       Interaction.currentSequence = [];
@@ -1125,6 +1130,7 @@ class Interaction {
 
   static pointerCancel(event) {
 
+    event.preventDefault();
     if (!event.isPrimary && event.pointerType === "touch") return;
 
     if (Interaction.currentType !== null && Interaction.currentType !== Interaction.TYPES.painting.hover) {
@@ -1178,6 +1184,8 @@ class Interaction {
     const modifiedInteraction = this.copy();
     modifiedInteraction.x -= Interaction.viewTransform.x();
     modifiedInteraction.y -= Interaction.viewTransform.y();
+    modifiedInteraction.x /= Interaction.viewTransform.scale;
+    modifiedInteraction.y /= Interaction.viewTransform.scale;
     return modifiedInteraction;
   }
 }
@@ -1349,6 +1357,7 @@ function setup() {
   canvasElement.addEventListener("pointerup", Interaction.pointerEnd);
   canvasElement.addEventListener("pointercancel", Interaction.pointerCancel);
   canvasElement.addEventListener("pointermove", Interaction.pointerMove);
+  canvasElement.addEventListener("wheel", Interaction.wheelScrolled);
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) {
       Interaction.lostFocus();
@@ -1360,7 +1369,7 @@ function setup() {
 
   // noLoop();
 
-  currentPainting = new Painting(paintingState.width(), paintingState.height(), canvasColor);
+  currentPainting = new Painting(Math.min(width, height)-150, Math.min(width, height)-150, canvasColor);
 
   document.body.style.backgroundColor = canvasColor.behind().hex;
 
@@ -1391,7 +1400,6 @@ function newCanvasSize() {
   //const scrollBarMargin = (isTouchControl === false) ? 10 : 0;
   resizeCanvas(windowWidth - 10, windowHeight - 0);
   GIZMO_SIZE = (width > 300) ? 120 : 60;
-  print("Window size now", width, height, "Canvas size", paintingState.width(), paintingState.height());
 }
 
 function newInterfaceSize() {
@@ -1408,15 +1416,32 @@ function draw() {
   redrawInterface(interfaceBuffer); 
 
   // draw the painting buffer
-  image(currentPainting.oldStrokesBuffer, paintingState.x(), paintingState.y());
+
+
+  drawCenteredCanvas(currentPainting.oldStrokesBuffer);
 
   // draw the still editable brushstrokes
   currentPainting.usedEditableStrokes.forEach((stroke) => {
-    image(stroke.buffer, paintingState.x(), paintingState.y());
+    drawCenteredCanvas(stroke.buffer);
   });
   
   // draw the indicator buffer in the top left corner
   image(interfaceBuffer, 0, 0);
+}
+
+
+function drawCenteredCanvas(buffer) {
+  if (Interaction.viewTransform.scale === 1) {
+    image(buffer, Interaction.viewTransform.x(), Interaction.viewTransform.y());
+    return;
+  }
+  const scaledSize = {
+    x: Math.round(Interaction.viewTransform.scale * currentPainting.width),
+    y: Math.round(Interaction.viewTransform.scale * currentPainting.height)
+  };
+  image(buffer, Interaction.viewTransform.x(), Interaction.viewTransform.y(), 
+    scaledSize.x, scaledSize.y
+  );
 }
 
 
@@ -1437,10 +1462,6 @@ function redrawInterface(buffer) {
   uiColors.onBrush = currentBrush.color.copy()
     .setLuminance(lerp(currentBrush.color.luminance, (currentBrush.color.luminance>0.5) ? 0:1, 0.7))
     .setSaturation(currentBrush.color.saturation * 0.5);
-
-  // Background borders
-  buffer.fill(uiColors.bg.hex);
-  buffer.rect(0, 0, width, 60);
   
   // MENUS
   // brush menu
@@ -1597,7 +1618,7 @@ function redrawInterface(buffer) {
       const botRight = {x: bounds.x + bounds.width, y: bounds.y + bounds.height};
 
       buffer.push();
-      buffer.translate(paintingState.x(), paintingState.y());
+      buffer.translate(Interaction.viewTransform.x(), Interaction.viewTransform.y());
 
       buffer.stroke(uiColors.constrastBg.hex);
       buffer.strokeWeight(3);
