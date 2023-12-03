@@ -813,6 +813,7 @@ class Interaction {
       } else if (Interaction.currentType === Interaction.TYPES.knob.size) {
         brushToAdjust.size = constrain(openPainting.previousBrush.size + deltaValue, 0, 1);
       }
+      if (Interaction.modifyLastStroke) openPainting.redrawLatestStroke();
 
     } else if (Object.values(Interaction.TYPES.slider).includes(Interaction.currentType)) {
 
@@ -833,6 +834,7 @@ class Interaction {
         if (newValue < 0) newValue = 1-(Math.abs(newValue) % 1);
         brushToAdjust.color.setHue(newValue);
       }
+      if (Interaction.modifyLastStroke) openPainting.redrawLatestStroke();
 
     } else if (Interaction.currentType === null) {
 
@@ -917,8 +919,9 @@ class Interaction {
               // vertical
               if (deltaPos.y < 0) {
                 // start eyedropper
+                Interaction.addToBrushHistory();
                 Interaction.currentType = Interaction.TYPES.painting.eyedropper;
-                Interaction.currentUI = Interaction.UI_STATES.nothing_open;
+                Interaction.currentUI = Interaction.UI_STATES.eyedropper_open;
               } else {
                 // start lum and sat
                 Interaction.addToBrushHistory();
@@ -1710,6 +1713,8 @@ class UI {
   static drawCurrentGizmo() {
   
     if (Interaction.currentUI === Interaction.UI_STATES.eyedropper_open) {
+
+      if (Interaction.currentSequence.length === 0) return;
 
       UI.buffer.fill(openPainting.currentBrush.color.hex);
       const position = Interaction.currentSequence[Interaction.currentSequence.length-1];
