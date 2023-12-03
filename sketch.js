@@ -1,20 +1,14 @@
-// defined in setup() once
-let cnv;
-let interfaceBuffer = undefined; // in setup()
-let currentPainting = undefined; // in setup()
+// init in setup()
+let openPainting = undefined;
 
-// initially set in setup()
-let canvasColor = undefined;
-let currentBrush = undefined;
-let previousBrush = undefined;
-
-let GIZMO_SIZE; // based on canvas size
+// based on canvas size
+let GIZMO_SIZE; 
 
 // menu
-let toolPresets = [
-  {brush: "Brush Tool", texture: "Regular", menuName: "Default"},
-  {brush: "Brush Tool", texture: "Rake",    menuName: "Rake" },
-  {brush: "Brush Tool", texture: "Round",   menuName: "Round"},
+const drawingTools = [
+  {tool: "Brush Tool", texture: "Regular", menuName: "Default"},
+  {tool: "Brush Tool", texture: "Rake",    menuName: "Rake" },
+  {tool: "Brush Tool", texture: "Round",   menuName: "Round"},
 ];
 
 let fontRegular; let fontItalic; let fontMedium;
@@ -23,7 +17,6 @@ function preload() {
   fontItalic = loadFont('assets/IBMPlexSans-Italic.ttf');
   fontMedium = loadFont('assets/IBMPlexSans-Medium.ttf');
 }
-
 
 
 class BrushSettings {
@@ -93,7 +86,7 @@ class BrushStroke {
    * @param {p5.graphics} buffer A p5 Graphics buffer.
    * @param {BrushSettings} settings The settings for the brush. May be modified later. 
    */
-  constructor(buffer, settings = currentBrush.copy()) {
+  constructor(buffer, settings) {
     this.buffer = buffer;
     this.points = [];
     this.settings = settings;
@@ -120,7 +113,7 @@ class BrushStroke {
   reset() {
     this.buffer.clear();
     this.points = [];
-    this.settings = currentBrush.copy();
+    this.settings = undefined;
   }
 
   renderWholeStroke() {
@@ -260,15 +253,23 @@ class Painting {
    * @param {number} width The initial width in pixels.
    * @param {number} height The initial height in pixels.
    * @param {HSLColor} backgroundColor The initial background color.
+   * @param {BrushSettings} startingBrush The initial brush settings.
    */
-  constructor(width, height, backgroundColor) {
+  constructor(width, height, backgroundColor, startingBrush) {
     this.width = width;
     this.height = height;
     this.mainBuffer = createGraphics(width, height);
     this.editableStrokesInUse = 0;
-    this.editableStrokes = Array.from({ length: 16 }, () => new BrushStroke(createGraphics(width, height), currentBrush.copy()));
+    this.editableStrokes = Array.from({ length: 16 }, () => new BrushStroke(createGraphics(width, height), startingBrush));
+    this.currentBrush = startingBrush;
+    this.previousBrushes = [];
+    this.canvasColor = backgroundColor;
 
     this.clearWithColor(backgroundColor); // WIP, this is currently missing anything for display density
+  }
+
+  get previousBrush() {
+    return this.previousBrushes[this.previousBrushes.length - 1];
   }
 
   get editableStrokesCount() {
@@ -292,7 +293,7 @@ class Painting {
   }
 
   get brushSettingsToAdjust() {
-    return Interaction.modifyLastStroke ? this.latestStroke.settings : currentBrush;
+    return Interaction.modifyLastStroke ? this.latestStroke.settings : openPainting.currentBrush;
   }
 
   clearWithColor(color) {
@@ -321,12 +322,13 @@ class Painting {
     }
   }
 
-  startStroke() {
+  startStroke(brushSettings) {
     if (this.editableStrokesInUse > this.editableStrokes.length - 1) this.applyOldestStroke();
     this.editableStrokesInUse += 1;
     //console.log("started new stroke:", this.editableStrokesInUse);
     const currentStroke = this.editableStrokes[this.editableStrokesInUse-1];
     currentStroke.reset();
+    currentStroke.settings = brushSettings;
   }
 
   updateStroke(newInteraction) {
@@ -400,8 +402,8 @@ class Painting {
 
   getPointRGB(point) {
     // update eyedropper
-    currentPainting.applyAllStrokes();
-    const buffer = currentPainting.oldStrokesBuffer;
+    openPainting.applyAllStrokes();
+    const buffer = openPainting.oldStrokesBuffer;
 
     // go through a few pixels
     const addRadiusPx = 2;
@@ -428,13 +430,14 @@ class Painting {
 
 // this is where most state should go, besides anything
 // that would be saved with the painting.
-
 class Interaction {
+
+  static MAX_BRUSH_HISTORY_LENGTH = 16;
 
   // WIP, just defaults. these should really adapt
   static viewTransform = {
-    x: () => Math.floor((width - Math.round(currentPainting.width*Interaction.viewTransform.scale))/2),
-    y: () => Math.floor((height - Math.round(currentPainting.height*Interaction.viewTransform.scale))/2),
+    x: () => Math.floor((width - Math.round(openPainting.width*Interaction.viewTransform.scale))/2),
+    y: () => Math.floor((height - Math.round(openPainting.height*Interaction.viewTransform.scale))/2),
     scale: 1
   };
 
@@ -501,6 +504,15 @@ class Interaction {
     return Interaction.lastInteractionEnd ?? Interaction.currentSequence[0];
   }
 
+  static adjustCanvasSize(windowWidth, windowHeight) {
+    //const scrollBarMargin = (isTouchControl === false) ? 10 : 0;
+    resizeCanvas(windowWidth - 10, windowHeight - 0);
+  
+    UI.buffer.resizeCanvas(width, height);
+    UI.buffer.textSize((width < height) ? 13 : 16);
+    GIZMO_SIZE = (width > 300) ? 120 : 60;
+  }
+
   static lostFocus() {
     Interaction.currentType = null;
     Interaction.currentSequence = [];
@@ -528,19 +540,19 @@ class Interaction {
       Interaction.editAction();
       Interaction.resetCurrentSequence();
     } else if (key === "1") {
-      previousBrush = currentBrush.copy();
+      Interaction.addToBrushHistory();
       Interaction.currentUI = Interaction.UI_STATES.satAndLum_open;
       Interaction.resetCurrentSequence();
     } else if (key === "2") {
-      previousBrush = currentBrush.copy();
+      Interaction.addToBrushHistory();
       Interaction.currentUI = Interaction.UI_STATES.hueAndVar_open;
       Interaction.resetCurrentSequence();
     } else if (key === "3") {
-      previousBrush = currentBrush.copy();
+      Interaction.addToBrushHistory();
       Interaction.currentUI = Interaction.UI_STATES.size_open;
       Interaction.resetCurrentSequence();
     } else if (key === "4") {
-      previousBrush = currentBrush.copy();
+      Interaction.addToBrushHistory();
       Interaction.currentUI = Interaction.UI_STATES.eyedropper_open;
     }
   }
@@ -569,38 +581,45 @@ class Interaction {
     Interaction.currentSequence = [];
   }
 
+  static addToBrushHistory() {
+    openPainting.previousBrushes.push(openPainting.currentBrush.copy());
+    if (openPainting.previousBrushes.length > Interaction.MAX_BRUSH_HISTORY_LENGTH) {
+      openPainting.previousBrushes.shift();
+    }
+  }
+
   static saveAction() {
     // commit strokes to the painting
-    currentPainting.applyAllStrokes();
-    currentPainting.download();
+    openPainting.applyAllStrokes();
+    openPainting.download();
   }
 
   static clearAction() {
-    const prevCanvasColor = canvasColor.copy();
-    canvasColor = currentBrush.color.copy();
-    currentBrush.color = prevCanvasColor.copy();
+    const prevCanvasColor = openPainting.canvasColor.copy();
+    openPainting.canvasColor = openPainting.currentBrush.color.copy();
+    openPainting.currentBrush.color = prevCanvasColor.copy();
 
-    currentPainting.clearWithColor(canvasColor);
-    document.body.style.backgroundColor = canvasColor.behind().hex;
+    openPainting.clearWithColor(openPainting.canvasColor);
+    document.body.style.backgroundColor = openPainting.canvasColor.behind().hex;
   }
 
   static undoAction() {
-    currentPainting.popLatestStroke();
+    openPainting.popLatestStroke();
     Interaction.modifyLastStroke = false;
   }
 
   static editAction() {
     Interaction.modifyLastStroke = !Interaction.modifyLastStroke;
-    if (currentPainting.editableStrokesCount === 0) Interaction.modifyLastStroke = false;
+    if (openPainting.editableStrokesCount === 0) Interaction.modifyLastStroke = false;
   }
 
   static pickToolAction(index) {
-    const modifyBrush = currentPainting.brushSettingsToAdjust;
-    modifyBrush.tool = toolPresets[index].brush;
-    modifyBrush.texture = toolPresets[index].texture;
+    const modifyBrush = openPainting.brushSettingsToAdjust;
+    modifyBrush.tool = drawingTools[index].tool;
+    modifyBrush.texture = drawingTools[index].texture;
 
     if (Interaction.modifyLastStroke) {
-      currentPainting.redrawLatestStroke();
+      openPainting.redrawLatestStroke();
       Interaction.modifyLastStroke = false;
     }
     Interaction.currentUI = Interaction.UI_STATES.nothing_open;
@@ -658,7 +677,7 @@ class Interaction {
     }
 
     if (x < 80 && Interaction.currentUI === Interaction.UI_STATES.clover_open) {
-      const toolsY = y - height/2 + (toolPresets.length * 60)/2;
+      const toolsY = y - height/2 + (drawingTools.length * 60)/2;
       const toolIndex = Math.floor(toolsY / 60);
 
       if (toolIndex === 0) {
@@ -694,11 +713,11 @@ class Interaction {
       Interaction.currentType = surfaceType;
       if (Object.values(Interaction.TYPES.knob).includes(Interaction.currentType)) {
         // started on a knob
-        previousBrush = currentBrush.copy();
+        Interaction.addToBrushHistory();
         Interaction.currentSequence = [new_interaction];
       } else if (Object.values(Interaction.TYPES.slider).includes(Interaction.currentType)) {
         // started on a slider
-        previousBrush = currentBrush.copy();
+        Interaction.addToBrushHistory();
         Interaction.currentSequence = [new_interaction];
       }
       return;
@@ -787,12 +806,12 @@ class Interaction {
       const deltaX = new_interaction.x - Interaction.currentSequence[0].x;
 
       if (deltaX === 0) return;
-      const brushToAdjust = currentPainting.brushSettingsToAdjust;
+      const brushToAdjust = openPainting.brushSettingsToAdjust;
       const deltaValue = deltaX * 0.002;
       if (Interaction.currentType === Interaction.TYPES.knob.jitter) {
-        brushToAdjust.colorVar = constrain(previousBrush.colorVar + deltaValue, 0, 1);
+        brushToAdjust.colorVar = constrain(openPainting.previousBrush.colorVar + deltaValue, 0, 1);
       } else if (Interaction.currentType === Interaction.TYPES.knob.size) {
-        brushToAdjust.size = constrain(previousBrush.size + deltaValue, 0, 1);
+        brushToAdjust.size = constrain(openPainting.previousBrush.size + deltaValue, 0, 1);
       }
 
     } else if (Object.values(Interaction.TYPES.slider).includes(Interaction.currentType)) {
@@ -800,7 +819,7 @@ class Interaction {
       // started on a slider
       const middle_width = 720;
       let xInMiddleSection = new_interaction.x - width/2 + middle_width/2;
-      const brushToAdjust = currentPainting.brushSettingsToAdjust;
+      const brushToAdjust = openPainting.brushSettingsToAdjust;
 
       if (Interaction.currentType === Interaction.TYPES.slider.luminance) {
         const newValue = constrain((xInMiddleSection - 60) / 200, 0, 1);
@@ -885,12 +904,12 @@ class Interaction {
               // horizontal
               if (deltaPos.x < 0) {
                 // start size gizmo
-                previousBrush = currentBrush.copy();
+                Interaction.addToBrushHistory();
                 Interaction.currentUI = Interaction.UI_STATES.size_open;
                 Interaction.currentType = Interaction.TYPES.gizmo.size;
               } else {
                 // start hue and var
-                previousBrush = currentBrush.copy();
+                Interaction.addToBrushHistory();
                 Interaction.currentUI = Interaction.UI_STATES.hueAndVar_open;
                 Interaction.currentType = Interaction.TYPES.gizmo.hueAndVar;
               }
@@ -902,7 +921,7 @@ class Interaction {
                 Interaction.currentUI = Interaction.UI_STATES.nothing_open;
               } else {
                 // start lum and sat
-                previousBrush = currentBrush.copy();
+                Interaction.addToBrushHistory();
                 Interaction.currentUI = Interaction.UI_STATES.satAndLum_open;
                 Interaction.currentType = Interaction.TYPES.gizmo.satAndLum;
               }
@@ -919,7 +938,7 @@ class Interaction {
         } else {
           // start brushstroke
           Interaction.currentType = Interaction.TYPES.painting.draw;
-          currentPainting.startStroke();
+          openPainting.startStroke(openPainting.currentBrush);
 
           // draw the existing segments that have not been drawn yet all at once
           // this code isn't pretty but seems to works
@@ -932,12 +951,12 @@ class Interaction {
               if (Interaction.distance2d(lastStep, step) > 2) {
                 lastIndex = index - 1;
                 
-                currentPainting.updateStroke(step.addPaintingTransform());
-                currentPainting.continueDrawing();
+                openPainting.updateStroke(step.addPaintingTransform());
+                openPainting.continueDrawing();
               }
             } else {
-              currentPainting.updateStroke(step.addPaintingTransform());
-              currentPainting.continueDrawing();
+              openPainting.updateStroke(step.addPaintingTransform());
+              openPainting.continueDrawing();
             }
           })
         }
@@ -952,8 +971,8 @@ class Interaction {
       const last_interaction = Interaction.currentSequence[Interaction.currentSequence.length-1];
       if (Interaction.distance2d(last_interaction, new_interaction) > 2) {
         Interaction.currentSequence.push(new_interaction);
-        currentPainting.updateStroke(new_interaction.addPaintingTransform());
-        currentPainting.continueDrawing();
+        openPainting.updateStroke(new_interaction.addPaintingTransform());
+        openPainting.continueDrawing();
       }
 
     } else if (Interaction.currentType === Interaction.TYPES.painting.move) { 
@@ -963,21 +982,21 @@ class Interaction {
         x: new_interaction.x - last_interaction.x,
         y: new_interaction.y - last_interaction.y
       }
-      currentPainting.moveLatestStroke(deltaMove.x, deltaMove.y);
+      openPainting.moveLatestStroke(deltaMove.x, deltaMove.y);
       Interaction.currentSequence.push(new_interaction);
 
     } else if (Interaction.currentType === Interaction.TYPES.painting.eyedropper) {
 
       Interaction.currentSequence = [new_interaction];
-      const brushToAdjust = currentPainting.brushSettingsToAdjust;
-      const combinedRGB = currentPainting.getPointRGB(new_interaction.addPaintingTransform());
+      const brushToAdjust = openPainting.brushSettingsToAdjust;
+      const combinedRGB = openPainting.getPointRGB(new_interaction.addPaintingTransform());
       brushToAdjust.color = HSLColor.fromRGBwithFallback(combinedRGB[0], combinedRGB[1], combinedRGB[2], brushToAdjust.color);
-      if (Interaction.modifyLastStroke) currentPainting.redrawLatestStroke();
+      if (Interaction.modifyLastStroke) openPainting.redrawLatestStroke();
 
     } else if (Interaction.currentType === Interaction.TYPES.gizmo.satAndLum) { 
 
-      const brushToAdjust = currentPainting.brushSettingsToAdjust;
-      const brushToReference = previousBrush;
+      const brushToAdjust = openPainting.brushSettingsToAdjust;
+      const brushToReference = openPainting.previousBrush;
 
       const deltaX = new_interaction.x - Interaction.currentSequence[0].x;
       const deltaY = new_interaction.y - Interaction.currentSequence[0].y;
@@ -987,12 +1006,12 @@ class Interaction {
       // Map to chroma and luminance
       brushToAdjust.color.setSaturation(map( deltaX + rangeX * brushToReference.color.saturation, 0, rangeX, 0, 1, true));
       brushToAdjust.color.setLuminance(map(-deltaY + rangeY * brushToReference.color.luminance, 0, rangeY, 0, 1, true));
-      if (Interaction.modifyLastStroke) currentPainting.redrawLatestStroke();
+      if (Interaction.modifyLastStroke) openPainting.redrawLatestStroke();
 
     } else if (Interaction.currentType === Interaction.TYPES.gizmo.hueAndVar) { 
 
-      const brushToAdjust = currentPainting.brushSettingsToAdjust;
-      const brushToReference = previousBrush;
+      const brushToAdjust = openPainting.brushSettingsToAdjust;
+      const brushToReference = openPainting.previousBrush;
 
       const deltaX = new_interaction.x - Interaction.currentSequence[0].x;
       const deltaY = new_interaction.y - Interaction.currentSequence[0].y;
@@ -1004,18 +1023,18 @@ class Interaction {
       if (newHue < 0) newHue = 1-(Math.abs(newHue) % 1);
       brushToAdjust.color.setHue(newHue);
       brushToAdjust.colorVar = map(-deltaY + rangeY * brushToReference.colorVar, 0, rangeY, 0, 1, true);
-      if (Interaction.modifyLastStroke) currentPainting.redrawLatestStroke();
+      if (Interaction.modifyLastStroke) openPainting.redrawLatestStroke();
       
     } else if (Interaction.currentType === Interaction.TYPES.gizmo.size) { 
 
-      const brushToAdjust = currentPainting.brushSettingsToAdjust;
-      const brushToReference = previousBrush;
+      const brushToAdjust = openPainting.brushSettingsToAdjust;
+      const brushToReference = openPainting.previousBrush;
 
       const deltaY = new_interaction.y - Interaction.currentSequence[0].y;
       const rangeY = GIZMO_SIZE * 2;
       
       brushToAdjust.size = map(-deltaY + rangeY * brushToReference.size, 0, rangeY, 0, 1, true);
-      if (Interaction.modifyLastStroke) currentPainting.redrawLatestStroke();
+      if (Interaction.modifyLastStroke) openPainting.redrawLatestStroke();
     }
   }
 
@@ -1031,7 +1050,6 @@ class Interaction {
     if (!event.isPrimary && event.pointerType === "touch") return;
 
     const new_interaction = Interaction.fromEvent(event);
-    previousBrush = undefined;
 
     if (Object.values(Interaction.TYPES.button).includes(Interaction.currentType)) {
 
@@ -1190,6 +1208,7 @@ class Interaction {
   }
 }
 
+
 // Main color representation in OKHSL. Converted to hex color using the helper file.
 class HSLColor {
   static RANDOM_VALUES = Array.from({ length: 1024 }, () => Math.random() * 2 - 1);
@@ -1339,378 +1358,351 @@ class HSLColor {
 }
 
 
-function setup() {
-  canvasColor = new HSLColor(0.6, 0.1, 0.15);
+class UI {
 
-  currentBrush = new BrushSettings(
-    new HSLColor(0.6, 0.6, 0.7), 
-    0.35, 0.5, 
-    toolPresets[0].brush, toolPresets[0].texture
-  );
+  static TOP_BUTTON_WIDTH = 80;
 
-  cnv = createCanvas(windowWidth - 10, windowHeight - 10);
-  newCanvasSize();
-  cnv.id("myCanvas");
-  const canvasElement = document.getElementById("myCanvas");
+  static buffer = undefined;
+  static palette = {};
 
-  canvasElement.addEventListener("pointerdown", Interaction.pointerStart);
-  canvasElement.addEventListener("pointerup", Interaction.pointerEnd);
-  canvasElement.addEventListener("pointercancel", Interaction.pointerCancel);
-  canvasElement.addEventListener("pointermove", Interaction.pointerMove);
-  canvasElement.addEventListener("wheel", Interaction.wheelScrolled);
-  document.addEventListener("visibilitychange", () => {
-    if (document.hidden) {
-      Interaction.lostFocus();
-    }
-  });
-  canvasElement.addEventListener("pointerout", (event) => {
-    Interaction.pointerCancel(event);
-  });
-
-  // noLoop();
-
-  currentPainting = new Painting(Math.min(width, height)-150, Math.min(width, height)-150, canvasColor);
-
-  document.body.style.backgroundColor = canvasColor.behind().hex;
-
-  // Create a graphics buffer for the indicator
-  interfaceBuffer = createGraphics(width, height);
-  interfaceBuffer.strokeWeight(6);
-  interfaceBuffer.textFont(fontMedium);
-  interfaceBuffer.textAlign(LEFT, CENTER);
-  newInterfaceSize();
+  static redrawInterface() {
+    // reset
+    UI.buffer.clear();
+    UI.buffer.textFont(fontMedium);
+    UI.buffer.textAlign(LEFT, CENTER);
+    UI.buffer.noStroke();
   
-  // draw();
-}
-
-function keyPressed() {
-  Interaction.keyStart(key);
-}
-function keyReleased() {
-  Interaction.keyEnd(key);
-}
-
-function windowResized() {
-  newCanvasSize();
-  newInterfaceSize();
-  // draw();
-}
-
-function newCanvasSize() {
-  //const scrollBarMargin = (isTouchControl === false) ? 10 : 0;
-  resizeCanvas(windowWidth - 10, windowHeight - 0);
-  GIZMO_SIZE = (width > 300) ? 120 : 60;
-}
-
-function newInterfaceSize() {
-  interfaceBuffer.resizeCanvas(width, height);
-  interfaceBuffer.textSize((width < height) ? 13 : 16);
-}
-
-
-function draw() {
-
-  background(canvasColor.behind().hex);
-
-  // draw the UI to the ui buffer
-  redrawInterface(interfaceBuffer); 
-
-  // draw the painting buffer
-
-
-  drawCenteredCanvas(currentPainting.oldStrokesBuffer);
-
-  // draw the still editable brushstrokes
-  currentPainting.usedEditableStrokes.forEach((stroke) => {
-    drawCenteredCanvas(stroke.buffer);
-  });
-  
-  // draw the indicator buffer in the top left corner
-  image(interfaceBuffer, 0, 0);
-}
-
-
-function drawCenteredCanvas(buffer) {
-  if (Interaction.viewTransform.scale === 1) {
-    image(buffer, Interaction.viewTransform.x(), Interaction.viewTransform.y());
-    return;
-  }
-  const scaledSize = {
-    x: Math.round(Interaction.viewTransform.scale * currentPainting.width),
-    y: Math.round(Interaction.viewTransform.scale * currentPainting.height)
-  };
-  image(buffer, Interaction.viewTransform.x(), Interaction.viewTransform.y(), 
-    scaledSize.x, scaledSize.y
-  );
-}
-
-
-function redrawInterface(buffer) {
-  if (buffer === undefined) return;
-
-  // Clear the UI buffer
-  buffer.clear();
-
-  // Interface Colors
-  const uiColors = {};
-  uiColors.bg = canvasColor.behind();
-  uiColors.fg = uiColors.bg.copy()
-    .setLuminance(lerp(canvasColor.luminance, (canvasColor.luminance>0.5) ? 0 : 1, 0.8)); 
-  uiColors.fgDisabled = uiColors.fg.copy().setAlpha(0.4);
-  uiColors.constrastBg = uiColors.fg.copy()
-    .setLuminance(lerp(canvasColor.luminance, canvasColor.luminance > 0.5 ? 1 : 0, 0.7)); 
-  uiColors.onBrush = currentBrush.color.copy()
-    .setLuminance(lerp(currentBrush.color.luminance, (currentBrush.color.luminance>0.5) ? 0:1, 0.7))
-    .setSaturation(currentBrush.color.saturation * 0.5);
-  
-  // MENUS
-  // brush menu
-  buffer.noStroke();
-  //displayTool(currentBrush.tool, currentBrush.texture, 0, 0)
-
-  if (Interaction.currentUI === Interaction.UI_STATES.clover_open) {
-    toolPresets.forEach((tool, index) => {
-      const x = 0;
-      const y = height/2 + 60 * (-toolPresets.length*0.5 + index);
-      displayTool(tool.brush, tool.texture, x, y, tool.menuName);
-    });
-  }
-
-  function displayTool(menuBrushTool, menuTexture, x, y, menuName) {
-
-    const settings = currentBrush.copy();
-    settings.size = constrain(settings.size, 0.1, 0.3);
-    settings.tool = menuBrushTool;
-    settings.texture = menuTexture;
-    const isSelected = (currentBrush.tool === settings.tool && currentBrush.texture === settings.texture);
-
-    buffer.push();
-    buffer.translate(x, y);
-
-    buffer.fill(uiColors.constrastBg.toHexWithSetAlpha(isSelected ? 0.2 : 1));
-    buffer.rect(0, 2, 100, 60-4, 0, 20, 20, 0);
-
-    // draw example
-    // wip, not sure why the angle 86 even makes sense.
-    const start = new BrushStrokePoint(0, 30, 86, undefined);
-    const end = new BrushStrokePoint(80, 30, 86, undefined);
+    // Interface Colors
+    UI.palette.bg = openPainting.canvasColor.behind();
+    UI.palette.fg = UI.palette.bg.copy()
+      .setLuminance(lerp(openPainting.canvasColor.luminance, (openPainting.canvasColor.luminance>0.5) ? 0 : 1, 0.8)); 
+    UI.palette.fgDisabled = UI.palette.fg.copy().setAlpha(0.4);
+    UI.palette.constrastBg = UI.palette.fg.copy()
+      .setLuminance(lerp(openPainting.canvasColor.luminance, openPainting.canvasColor.luminance > 0.5 ? 1 : 0, 0.7)); 
+    UI.palette.onBrush = openPainting.currentBrush.color.copy()
+      .setLuminance(lerp(openPainting.currentBrush.color.luminance, (openPainting.currentBrush.color.luminance>0.5) ? 0:1, 0.7))
+      .setSaturation(openPainting.currentBrush.color.saturation * 0.5);
     
-    new BrushStroke(buffer, settings).renderStrokePart(start, end);
-
-    buffer.noStroke();
-    buffer.fill(uiColors.constrastBg.toHexWithSetAlpha(isSelected ? 0.8 : 0.3));
-    buffer.rect(0, 2, 100, 60-4, 0, 20, 20, 0);
-
-    buffer.textAlign(CENTER);
-    buffer.fill(isSelected ? uiColors.fgDisabled.hex : uiColors.fg.hex);
-    buffer.text(menuName, 40, 30-4);
-    buffer.textFont(fontMedium);
+    // MENUS
+    // brush menu
+    if (Interaction.currentUI === Interaction.UI_STATES.clover_open) {
+      drawingTools.forEach((preset, index) => {
+        const x = 0;
+        const y = height/2 + 60 * (-drawingTools.length*0.5 + index);
+        UI.displayTool(preset.tool, preset.texture, x, y, preset.menuName);
+      });
+    }
+  
+    // top menu buttons
+    UI.buffer.textAlign(CENTER);
+    UI.buffer.textFont(fontMedium);
+  
+    const noEditableStrokes = (openPainting.editableStrokesCount === 0);
+    UI.drawTopButton("undo" , UI.TOP_BUTTON_WIDTH*0, noEditableStrokes ? UI.palette.fgDisabled : UI.palette.fg);
+    UI.drawTopButton("edit" , UI.TOP_BUTTON_WIDTH*1, Interaction.modifyLastStroke || noEditableStrokes ? UI.palette.fgDisabled : UI.palette.fg);
+    UI.drawTopButton("clear", width-UI.TOP_BUTTON_WIDTH*2, new HSLColor(0.1, 0.8, (UI.palette.fg.luminance > 0.5) ? 0.7 : 0.4));
+    UI.drawTopButton("save" , width-UI.TOP_BUTTON_WIDTH*1, UI.palette.fg);
     
+    UI.buffer.fill(UI.palette.fg.hex);
+    UI.buffer.textAlign(LEFT);
+    UI.buffer.textFont(fontMedium);
   
-    buffer.pop();
-
-    buffer.textAlign(LEFT);
-  }
-
-
-  function topButton(text, x, textColor) {
-    buffer.fill(uiColors.constrastBg.toHexWithSetAlpha(0.5));
-    buffer.rect(x+3, 0, topButtonWidth-6, 60, 0, 0, 20, 20);
-    buffer.fill(textColor.hex);
-    buffer.text(text, x, 0, topButtonWidth, 60 - 8);
-  }
-
-  // top menu buttons
-  buffer.textAlign(CENTER);
-  buffer.textFont(fontMedium);
-
-  const topButtonWidth = 80;
-
-  const noEditableStrokes = (currentPainting.editableStrokesCount === 0);
-  topButton("undo" , topButtonWidth*0,             noEditableStrokes ? uiColors.fgDisabled : uiColors.fg);
-  topButton("edit" , topButtonWidth*1, Interaction.modifyLastStroke || noEditableStrokes ? uiColors.fgDisabled : uiColors.fg);
-  topButton("clear", width-topButtonWidth*2, new HSLColor(0.1, 0.8, (uiColors.fg.luminance > 0.5) ? 0.7 : 0.4));
-  topButton("save" , width-topButtonWidth*1, uiColors.fg);
+    // draw the sliders at the top
+    const sliderStart = width/2 - 300;
+    if (width > 980) {
+      let baseColor = openPainting.brushSettingsToAdjust.color;
+      UI.drawGradientSlider(sliderStart, 0, 200, 60,     baseColor.copy().setLuminance(0), baseColor.copy().setLuminance(1), baseColor.luminance);
+      UI.drawGradientSlider(sliderStart+200, 0, 200, 60, baseColor.copy().setSaturation(0), baseColor.copy().setSaturation(1), baseColor.saturation);
+      UI.drawGradientSlider(sliderStart+400, 0, 200, 60, baseColor.copy().setHue(0), baseColor.copy().setHue(1), baseColor.hue);
   
-  buffer.fill(uiColors.fg.hex);
-  buffer.textAlign(LEFT);
-  buffer.textFont(fontMedium);
-
-  // draw the sliders at the top
-  const sliderStart = width/2 - 300;
-  if (width > 980) {
-    let baseColor = currentPainting.brushSettingsToAdjust.color;
-    drawGradientSlider(sliderStart, 0, 200, 60,     baseColor.copy().setLuminance(0), baseColor.copy().setLuminance(1), baseColor.luminance);
-    drawGradientSlider(sliderStart+200, 0, 200, 60, baseColor.copy().setSaturation(0), baseColor.copy().setSaturation(1), baseColor.saturation);
-    drawGradientSlider(sliderStart+400, 0, 200, 60, baseColor.copy().setHue(0), baseColor.copy().setHue(1), baseColor.hue);
-
-    // show difference
-    if (previousBrush !== undefined) {
-      const prevColor = previousBrush.color;
-
-      if (prevColor.luminance !== baseColor.luminance) {
-        showGradientSliderDifference(
-          sliderStart, 0, 200, 60, 
-          prevColor.copy().setLuminance(0), prevColor.copy().setLuminance(1), 
-          prevColor.luminance, baseColor.luminance, 
-          "L: " + Math.floor(baseColor.luminance * 100) + "%"
-        );
+      // show difference
+      const settingsChangeInteractions = [...Object.values(Interaction.TYPES.knob),...Object.values(Interaction.TYPES.slider)];
+      if (settingsChangeInteractions.includes(Interaction.currentType) && openPainting.previousBrush !== undefined) {
+        const prevColor = openPainting.previousBrush.color;
+  
+        if (prevColor.luminance !== baseColor.luminance) {
+          UI.drawSliderChange(
+            sliderStart, 0, 200, 60, 
+            prevColor.copy().setLuminance(0), prevColor.copy().setLuminance(1), 
+            prevColor.luminance, baseColor.luminance, 
+            "L: " + Math.floor(baseColor.luminance * 100) + "%"
+          );
+        }
+        if (prevColor.saturation !== baseColor.saturation) {
+          UI.drawSliderChange(
+            sliderStart + 200, 0, 200, 60, 
+            prevColor.copy().setSaturation(0), prevColor.copy().setSaturation(1), 
+            prevColor.saturation, baseColor.saturation, 
+            "S: " + Math.floor(baseColor.saturation * 100) + "%"
+          );
+        }
+        if (prevColor.hue !== baseColor.hue) {
+          UI.drawSliderChange(
+            sliderStart + 400, 0, 200, 60, 
+            prevColor.copy().setHue(0), prevColor.copy().setHue(1), 
+            prevColor.hue, baseColor.hue, 
+            "H:" + Math.floor(baseColor.hue*360) + "°"
+          );
+        }
+  
+        if (openPainting.previousBrush.colorVar !== openPainting.currentBrush.colorVar) {
+          UI.drawTooltipBelow(sliderStart - 30, 60, Math.round(openPainting.currentBrush.colorVar * 100) + "%");
+        }
+        if (openPainting.previousBrush.size !== openPainting.currentBrush.size) {
+          UI.drawTooltipBelow(sliderStart + 630, 60, Math.round(openPainting.currentBrush.pxSize) + "px");
+        }
       }
-      if (prevColor.saturation !== baseColor.saturation) {
-        showGradientSliderDifference(
-          sliderStart + 200, 0, 200, 60, 
-          prevColor.copy().setSaturation(0), prevColor.copy().setSaturation(1), 
-          prevColor.saturation, baseColor.saturation, 
-          "S: " + Math.floor(baseColor.saturation * 100) + "%"
-        );
-      }
-      if (prevColor.hue !== baseColor.hue) {
-        showGradientSliderDifference(
-          sliderStart + 400, 0, 200, 60, 
-          prevColor.copy().setHue(0), prevColor.copy().setHue(1), 
-          prevColor.hue, baseColor.hue, 
-          "H:" + Math.floor(baseColor.hue*360) + "°"
-        );
-      }
-
-      if (previousBrush.colorVar !== currentBrush.colorVar) {
-        drawTooltipBelow(sliderStart - 30, 60, Math.round(currentBrush.colorVar * 100) + "%");
-      }
-      if (previousBrush.size !== currentBrush.size) {
-        drawTooltipBelow(sliderStart + 630, 60, Math.round(currentBrush.pxSize) + "px");
-      }
+  
+      // draw the variation indicator
+      UI.drawRoundColorExampleWithVariation(openPainting.currentBrush, 55, sliderStart - 30, 30);
+  
+      // draw the size indicator
+      UI.buffer.drawingContext.save();
+      UI.buffer.fill(UI.palette.constrastBg.toHexWithSetAlpha(0.5));
+      UI.buffer.rect(sliderStart + 600, 0, 60, 60, 20, 20, 20, 20);
+      UI.buffer.drawingContext.clip();
+      UI.drawSizeIndicator(openPainting.currentBrush.pxSize, sliderStart + 630, 30);
+      UI.buffer.drawingContext.restore();
+      UI.buffer.noStroke();
     }
 
-    // draw the variation indicator
-    drawRoundColorExampleWithVariation(currentBrush, 55, sliderStart - 30, 30);
-
-    // draw the size indicator
-    buffer.drawingContext.save();
-    buffer.fill(uiColors.constrastBg.toHexWithSetAlpha(0.5));
-    buffer.rect(sliderStart + 600, 0, 60, 60, 20, 20, 20, 20);
-    buffer.drawingContext.clip();
-    drawSizeIndicator(buffer, currentBrush.pxSize, sliderStart + 630, 30);
-    buffer.drawingContext.restore();
-    buffer.noStroke();
-  }
-
-  function showGradientSliderDifference(x, y, w, h, start, end, componentBefore, componentAfter, componentName) {
-    drawGradientSlider(x, 0, w, h/6, start, end, componentBefore);
-    drawTooltipBelow(x + componentAfter * w, h, componentName);
-  }
-
-  // bottom left/ top middle text
-  buffer.fill(uiColors.fg.hex);
-
-  buffer.textAlign(LEFT);
-  buffer.fill(uiColors.fg.hex);
-  const controlsInfo = "Keyboard: 1-[Value] 2-[Hue] 3-[Size] 4-[Eyedrop] U-[Undo] E-[Edit] S-[Save]";
-  buffer.text(controlsInfo, 20, height - 20 - 12);
-
-  //reset text size
-  buffer.textSize((width < height) ? 13 : 16);
-
-  // draw rectangle around stroke being edited
-  if (Interaction.modifyLastStroke) {
-    const bounds = currentPainting.latestStroke.bounds;
-    if (bounds.width > 0 && bounds.height > 0) {
-      const topLeft = {x: bounds.x, y: bounds.y};
-      const botRight = {x: bounds.x + bounds.width, y: bounds.y + bounds.height};
-
-      buffer.push();
-      buffer.translate(Interaction.viewTransform.x(), Interaction.viewTransform.y());
-
-      buffer.stroke(uiColors.constrastBg.hex);
-      buffer.strokeWeight(3);
-      buffer.line(topLeft.x, topLeft.y, botRight.x, topLeft.y);
-      buffer.line(topLeft.x, topLeft.y, topLeft.x, botRight.y);
-      buffer.line(topLeft.x, botRight.y, botRight.x, botRight.y);
-      buffer.line(botRight.x, topLeft.y, botRight.x, botRight.y);
-      buffer.stroke(uiColors.fg.hex);
-      buffer.strokeWeight(1);
-      buffer.line(topLeft.x, topLeft.y, botRight.x, topLeft.y);
-      buffer.line(topLeft.x, topLeft.y, topLeft.x, botRight.y);
-      buffer.line(topLeft.x, botRight.y, botRight.x, botRight.y);
-      buffer.line(botRight.x, topLeft.y, botRight.x, botRight.y);
-      buffer.strokeWeight(6);
-      buffer.noStroke();
-  
-      buffer.pop();
+    if (Interaction.currentUI === Interaction.UI_STATES.clover_open) {
+      UI.drawPalette(openPainting.previousBrushes, width/2, 70, 30, 10);
     }
-  }
-
-  // draw the right gadget
-  if (Interaction.currentUI !== Interaction.UI_STATES.nothing_open) {
-    drawActiveGadget();
-  }
   
-  // DEV STUFF, WIP
-  if (false) {
-    buffer.strokeWeight(2);
-    buffer.fill(uiColors.fg.hex)
-    buffer.text('ui: '         + (Interaction.currentUI ?? 'none'),              20,  80);
-    buffer.text('gesture: '    + (Interaction.currentType ?? 'none'),            20, 100);
-    buffer.text('points: '     + (Interaction.currentSequence.length ?? 'none'), 20, 120);
-    buffer.text('zoom: '       + (Interaction.viewTransform.scale ?? 'none'),    20, 140);
-
+    // bottom left/ top middle text
+    UI.buffer.fill(UI.palette.fg.hex);
+    UI.buffer.textAlign(LEFT);
+    UI.buffer.fill(UI.palette.fg.hex);
+    const controlsInfo = "Keyboard: 1-[Value] 2-[Hue] 3-[Size] 4-[Eyedrop] U-[Undo] E-[Edit] S-[Save]";
+    UI.buffer.text(controlsInfo, 20, height - 20 - 12);
   
-    if (Interaction.referencePosition !== undefined) {
-      buffer.stroke(new HSLColor(0.1, 1, 1.0).hex);
-      buffer.push();
-      buffer.translate(Interaction.referencePosition.x, Interaction.referencePosition.y);
-      buffer.line(-4, -4, 4, 4);
-      buffer.line(-4, 4, 4, -4);
-      buffer.pop();
+    //reset text size
+    UI.buffer.textSize((width < height) ? 13 : 16);
+  
+    // draw rectangle around stroke being edited
+    if (Interaction.modifyLastStroke) {
+      UI.drawBounds(openPainting.latestStroke.bounds);
+    }
+  
+    // draw the right gadget
+    if (Interaction.currentUI !== Interaction.UI_STATES.nothing_open) {
+      UI.drawCurrentGizmo();
     }
     
-    // Interaction.lastInteractionEnd.forEach((point) => {
-    //   buffer.fill(new HSLColor(0.6, 1, 1.0).hex);
-    //   buffer.rect(point.x, point.y, 2, 2)
-    // })
-    buffer.strokeWeight(2);
-    Interaction.currentSequence.forEach((point) => {
+    // DEV STUFF, WIP
+    if (false) {
+      UI.buffer.strokeWeight(2);
+      UI.buffer.fill(UI.palette.fg.hex)
+      UI.buffer.text('ui: '         + (Interaction.currentUI ?? 'none'),              20,  80);
+      UI.buffer.text('gesture: '    + (Interaction.currentType ?? 'none'),            20, 100);
+      UI.buffer.text('points: '     + (Interaction.currentSequence.length ?? 'none'), 20, 120);
+      UI.buffer.text('zoom: '       + (Interaction.viewTransform.scale ?? 'none'),    20, 140);
+  
+    
+      if (Interaction.referencePosition !== undefined) {
+        UI.buffer.stroke(new HSLColor(0.1, 1, 1.0).hex);
+        UI.buffer.push();
+        UI.buffer.translate(Interaction.referencePosition.x, Interaction.referencePosition.y);
+        UI.buffer.line(-4, -4, 4, 4);
+        UI.buffer.line(-4, 4, 4, -4);
+        UI.buffer.pop();
+      }
       
-      buffer.stroke(new HSLColor(0.1, 1, 1.0).hex);
-      buffer.rect(point.x, point.y, 2, 2)
-      buffer.fill(new HSLColor(0.1, 1, 0.4).hex);
-      buffer.noStroke()
-      buffer.rect(point.x, point.y, 2, 2)
-    })
+      // Interaction.lastInteractionEnd.forEach((point) => {
+      //   buffer.fill(new HSLColor(0.6, 1, 1.0).hex);
+      //   buffer.rect(point.x, point.y, 2, 2)
+      // })
+      UI.buffer.strokeWeight(2);
+      Interaction.currentSequence.forEach((point) => {
+        
+        UI.buffer.stroke(new HSLColor(0.1, 1, 1.0).hex);
+        UI.buffer.rect(point.x, point.y, 2, 2)
+        UI.buffer.fill(new HSLColor(0.1, 1, 0.4).hex);
+        UI.buffer.noStroke()
+        UI.buffer.rect(point.x, point.y, 2, 2)
+      })
+    }
+  
+    // hover indicator
+    if (Interaction.currentType === Interaction.TYPES.painting.hover 
+      && Interaction.currentSequence.length > 1
+      && !Interaction.modifyLastStroke
+      && Interaction.currentUI === Interaction.UI_STATES.nothing_open) {
+      
+      UI.drawHoverDisplay()
+    }
   }
 
-
-  // hover indicator
-  if (Interaction.currentType === Interaction.TYPES.painting.hover 
-    && Interaction.currentSequence.length > 1
-    && !Interaction.modifyLastStroke
-    && Interaction.currentUI === Interaction.UI_STATES.nothing_open) {
+  static drawHoverDisplay() {
     const startInteraction = Interaction.currentSequence[Interaction.currentSequence.length-2];
     const endInteraction = Interaction.currentSequence[Interaction.currentSequence.length-1];
 
     const start = new BrushStrokePoint(startInteraction.x, startInteraction.y, startInteraction.angle);
     const end = new BrushStrokePoint(endInteraction.x, endInteraction.y, endInteraction.angle);
 
-    new BrushStroke(buffer, currentBrush.copy()).renderStrokePart(start, end);
+    new BrushStroke(UI.buffer, openPainting.currentBrush.copy()).renderStrokePart(start, end);
   }
-  buffer.noStroke();
 
-  // end of redrawInterface
+  static displayTool(menuBrushTool, menuTexture, x, y, menuName) {
+  
+    const settings = openPainting.currentBrush.copy();
+    settings.size = constrain(settings.size, 0.1, 0.3);
+    settings.tool = menuBrushTool;
+    settings.texture = menuTexture;
+    const isSelected = (openPainting.currentBrush.tool === settings.tool && openPainting.currentBrush.texture === settings.texture);
 
+    UI.buffer.push();
+    UI.buffer.translate(x, y);
 
+    UI.buffer.fill(UI.palette.constrastBg.toHexWithSetAlpha(isSelected ? 0.2 : 1));
+    UI.buffer.rect(0, 2, 100, 60-4, 0, 20, 20, 0);
 
-  function drawActiveGadget() {
+    // draw example
+    // wip, not sure why the angle 86 even makes sense.
+    const start = new BrushStrokePoint(0, 30, 86, undefined);
+    const end = new BrushStrokePoint(80, 30, 86, undefined);
+    
+    new BrushStroke(UI.buffer, settings).renderStrokePart(start, end);
 
+    UI.buffer.noStroke();
+    UI.buffer.fill(UI.palette.constrastBg.toHexWithSetAlpha(isSelected ? 0.8 : 0.3));
+    UI.buffer.rect(0, 2, 100, 60-4, 0, 20, 20, 0);
+
+    UI.buffer.textAlign(CENTER);
+    UI.buffer.fill(isSelected ? UI.palette.fgDisabled.hex : UI.palette.fg.hex);
+    UI.buffer.text(menuName, 40, 30-4);
+    UI.buffer.textFont(fontMedium);
+    
+  
+    UI.buffer.pop();
+
+    UI.buffer.textAlign(LEFT);
+  }
+
+  static drawPalette(settingsArray, x, y, tileWidth, tileHeight) {
+    
+    if (settingsArray.length <= 1) return;
+    const totalWidth = tileWidth * settingsArray.length;
+    const topLeft = {
+      x: x - totalWidth / 2,
+      y: y
+    }
+
+    UI.buffer.drawingContext.save();
+    UI.buffer.rect(topLeft.x, topLeft.y, totalWidth, tileHeight, 20, 20, 20, 20);
+    UI.buffer.drawingContext.clip();
+
+    settingsArray.forEach((setting, index) => {
+      UI.buffer.fill(setting.color.hex);
+      UI.buffer.rect(topLeft.x + index * tileWidth, topLeft.y, tileWidth, tileHeight);
+    });
+
+    UI.buffer.drawingContext.restore();
+  }
+
+  static drawTopButton(text, x, textColor) {
+    UI.buffer.fill(UI.palette.constrastBg.toHexWithSetAlpha(0.5));
+    UI.buffer.rect(x+3, 0, UI.TOP_BUTTON_WIDTH-6, 60, 0, 0, 20, 20);
+    UI.buffer.fill(textColor.hex);
+    UI.buffer.text(text, x, 0, UI.TOP_BUTTON_WIDTH, 60 - 8);
+  }
+
+  static drawRoundColorExampleWithVariation(brush, size, x, y) {
+    UI.buffer.fill(brush.color.hex);
+    UI.buffer.ellipse(x, y, size);
+
+    const varSegments = 48;
+    for (let i = 0; i < varSegments; i++) {
+      const start = (TWO_PI / varSegments) * i;
+      const stop = start + TWO_PI / varSegments; 
+      UI.buffer.fill(brush.getColorWithVar(i).hex);
+      UI.buffer.arc(x, y, size, size, start, stop);
+    }
+  }
+
+  static drawSizeIndicator(size, x, y) {
+    UI.buffer.fill(UI.palette.fg.toHexWithSetAlpha(0.4));
+    UI.buffer.ellipse(x, y, size, size)
+    UI.buffer.fill(UI.palette.constrastBg.toHexWithSetAlpha(0.3));
+    UI.buffer.ellipse(x, y, size*0.66, size*0.66)
+    UI.buffer.ellipse(x, y, size*0.33, size*0.33)
+  }
+
+  static drawColorAxis(xStart, yStart, xEnd, yEnd, startColor, endColor, radius, startVar = 0, endVar = 0) {
+    const segments = Math.floor(radius);
+    let lastX = xStart;
+    let lastY = yStart;
+    for (let i = 1; i < segments + 1; i++) {
+      const toX = lerp(xStart, xEnd, i / segments);
+      const toY = lerp(yStart, yEnd, i / segments);
+      const colorLerpAmt = (i - 0.5) / segments;
+      const lerpedVar = lerp(startVar, endVar, colorLerpAmt);
+      const lerpedColor = HSLColor.lerpColorInHSL(startColor, endColor, colorLerpAmt).varyComponents(i, lerpedVar);
+      
+      UI.buffer.stroke(lerpedColor.hex);
+      UI.buffer.line(lastX, lastY, toX, toY);
+  
+      lastX = toX;
+      lastY = toY;
+    }
+  }
+
+  static drawSliderChange(x, y, w, h, start, end, componentBefore, componentAfter, componentName) {
+    UI.drawGradientSlider(x, 0, w, h/6, start, end, componentBefore);
+    UI.drawTooltipBelow(x + componentAfter * w, h, componentName);
+  }
+
+  static drawGradientSlider(x, y, width, height, startColor, endColor, sliderPercent) {
+    const segments = width;
+    const currentSegment = Math.round(segments * sliderPercent);
+
+    for (let i = 0; i < segments; i++) {
+      const colorLerpAmt = (i + 0.5) / segments;
+      const lerpedColor = HSLColor.lerpColorInHSL(startColor, endColor, colorLerpAmt);
+
+      const curvedHeight = height * Math.min((1 - Math.abs((i/segments)-0.5) * 2) * 6, 1) ** 0.12
+  
+      UI.buffer.fill(lerpedColor.hex);
+      UI.buffer.rect(x + (i/segments) * width, y, width/segments, curvedHeight);
+
+      if (i === currentSegment) {
+        UI.buffer.fill(new HSLColor(0,0,1,0.8).hex);
+        UI.buffer.rect(x + (i/segments) * width, y, width/segments, curvedHeight);
+      }
+      if (i+1 === currentSegment) {
+        UI.buffer.fill(new HSLColor(0,0,0,0.8).hex);
+        UI.buffer.rect(x + (i/segments) * width, y, width/segments, curvedHeight);
+      }
+    }
+  }
+
+  static drawTooltipBelow(x, y, text) {
+    UI.buffer.textAlign(CENTER);
+    const textPos = {
+      x: x,
+      y: y + 14
+    }
+    let bbox = fontMedium.textBounds(text, textPos.x, textPos.y);
+    UI.buffer.fill(UI.palette.constrastBg.toHexWithSetAlpha(0.5));
+    UI.buffer.rect(bbox.x - bbox.w/2 - 13, bbox.y + bbox.h/2 - 4, bbox.w+26, bbox.h+12, 20);
+    UI.buffer.fill(UI.palette.fg.hex);
+    UI.buffer.text(text, textPos.x, textPos.y);
+  }
+
+  static drawCurrentGizmo() {
+  
     if (Interaction.currentUI === Interaction.UI_STATES.eyedropper_open) {
 
-      buffer.fill(currentBrush.color.hex);
+      UI.buffer.fill(openPainting.currentBrush.color.hex);
       const position = Interaction.currentSequence[Interaction.currentSequence.length-1];
 
       // when actually eyedropping
       if (Interaction.currentType === Interaction.TYPES.painting.eyedropper) {
-        drawRoundColorExampleWithVariation(currentBrush, currentBrush.pxSize, position.x, position.y);
+        UI.drawRoundColorExampleWithVariation(openPainting.currentBrush, openPainting.currentBrush.pxSize, position.x, position.y);
       }
       
-      drawCrosshair(currentBrush.pxSize, position.x, position.y);
+      UI.drawCrosshair(openPainting.currentBrush.pxSize, position.x, position.y);
 
     }
 
@@ -1719,10 +1711,10 @@ function redrawInterface(buffer) {
 
     if (basePosition === undefined) return;
 
-    const brushToVisualize = currentPainting.brushSettingsToAdjust;
+    const brushToVisualize = openPainting.brushSettingsToAdjust;
 
-    buffer.noStroke();
-    buffer.fill(brushToVisualize.color.hex);
+    UI.buffer.noStroke();
+    UI.buffer.fill(brushToVisualize.color.hex);
 
     const sideDist = GIZMO_SIZE; //(Math.max(width, height) > 4* gadgetRadius) ? gadgetRadius : gadgetRadius*0.5;
     const ankerX = constrain(basePosition.x, sideDist, width - sideDist);
@@ -1730,21 +1722,21 @@ function redrawInterface(buffer) {
 
     if (Interaction.currentUI === Interaction.UI_STATES.clover_open) {
 
-      buffer.textAlign(CENTER);
-      buffer.textStyle(BOLD);
-      buffer.noStroke();
+      UI.buffer.textAlign(CENTER);
+      UI.buffer.textStyle(BOLD);
+      UI.buffer.noStroke();
 
       function drawGadgetDirection(x, y, xDir, yDir, isActive, text) {
         const size = 54;
         const centerOffset = 40;
         if (isActive) {
-          buffer.fill(uiColors.fg.hex);
-          buffer.ellipse(x+centerOffset*xDir, y+centerOffset*yDir, size, size);
-          buffer.fill(uiColors.constrastBg.hex);
+          UI.buffer.fill(UI.palette.fg.hex);
+          UI.buffer.ellipse(x+centerOffset*xDir, y+centerOffset*yDir, size, size);
+          UI.buffer.fill(UI.palette.constrastBg.hex);
         } else {
-          buffer.fill(uiColors.constrastBg.hex);
-          buffer.ellipse(x+centerOffset*xDir, y+centerOffset*yDir, size, size);
-          buffer.fill(uiColors.fg.hex);
+          UI.buffer.fill(UI.palette.constrastBg.hex);
+          UI.buffer.ellipse(x+centerOffset*xDir, y+centerOffset*yDir, size, size);
+          UI.buffer.fill(UI.palette.fg.hex);
         }
         
 
@@ -1752,34 +1744,34 @@ function redrawInterface(buffer) {
         const posY = y+centerOffset*yDir;
         // icons or text
         if (text === "H") {
-          buffer.strokeWeight(8);
+          UI.buffer.strokeWeight(8);
 
-          drawColorAxis(posX, posY - size/3, posX, posY + size/3, brushToVisualize.color, brushToVisualize.color, size, 1.0, 0.0);
+          UI.drawColorAxis(posX, posY - size/3, posX, posY + size/3, brushToVisualize.color, brushToVisualize.color, size, 1.0, 0.0);
 
           const startColorHue = brushToVisualize.color.copy().setHue(brushToVisualize.color.hue - 0.5); 
           const endColorHue   = brushToVisualize.color.copy().setHue(brushToVisualize.color.hue + 0.5);
-          drawColorAxis(posX - size/3, posY, posX + size/3, posY, startColorHue, endColorHue, size);
+          UI.drawColorAxis(posX - size/3, posY, posX + size/3, posY, startColorHue, endColorHue, size);
           
-          buffer.noStroke();
+          UI.buffer.noStroke();
 
         } else if (text === "LC") {
-          buffer.strokeWeight(8);
+          UI.buffer.strokeWeight(8);
 
           const startColorSat = brushToVisualize.color.copy().setSaturation(0);
           const endColorSat   = brushToVisualize.color.copy().setSaturation(1);
-          drawColorAxis(posX - size/3, posY, posX + size/3, posY, startColorSat, endColorSat, size);
+          UI.drawColorAxis(posX - size/3, posY, posX + size/3, posY, startColorSat, endColorSat, size);
           
           const startColorLum = brushToVisualize.color.copy().setLuminance(1);
           const endColorLum   = brushToVisualize.color.copy().setLuminance(0);
-          drawColorAxis(posX, posY - size/3, posX, posY + size/3, startColorLum, endColorLum, size);
+          UI.drawColorAxis(posX, posY - size/3, posX, posY + size/3, startColorLum, endColorLum, size);
 
-          buffer.noStroke();
+          UI.buffer.noStroke();
 
         } else {
-          buffer.textSize(22);
-          buffer.text(text, posX, posY - 4);
+          UI.buffer.textSize(22);
+          UI.buffer.text(text, posX, posY - 4);
           //reset text size
-          buffer.textSize((width < height) ? 13 : 16);
+          UI.buffer.textSize((width < height) ? 13 : 16);
         }
       }
 
@@ -1794,67 +1786,67 @@ function redrawInterface(buffer) {
     } else if (Interaction.currentUI === Interaction.UI_STATES.hueAndVar_open) {
 
       const radius = GIZMO_SIZE;
-      buffer.push();
-      buffer.translate(ankerX, ankerY);
+      UI.buffer.push();
+      UI.buffer.translate(ankerX, ankerY);
 
-      buffer.fill("black")
-      buffer.ellipse(0, 0, constrain(brushToVisualize.pxSize, 8, GIZMO_SIZE/3)+2)
+      UI.buffer.fill("black")
+      UI.buffer.ellipse(0, 0, constrain(brushToVisualize.pxSize, 8, GIZMO_SIZE/3)+2)
 
       // var
-      buffer.stroke("black");
-      buffer.strokeWeight(16);
-      buffer.line(0, radius*2 * (brushToVisualize.colorVar - 1), 0, radius*2 * brushToVisualize.colorVar);
+      UI.buffer.stroke("black");
+      UI.buffer.strokeWeight(16);
+      UI.buffer.line(0, radius*2 * (brushToVisualize.colorVar - 1), 0, radius*2 * brushToVisualize.colorVar);
 
-      buffer.strokeWeight(14);
-      drawColorAxis(0, radius*2 * (brushToVisualize.colorVar - 1), 0, radius*2 * brushToVisualize.colorVar, brushToVisualize.color, brushToVisualize.color, GIZMO_SIZE, 1.0, 0.0);
+      UI.buffer.strokeWeight(14);
+      UI.drawColorAxis(0, radius*2 * (brushToVisualize.colorVar - 1), 0, radius*2 * brushToVisualize.colorVar, brushToVisualize.color, brushToVisualize.color, GIZMO_SIZE, 1.0, 0.0);
 
       // hue
       // stay centered since hue is a circle anyway
-      buffer.stroke("black");
-      buffer.strokeWeight(16);
-      buffer.line(radius*2 * -0.5, 0, radius*2 * (1-0.5), 0);
+      UI.buffer.stroke("black");
+      UI.buffer.strokeWeight(16);
+      UI.buffer.line(radius*2 * -0.5, 0, radius*2 * (1-0.5), 0);
 
       const startColorHue = brushToVisualize.color.copy().setHue(brushToVisualize.color.hue - 0.5); 
       const endColorHue   = brushToVisualize.color.copy().setHue(brushToVisualize.color.hue + 0.5);
-      buffer.strokeWeight(14);
-      drawColorAxis(radius*2 * -0.5, 0, radius*2 * (1-0.5), 0, startColorHue, endColorHue, GIZMO_SIZE);
+      UI.buffer.strokeWeight(14);
+      UI.drawColorAxis(radius*2 * -0.5, 0, radius*2 * (1-0.5), 0, startColorHue, endColorHue, GIZMO_SIZE);
 
-      buffer.pop();
+      UI.buffer.pop();
 
       // Show color at reference position
       //const currentColorSize = constrain(brushToVisualize.pxSize, 8, gadgetRadius/3);
-      drawRoundColorExampleWithVariation(brushToVisualize, 40, ankerX, ankerY);
+      UI.drawRoundColorExampleWithVariation(brushToVisualize, 40, ankerX, ankerY);
 
     } else if (Interaction.currentUI === Interaction.UI_STATES.satAndLum_open) {
 
       const radius = GIZMO_SIZE;
-      buffer.push();
-      buffer.translate(ankerX, ankerY);
+      UI.buffer.push();
+      UI.buffer.translate(ankerX, ankerY);
 
-      buffer.fill("black")
-      buffer.ellipse(0, 0, constrain(brushToVisualize.pxSize, 8, GIZMO_SIZE/3)+2)
+      UI.buffer.fill("black")
+      UI.buffer.ellipse(0, 0, constrain(brushToVisualize.pxSize, 8, GIZMO_SIZE/3)+2)
 
       const startColorLum = brushToVisualize.color.copy().setLuminance(1);
       const endColorLum   = brushToVisualize.color.copy().setLuminance(0);
-      buffer.stroke("black");
-      buffer.strokeWeight(16);
-      buffer.line(0, radius*2 * (-1 + brushToVisualize.color.luminance), 0, radius*2 * brushToVisualize.color.luminance);
-      buffer.strokeWeight(14);
-      drawColorAxis(0, radius*2 * (-1 + brushToVisualize.color.luminance), 0, radius*2 * brushToVisualize.color.luminance, startColorLum, endColorLum, GIZMO_SIZE);
+      UI.buffer.stroke("black");
+      UI.buffer.strokeWeight(16);
+      UI.buffer.line(0, radius*2 * (-1 + brushToVisualize.color.luminance), 0, radius*2 * brushToVisualize.color.luminance);
+      UI.buffer.strokeWeight(14);
+      UI.drawColorAxis(0, radius*2 * (-1 + brushToVisualize.color.luminance), 0, radius*2 * brushToVisualize.color.luminance, startColorLum, endColorLum, GIZMO_SIZE);
 
       const startColorSat = brushToVisualize.color.copy().setSaturation(0);
       const endColorSat   = brushToVisualize.color.copy().setSaturation(1);
-      buffer.stroke("black");
-      buffer.strokeWeight(16);
-      buffer.line(radius*2 * -brushToVisualize.color.saturation, 0, radius*2 * (1-brushToVisualize.color.saturation), 0);
-      buffer.strokeWeight(14);
-      drawColorAxis(radius*2 * -brushToVisualize.color.saturation, 0, radius*2 * (1-brushToVisualize.color.saturation), 0, startColorSat, endColorSat, GIZMO_SIZE);
+      UI.buffer.stroke("black");
+      UI.buffer.strokeWeight(16);
+      UI.buffer.line(radius*2 * -brushToVisualize.color.saturation, 0, radius*2 * (1-brushToVisualize.color.saturation), 0);
+      UI.buffer.strokeWeight(14);
+      UI.drawColorAxis(radius*2 * -brushToVisualize.color.saturation, 0, radius*2 * (1-brushToVisualize.color.saturation), 0, startColorSat, endColorSat, GIZMO_SIZE);
       
-      buffer.pop();
+      UI.buffer.pop();
 
       // Show color at reference position
       //const currentColorSize = constrain(brushToVisualize.pxSize, 8, gadgetRadius/3);
-      drawRoundColorExampleWithVariation(brushToVisualize, 40, ankerX, ankerY);
+      UI.drawRoundColorExampleWithVariation(brushToVisualize, 40, ankerX, ankerY);
 
     } else if (Interaction.currentUI === Interaction.UI_STATES.size_open) {
 
@@ -1863,122 +1855,147 @@ function redrawInterface(buffer) {
       const lineAddY = GIZMO_SIZE * 2 * brushToVisualize.size;
       const lineTranslateY = posY + lineAddY;
 
-      buffer.stroke(uiColors.constrastBg.toHexWithSetAlpha(0.3));
-      buffer.strokeWeight(12);
-      buffer.line(posX, lineTranslateY - GIZMO_SIZE,posX, lineTranslateY + GIZMO_SIZE);
-      buffer.strokeWeight(10);
-      buffer.stroke(uiColors.fg.toHexWithSetAlpha(0.3));
-      buffer.line(posX, lineTranslateY - GIZMO_SIZE,posX, lineTranslateY + GIZMO_SIZE);
-      buffer.noStroke();
+      UI.buffer.stroke(UI.palette.constrastBg.toHexWithSetAlpha(0.3));
+      UI.buffer.strokeWeight(12);
+      UI.buffer.line(posX, lineTranslateY - GIZMO_SIZE,posX, lineTranslateY + GIZMO_SIZE);
+      UI.buffer.strokeWeight(10);
+      UI.buffer.stroke(UI.palette.fg.toHexWithSetAlpha(0.3));
+      UI.buffer.line(posX, lineTranslateY - GIZMO_SIZE,posX, lineTranslateY + GIZMO_SIZE);
+      UI.buffer.noStroke();
 
-      buffer.fill(brushToVisualize.color.toHexWithSetAlpha(0.5));
-      buffer.ellipse(posX, ankerY, brushToVisualize.pxSize);
-      buffer.fill(brushToVisualize.color.hex);
-      drawCrosshair(brushToVisualize.pxSize, posX, ankerY);
+      UI.buffer.fill(brushToVisualize.color.toHexWithSetAlpha(0.5));
+      UI.buffer.ellipse(posX, ankerY, brushToVisualize.pxSize);
+      UI.buffer.fill(brushToVisualize.color.hex);
+      UI.drawCrosshair(brushToVisualize.pxSize, posX, ankerY);
     }
   }
 
-  function drawRoundColorExampleWithVariation(brush, size, x, y) {
-    buffer.fill(brush.color.hex);
-    buffer.ellipse(x, y, size);
-
-    const varSegments = 48;
-    for (let i = 0; i < varSegments; i++) {
-      const start = (TWO_PI / varSegments) * i;
-      const stop = start + TWO_PI / varSegments; 
-      buffer.fill(brush.getColorWithVar(i).hex);
-      buffer.arc(x, y, size, size, start, stop);
-    }
-  }
-
-  function drawTooltipBelow(x, y, text) {
-    buffer.textAlign(CENTER);
-    const textPos = {
-      x: x,
-      y: y + 14
-    }
-    let bbox = fontMedium.textBounds(text, textPos.x, textPos.y);
-    buffer.fill(uiColors.constrastBg.toHexWithSetAlpha(0.5));
-    buffer.rect(bbox.x - bbox.w/2 - 13, bbox.y + bbox.h/2 - 4, bbox.w+26, bbox.h+12, 20);
-    buffer.fill(uiColors.fg.hex);
-    buffer.text(text, textPos.x, textPos.y);
-  }
-
-  function drawSizeIndicator(buffer, size, x, y) {
-    buffer.fill(uiColors.fg.toHexWithSetAlpha(0.4));
-    buffer.ellipse(x, y, size, size)
-    buffer.fill(uiColors.constrastBg.toHexWithSetAlpha(0.3));
-    buffer.ellipse(x, y, size*0.66, size*0.66)
-    buffer.ellipse(x, y, size*0.33, size*0.33)
-  }
-
-  function drawCrosshair(size, x, y) {
+  static drawCrosshair(size, x, y) {
     const expand_size = Math.min(25, size * 0.4);
 
     //shadow ver
-    buffer.strokeWeight(4);
-    buffer.stroke(uiColors.constrastBg.hex);
-    buffer.line(x, y - size*0.5, x, y - size*0.5 - expand_size);
-    buffer.line(x, y + size*0.5, x, y + size*0.5 + expand_size);
-    buffer.line(x - size*0.5, y, x - size*0.5 - expand_size, y);
-    buffer.line(x + size*0.5, y, x + size*0.5 + expand_size, y);
+    UI.buffer.strokeWeight(4);
+    UI.buffer.stroke(UI.palette.constrastBg.hex);
+    UI.buffer.line(x, y - size*0.5, x, y - size*0.5 - expand_size);
+    UI.buffer.line(x, y + size*0.5, x, y + size*0.5 + expand_size);
+    UI.buffer.line(x - size*0.5, y, x - size*0.5 - expand_size, y);
+    UI.buffer.line(x + size*0.5, y, x + size*0.5 + expand_size, y);
 
     // draw the crosshair
-    buffer.strokeWeight(2);
-    buffer.stroke(uiColors.fg.hex);
-    buffer.line(x, y - size*0.5, x, y - size*0.5 - expand_size);
-    buffer.line(x, y + size*0.5, x, y + size*0.5 + expand_size);
-    buffer.line(x - size*0.5, y, x - size*0.5 - expand_size, y);
-    buffer.line(x + size*0.5, y, x + size*0.5 + expand_size, y);
+    UI.buffer.strokeWeight(2);
+    UI.buffer.stroke(UI.palette.fg.hex);
+    UI.buffer.line(x, y - size*0.5, x, y - size*0.5 - expand_size);
+    UI.buffer.line(x, y + size*0.5, x, y + size*0.5 + expand_size);
+    UI.buffer.line(x - size*0.5, y, x - size*0.5 - expand_size, y);
+    UI.buffer.line(x + size*0.5, y, x + size*0.5 + expand_size, y);
   
     // reset
-    buffer.strokeWeight(6);
-    buffer.noStroke();
+    UI.buffer.strokeWeight(6);
+    UI.buffer.noStroke();
   }
 
-  function drawColorAxis(xStart, yStart, xEnd, yEnd, startColor, endColor, radius, startVar = 0, endVar = 0) {
-    const segments = Math.floor(radius);
-    let lastX = xStart;
-    let lastY = yStart;
-    for (let i = 1; i < segments + 1; i++) {
-      const toX = lerp(xStart, xEnd, i / segments);
-      const toY = lerp(yStart, yEnd, i / segments);
-      const colorLerpAmt = (i - 0.5) / segments;
-      const lerpedVar = lerp(startVar, endVar, colorLerpAmt);
-      const lerpedColor = HSLColor.lerpColorInHSL(startColor, endColor, colorLerpAmt).varyComponents(i, lerpedVar);
-      
-      buffer.stroke(lerpedColor.hex);
-      buffer.line(lastX, lastY, toX, toY);
-  
-      lastX = toX;
-      lastY = toY;
-    }
-  }
+  static drawBounds(bounds) {
+    if (bounds.width === 0 || bounds.height === 0) return;
 
-  function drawGradientSlider(x, y, width, height, startColor, endColor, sliderPercent) {
-    const segments = width;
-    const currentSegment = Math.round(segments * sliderPercent);
+    const topLeft = {x: bounds.x, y: bounds.y};
+    const botRight = {x: bounds.x + bounds.width, y: bounds.y + bounds.height};
 
-    for (let i = 0; i < segments; i++) {
-      const colorLerpAmt = (i + 0.5) / segments;
-      const lerpedColor = HSLColor.lerpColorInHSL(startColor, endColor, colorLerpAmt);
+    UI.buffer.push();
+    UI.buffer.translate(Interaction.viewTransform.x(), Interaction.viewTransform.y());
 
-      const curvedHeight = height * Math.min((1 - Math.abs((i/segments)-0.5) * 2) * 6, 1) ** 0.12
-  
-      buffer.fill(lerpedColor.hex);
-      buffer.rect(x + (i/segments) * width, y, width/segments, curvedHeight);
+    UI.buffer.stroke(UI.palette.constrastBg.hex);
+    UI.buffer.strokeWeight(3);
+    UI.buffer.line(topLeft.x, topLeft.y, botRight.x, topLeft.y);
+    UI.buffer.line(topLeft.x, topLeft.y, topLeft.x, botRight.y);
+    UI.buffer.line(topLeft.x, botRight.y, botRight.x, botRight.y);
+    UI.buffer.line(botRight.x, topLeft.y, botRight.x, botRight.y);
+    UI.buffer.stroke(UI.palette.fg.hex);
+    UI.buffer.strokeWeight(1);
+    UI.buffer.line(topLeft.x, topLeft.y, botRight.x, topLeft.y);
+    UI.buffer.line(topLeft.x, topLeft.y, topLeft.x, botRight.y);
+    UI.buffer.line(topLeft.x, botRight.y, botRight.x, botRight.y);
+    UI.buffer.line(botRight.x, topLeft.y, botRight.x, botRight.y);
+    UI.buffer.strokeWeight(6);
+    UI.buffer.noStroke();
 
-      if (i === currentSegment) {
-        buffer.fill(new HSLColor(0,0,1,0.8).hex);
-        buffer.rect(x + (i/segments) * width, y, width/segments, curvedHeight);
-      }
-      if (i+1 === currentSegment) {
-        buffer.fill(new HSLColor(0,0,0,0.8).hex);
-        buffer.rect(x + (i/segments) * width, y, width/segments, curvedHeight);
-      }
-    }
+    UI.buffer.pop();
   }
 }
+
+function setup() {
+  
+  const cnv = createCanvas(windowWidth - 10, windowHeight - 10);
+  cnv.id("myCanvas");
+
+  // Create a graphics buffer for the indicator
+  UI.buffer = createGraphics(width, height);
+  Interaction.adjustCanvasSize(windowWidth, windowHeight);
+
+  // event listeners on the entire canvas element
+  const canvasElement = document.getElementById("myCanvas");
+  canvasElement.addEventListener("pointerdown", Interaction.pointerStart);
+  canvasElement.addEventListener("pointerup", Interaction.pointerEnd);
+  canvasElement.addEventListener("pointercancel", Interaction.pointerCancel);
+  canvasElement.addEventListener("pointermove", Interaction.pointerMove);
+  canvasElement.addEventListener("wheel", Interaction.wheelScrolled);
+  canvasElement.addEventListener("pointerout", (event) => {
+    Interaction.pointerCancel(event);
+  });
+
+  // event listeners on the document
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) { Interaction.lostFocus(); }
+  });
+  document.addEventListener("keydown", (event) => Interaction.keyStart(event.key));
+  document.addEventListener("keyup", (event) => Interaction.keyEnd(event.key));
+  window.addEventListener("resize", () => Interaction.adjustCanvasSize(windowWidth, windowHeight));
+
+  // initialize new painting
+  const INITIAL_CANVAS_COLOR = new HSLColor(0.6, 0.1, 0.15);
+  const INITIAL_CANVAS_DIMENSIONS = {
+    x: Math.min(width, height)-150,
+    y: Math.min(width, height)-150
+  }
+  const INITIAL_BRUSH_SETTINGS = new BrushSettings(
+    new HSLColor(0.6, 0.6, 0.7), 
+    0.35, 0.5, 
+    drawingTools[0].tool, drawingTools[0].texture
+  );
+  openPainting = new Painting(INITIAL_CANVAS_DIMENSIONS.x, INITIAL_CANVAS_DIMENSIONS.y, INITIAL_CANVAS_COLOR, INITIAL_BRUSH_SETTINGS);
+  document.body.style.backgroundColor = INITIAL_CANVAS_COLOR.behind().hex;
+}
+
+function draw() {
+
+  background(openPainting.canvasColor.behind().hex);
+
+  // draw the painting buffers
+  drawCenteredCanvas(openPainting.oldStrokesBuffer);
+  openPainting.usedEditableStrokes.forEach((stroke) => {
+    drawCenteredCanvas(stroke.buffer);
+  });
+
+  // draw the new UI to the buffer
+  // show on top
+  UI.redrawInterface(); 
+  image(UI.buffer, 0, 0);
+}
+
+
+function drawCenteredCanvas(buffer) {
+  if (Interaction.viewTransform.scale === 1) {
+    image(buffer, Interaction.viewTransform.x(), Interaction.viewTransform.y());
+    return;
+  }
+  const scaledSize = {
+    x: Math.round(Interaction.viewTransform.scale * openPainting.width),
+    y: Math.round(Interaction.viewTransform.scale * openPainting.height)
+  };
+  image(buffer, Interaction.viewTransform.x(), Interaction.viewTransform.y(), 
+    scaledSize.x, scaledSize.y
+  );
+}
+
 
 function easeInCirc(x, from, to) {
   if (from === undefined) {
