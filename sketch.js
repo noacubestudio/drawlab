@@ -1712,7 +1712,16 @@ class UI {
     UI.buffer.ellipse(x, y, size*0.33, size*0.33)
   }
 
-  static drawColorAxis(xStart, yStart, xEnd, yEnd, startColor, endColor, radius, startVar = 0, endVar = 0) {
+  static drawColorAxis(thickness, xStart, yStart, xEnd, yEnd, startColor, endColor, radius, startVar = 0, endVar = 0) {
+    UI.buffer.strokeWeight(thickness);
+
+    // round end caps first
+    UI.buffer.stroke(startColor.hex);
+    UI.buffer.line(xStart, yStart, (xStart+xEnd)/2, (yStart+yEnd)/2);
+    UI.buffer.stroke(endColor.hex);
+    UI.buffer.line((xStart+xEnd)/2, (yStart+yEnd)/2, xEnd, yEnd);
+
+    UI.buffer.strokeCap(SQUARE);
     const segments = Math.floor(radius);
     let lastX = xStart;
     let lastY = yStart;
@@ -1729,6 +1738,7 @@ class UI {
       lastX = toX;
       lastY = toY;
     }
+    UI.buffer.strokeCap(ROUND);
   }
 
   static drawSliderChange(x, y, w, h, start, end, componentBefore, componentAfter, componentName) {
@@ -1836,44 +1846,50 @@ class UI {
         const posY = y+centerOffset*yDir;
         // icons or text
         if (text === "H") {
-          UI.buffer.strokeWeight(8);
-
-          UI.drawColorAxis(posX, posY - size/3, posX, posY + size/3, brushToVisualize.color, brushToVisualize.color, size, 1.0, 0.0);
+          UI.drawColorAxis(6, posX, posY - size/3, posX, posY + size/3, brushToVisualize.color, brushToVisualize.color, size, 1.0, 0.0);
 
           const startColorHue = brushToVisualize.color.copy().setHue(brushToVisualize.color.hue - 0.5); 
           const endColorHue   = brushToVisualize.color.copy().setHue(brushToVisualize.color.hue + 0.5);
-          UI.drawColorAxis(posX - size/3, posY, posX + size/3, posY, startColorHue, endColorHue, size);
-          
-          UI.buffer.noStroke();
+          UI.drawColorAxis(6, posX - size/3, posY, posX + size/3, posY, startColorHue, endColorHue, size);
 
         } else if (text === "LC") {
-          UI.buffer.strokeWeight(8);
-
           const startColorSat = brushToVisualize.color.copy().setSaturation(0);
           const endColorSat   = brushToVisualize.color.copy().setSaturation(1);
-          UI.drawColorAxis(posX - size/3, posY, posX + size/3, posY, startColorSat, endColorSat, size);
+          UI.drawColorAxis(6, posX - size/3, posY, posX + size/3, posY, startColorSat, endColorSat, size);
           
           const startColorLum = brushToVisualize.color.copy().setLuminance(1);
           const endColorLum   = brushToVisualize.color.copy().setLuminance(0);
-          UI.drawColorAxis(posX, posY - size/3, posX, posY + size/3, startColorLum, endColorLum, size);
+          UI.drawColorAxis(6, posX, posY - size/3, posX, posY + size/3, startColorLum, endColorLum, size);
+
+        } else if (text === "S") {
 
           UI.buffer.noStroke();
+          UI.buffer.fill(UI.palette.fg.toHexWithSetAlpha(0.7));
+          UI.buffer.ellipse(posX, posY - (size/3) * 0.8, size/6, size/6);
+          UI.buffer.ellipse(posX, posY + (size/3) * 0.8, size/9, size/9);
 
-        } else {
-          UI.buffer.textSize(22);
-          UI.buffer.text(text, posX, posY - 4);
-          //reset text size
-          UI.buffer.textSize((width < height) ? 13 : 16);
-        }
+        } else if (text === "I") {
+          
+          UI.buffer.strokeWeight(4);
+          UI.buffer.stroke(UI.palette.fg.toHexWithSetAlpha(0.7));
+          UI.buffer.line(posX, posY - size/3, posX, posY - (size/3) * 0.6);
+          UI.buffer.line(posX, posY + size/3, posX, posY + (size/3) * 0.6);
+          UI.buffer.line(posX - size/3, posY, posX - (size/3) * 0.6, posY);
+          UI.buffer.line(posX + size/3, posY, posX + (size/3) * 0.6, posY);
+
+        } 
+
+        UI.buffer.noStroke();
+        UI.buffer.fill(brushToVisualize.color.hex);
+        UI.buffer.ellipse(posX, posY, size/4, size/4);
       }
 
-      const highlightedGadget = 0 // (menuState.hoverPage === null) ? menuState.lastGadgetPage : menuState.hoverPage;
-      // WIP, could reintroduce hover later
-
-      drawGadgetDirection(basePosition.x, basePosition.y, -1,  0, highlightedGadget === 4, "S");
-      drawGadgetDirection(basePosition.x, basePosition.y,  1,  0, highlightedGadget === 3, "H");
-      drawGadgetDirection(basePosition.x, basePosition.y,  0, -1, highlightedGadget === 5, "I");
-      drawGadgetDirection(basePosition.x, basePosition.y,  0,  1, highlightedGadget === 2, "LC");
+      // WIP: the false means none of these will be highlighted.
+      // hover state and default behavior could be re-added...
+      drawGadgetDirection(basePosition.x, basePosition.y, -1,  0, false, "S");
+      drawGadgetDirection(basePosition.x, basePosition.y,  1,  0, false, "H");
+      drawGadgetDirection(basePosition.x, basePosition.y,  0, -1, false, "I");
+      drawGadgetDirection(basePosition.x, basePosition.y,  0,  1, false, "LC");
     
     } else if (Interaction.currentUI === Interaction.UI_STATES.hueAndVar_open) {
 
@@ -1888,9 +1904,7 @@ class UI {
       UI.buffer.stroke("black");
       UI.buffer.strokeWeight(16);
       UI.buffer.line(0, radius*2 * (brushToVisualize.colorVar - 1), 0, radius*2 * brushToVisualize.colorVar);
-
-      UI.buffer.strokeWeight(14);
-      UI.drawColorAxis(0, radius*2 * (brushToVisualize.colorVar - 1), 0, radius*2 * brushToVisualize.colorVar, brushToVisualize.color, brushToVisualize.color, GIZMO_SIZE, 1.0, 0.0);
+      UI.drawColorAxis(14, 0, radius*2 * (brushToVisualize.colorVar - 1), 0, radius*2 * brushToVisualize.colorVar, brushToVisualize.color, brushToVisualize.color, GIZMO_SIZE, 1.0, 0.0);
 
       // hue
       // stay centered since hue is a circle anyway
@@ -1900,8 +1914,7 @@ class UI {
 
       const startColorHue = brushToVisualize.color.copy().setHue(brushToVisualize.color.hue - 0.5); 
       const endColorHue   = brushToVisualize.color.copy().setHue(brushToVisualize.color.hue + 0.5);
-      UI.buffer.strokeWeight(14);
-      UI.drawColorAxis(radius*2 * -0.5, 0, radius*2 * (1-0.5), 0, startColorHue, endColorHue, GIZMO_SIZE);
+      UI.drawColorAxis(14, radius*2 * -0.5, 0, radius*2 * (1-0.5), 0, startColorHue, endColorHue, GIZMO_SIZE);
 
       UI.buffer.pop();
 
@@ -1923,16 +1936,14 @@ class UI {
       UI.buffer.stroke("black");
       UI.buffer.strokeWeight(16);
       UI.buffer.line(0, radius*2 * (-1 + brushToVisualize.color.luminance), 0, radius*2 * brushToVisualize.color.luminance);
-      UI.buffer.strokeWeight(14);
-      UI.drawColorAxis(0, radius*2 * (-1 + brushToVisualize.color.luminance), 0, radius*2 * brushToVisualize.color.luminance, startColorLum, endColorLum, GIZMO_SIZE);
+      UI.drawColorAxis(14, 0, radius*2 * (-1 + brushToVisualize.color.luminance), 0, radius*2 * brushToVisualize.color.luminance, startColorLum, endColorLum, GIZMO_SIZE);
 
       const startColorSat = brushToVisualize.color.copy().setSaturation(0);
       const endColorSat   = brushToVisualize.color.copy().setSaturation(1);
       UI.buffer.stroke("black");
       UI.buffer.strokeWeight(16);
       UI.buffer.line(radius*2 * -brushToVisualize.color.saturation, 0, radius*2 * (1-brushToVisualize.color.saturation), 0);
-      UI.buffer.strokeWeight(14);
-      UI.drawColorAxis(radius*2 * -brushToVisualize.color.saturation, 0, radius*2 * (1-brushToVisualize.color.saturation), 0, startColorSat, endColorSat, GIZMO_SIZE);
+      UI.drawColorAxis(14, radius*2 * -brushToVisualize.color.saturation, 0, radius*2 * (1-brushToVisualize.color.saturation), 0, startColorSat, endColorSat, GIZMO_SIZE);
       
       UI.buffer.pop();
 
