@@ -1454,7 +1454,12 @@ class UI {
       }
   
       // draw the variation indicator
-      UI.drawRoundColorExampleWithVariation(openPainting.currentBrush, 55, sliderStart - 30, 30);
+      UI.buffer.drawingContext.save();
+      UI.buffer.fill(UI.palette.constrastBg.toHexWithSetAlpha(0.5));
+      UI.buffer.rect(sliderStart - 60, 0, 60, 60, 20, 20, 20, 20);
+      UI.buffer.drawingContext.clip();
+      UI.drawVariedColorCircle(openPainting.currentBrush, 70, sliderStart - 30, 30);
+      UI.buffer.drawingContext.restore();
   
       // draw the size indicator
       UI.buffer.drawingContext.save();
@@ -1463,7 +1468,6 @@ class UI {
       UI.buffer.drawingContext.clip();
       UI.drawSizeIndicator(openPainting.currentBrush.pxSize, sliderStart + 630, 30);
       UI.buffer.drawingContext.restore();
-      UI.buffer.noStroke();
     }
 
     if (Interaction.currentUI === Interaction.UI_STATES.clover_open) {
@@ -1608,17 +1612,23 @@ class UI {
     UI.buffer.text(text, x, 0, UI.TOP_BUTTON_WIDTH, 60 - 8);
   }
 
-  static drawRoundColorExampleWithVariation(brush, size, x, y) {
+  static drawVariedColorCircle(brush, size, x, y) {
+    UI.buffer.push();
+    UI.buffer.translate(x, y);
+    const intensityAngle = brush.colorVar * Math.PI * 2;
+    if (intensityAngle !== undefined) UI.buffer.rotate(intensityAngle);
+
     UI.buffer.fill(brush.color.hex);
-    UI.buffer.ellipse(x, y, size);
+    UI.buffer.ellipse(0, 0, size);
 
     const varSegments = 48;
     for (let i = 0; i < varSegments; i++) {
       const start = (TWO_PI / varSegments) * i;
       const stop = start + TWO_PI / varSegments; 
       UI.buffer.fill(brush.getColorWithVar(i).hex);
-      UI.buffer.arc(x, y, size, size, start, stop);
+      UI.buffer.arc(0, 0, size, size, start, stop);
     }
+    UI.buffer.pop();
   }
 
   static drawSizeIndicator(size, x, y) {
@@ -1654,6 +1664,11 @@ class UI {
   }
 
   static drawGradientSlider(x, y, width, height, startColor, endColor, sliderPercent) {
+    UI.buffer.drawingContext.save();
+    UI.buffer.fill(UI.palette.constrastBg.toHexWithSetAlpha(0.5));
+    UI.buffer.rect(x, y, width, height, 0, 0, 20, 20);
+    UI.buffer.drawingContext.clip();
+      
     const segments = width;
     const currentSegment = Math.round(segments * sliderPercent);
 
@@ -1661,20 +1676,22 @@ class UI {
       const colorLerpAmt = (i + 0.5) / segments;
       const lerpedColor = HSLColor.lerpColorInHSL(startColor, endColor, colorLerpAmt);
 
-      const curvedHeight = height * Math.min((1 - Math.abs((i/segments)-0.5) * 2) * 6, 1) ** 0.12
+      //const curvedHeight = height * Math.min((1 - Math.abs((i/segments)-0.5) * 2) * 6, 1) ** 0.12
   
       UI.buffer.fill(lerpedColor.hex);
-      UI.buffer.rect(x + (i/segments) * width, y, width/segments, curvedHeight);
+      UI.buffer.rect(x + (i/segments) * width, y, width/segments, height);
 
       if (i === currentSegment) {
         UI.buffer.fill(new HSLColor(0,0,1,0.8).hex);
-        UI.buffer.rect(x + (i/segments) * width, y, width/segments, curvedHeight);
+        UI.buffer.rect(x + (i/segments) * width, y, width/segments, height);
       }
       if (i+1 === currentSegment) {
         UI.buffer.fill(new HSLColor(0,0,0,0.8).hex);
-        UI.buffer.rect(x + (i/segments) * width, y, width/segments, curvedHeight);
+        UI.buffer.rect(x + (i/segments) * width, y, width/segments, height);
       }
     }
+
+    UI.buffer.drawingContext.restore();
   }
 
   static drawTooltipBelow(x, y, text) {
@@ -1699,7 +1716,7 @@ class UI {
 
       // when actually eyedropping
       if (Interaction.currentType === Interaction.TYPES.painting.eyedropper) {
-        UI.drawRoundColorExampleWithVariation(openPainting.currentBrush, openPainting.currentBrush.pxSize, position.x, position.y);
+        UI.drawVariedColorCircle(openPainting.currentBrush, openPainting.currentBrush.pxSize, position.x, position.y);
       }
       
       UI.drawCrosshair(openPainting.currentBrush.pxSize, position.x, position.y);
@@ -1815,7 +1832,7 @@ class UI {
 
       // Show color at reference position
       //const currentColorSize = constrain(brushToVisualize.pxSize, 8, gadgetRadius/3);
-      UI.drawRoundColorExampleWithVariation(brushToVisualize, 40, ankerX, ankerY);
+      UI.drawVariedColorCircle(brushToVisualize, 40, ankerX, ankerY);
 
     } else if (Interaction.currentUI === Interaction.UI_STATES.satAndLum_open) {
 
@@ -1846,7 +1863,7 @@ class UI {
 
       // Show color at reference position
       //const currentColorSize = constrain(brushToVisualize.pxSize, 8, gadgetRadius/3);
-      UI.drawRoundColorExampleWithVariation(brushToVisualize, 40, ankerX, ankerY);
+      UI.drawVariedColorCircle(brushToVisualize, 40, ankerX, ankerY);
 
     } else if (Interaction.currentUI === Interaction.UI_STATES.size_open) {
 
