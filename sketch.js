@@ -1,16 +1,15 @@
 // init in setup()
 let openPainting = undefined;
 
-// based on canvas size
-let GIZMO_SIZE = undefined; 
+// constants
+const GIZMO_SIZE = 120; 
+const MOBILE_WIDTH_BREAKPOINT = 576;
 
-// menu
 const PRESET_TOOLS = [
   {tool: "Brush Tool", texture: "Regular", menuName: "Default"},
   {tool: "Brush Tool", texture: "Rake",    menuName: "Rake" },
   {tool: "Brush Tool", texture: "Round",   menuName: "Round"},
 ];
-
 let FONT_REGULAR; let FONT_ITALIC; let FONT_MEDIUM;
 function preload() {
   FONT_REGULAR = loadFont('assets/IBMPlexSans-Regular.ttf');
@@ -18,8 +17,9 @@ function preload() {
   FONT_MEDIUM = loadFont('assets/IBMPlexSans-Medium.ttf');
 }
 
+
 function setup() {
-  const cnv = createCanvas(windowWidth - 10, windowHeight - 10);
+  const cnv = createCanvas(windowWidth, windowHeight);
   cnv.id("myCanvas");
 
   // Create a graphics buffer for the indicator
@@ -49,9 +49,10 @@ function setup() {
 
   // initialize new painting
   const INITIAL_CANVAS_COLOR = new HSLColor(0.6, 0.1, 0.15);
+  const smaller_side = Math.min(width, height);
   const INITIAL_CANVAS_DIMENSIONS = {
-    x: Math.min(width, height)-150,
-    y: Math.min(width, height)-150
+    x: Math.round(smaller_side*0.9),
+    y: Math.round(smaller_side*0.9)
   }
   const INITIAL_BRUSH_SETTINGS = new BrushSettings(
     new HSLColor(0.6, 0.6, 0.7), 
@@ -573,6 +574,10 @@ class Interaction {
     }
   };
 
+  static get middleUIVisible() {
+    return (width > 980);
+  }
+
   static get isAlreadyDown() {
     return (Interaction.currentType !== null && Interaction.currentType !== Interaction.TYPES.painting.hover);
   }
@@ -584,8 +589,6 @@ class Interaction {
   static adjustCanvasSize(windowWidth, windowHeight) {
     resizeCanvas(windowWidth, windowHeight);
     UI.buffer.resizeCanvas(width, height);
-    UI.buffer.textSize((width < height) ? 13 : 16);
-    GIZMO_SIZE = (width > 300) ? 120 : 60;
   }
 
   static lostFocus() {
@@ -625,7 +628,7 @@ class Interaction {
 
   static keyStart(key) {
     console.log("pressed " + key);
-    
+
     if (key === "c") {
       //Interaction.clearAction();
     } else if (key === "s") {
@@ -748,7 +751,7 @@ class Interaction {
         // second to last
         return Interaction.TYPES.button.clear;
 
-      } else {
+      } else if (Interaction.middleUIVisible) {
 
         const xInMiddleSection = x - width/2 + middle_width/2;
         if (xInMiddleSection > 0) {
@@ -791,7 +794,7 @@ class Interaction {
       }
     }
 
-    if (x > width - UI.BUTTON_WIDTH && y > height - 60) {
+    if (x > width - UI.BUTTON_WIDTH && y > height - 60 && width > MOBILE_WIDTH_BREAKPOINT) {
       return Interaction.TYPES.button.help;
     }
 
@@ -1539,6 +1542,7 @@ class UI {
     UI.buffer.clear();
     UI.buffer.textFont(FONT_MEDIUM);
     UI.buffer.textAlign(LEFT, CENTER);
+    UI.buffer.textSize(16);
     UI.buffer.noStroke();
   
     // Interface Colors
@@ -1572,7 +1576,9 @@ class UI {
     UI.drawButton("clear", width-UI.BUTTON_WIDTH*2, 0, new HSLColor(0.1, 0.8, (UI.palette.fg.luminance > 0.5) ? 0.7 : 0.4));
     UI.drawButton("save" , width-UI.BUTTON_WIDTH*1, 0, UI.palette.fg);
 
-    UI.drawButton("help" , width-UI.BUTTON_WIDTH*1, height-60, UI.showingHelp ? UI.palette.fgDisabled : UI.palette.fg);
+    if (width > MOBILE_WIDTH_BREAKPOINT) {
+      UI.drawButton("help" , width-UI.BUTTON_WIDTH*1, height-60, UI.showingHelp ? UI.palette.fgDisabled : UI.palette.fg);
+    }
     
     UI.buffer.fill(UI.palette.fg.hex);
     UI.buffer.textAlign(LEFT);
@@ -1580,7 +1586,7 @@ class UI {
   
     // draw the sliders at the top
     const sliderStart = width/2 - 300;
-    if (width > 980) {
+    if (Interaction.middleUIVisible) {
       let baseColor = openPainting.brushSettingsToAdjust.color;
       UI.drawGradientSlider(sliderStart, 0, 200, 60,     baseColor.copy().setLuminance(0), baseColor.copy().setLuminance(1), baseColor.luminance);
       UI.drawGradientSlider(sliderStart+200, 0, 200, 60, baseColor.copy().setSaturation(0), baseColor.copy().setSaturation(1), baseColor.saturation);
@@ -1653,10 +1659,6 @@ class UI {
       const controlsInfo = "Keyboard: 1-[Value] 2-[Hue] 3-[Size] 4-[Eyedrop] U-[Undo] E-[Edit] S-[Save]";
       UI.buffer.text(controlsInfo, 20, height - 20 - 12);
     }
-
-  
-    //reset text size
-    UI.buffer.textSize((width < height) ? 13 : 16);
   
     // draw rectangle around stroke being edited
     if (Interaction.modifyLastStroke) {
@@ -1669,7 +1671,7 @@ class UI {
     }
     
     // DEV STUFF, WIP
-    if (true) {
+    if (false) {
       UI.buffer.strokeWeight(2);
       UI.buffer.fill(UI.palette.fg.hex)
       UI.buffer.textAlign(LEFT);
