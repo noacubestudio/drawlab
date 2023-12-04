@@ -632,10 +632,7 @@ class Interaction {
 
     //Interaction.clearAction();
     if (key === "r") {
-      openPainting.hueRotation += 0.5;
-      openPainting.hueRotation %= 1;
-      const rotatedHue = openPainting.brushSettingsToAdjust.color.hue + 0.5;
-      openPainting.brushSettingsToAdjust.color.setHue(rotatedHue % 1);
+      Interaction.rotateHueAction();
       //console.log('rotate to: '+ openPainting.hueRotation, 'current hue: '+ openPainting.currentBrush.color.hue);
     } else if (key === "s") {
       Interaction.saveAction();
@@ -734,6 +731,13 @@ class Interaction {
       Interaction.modifyLastStroke = false;
     }
     Interaction.currentUI = Interaction.UI_STATES.nothing_open;
+  }
+
+  static rotateHueAction() {
+    openPainting.hueRotation += 0.5;
+    openPainting.hueRotation %= 1;
+    const rotatedHue = openPainting.brushSettingsToAdjust.color.hue + 0.5;
+    openPainting.brushSettingsToAdjust.color.setHue(rotatedHue % 1);
   }
 
   static wasSurfaceType(x, y) {
@@ -961,8 +965,13 @@ class Interaction {
         const newValue = constrain((xInMiddleSection - 60) / 200, 0, 1);
         brushToAdjust.color.setLuminance(newValue);
       } else if (Interaction.currentType === Interaction.TYPES.slider.saturation) {
-        const newValue = constrain((xInMiddleSection - 260) / 200, 0, 1);
-        brushToAdjust.color.setSaturation(newValue);
+        const newValue = constrain((xInMiddleSection - 260) / 200, 0, 1)*2 - 1;
+        if (newValue < 0 && openPainting.hueRotation === 0) {
+          Interaction.rotateHueAction();
+        } else if (newValue >= 0 && openPainting.hueRotation !== 0) {
+          Interaction.rotateHueAction();
+        }
+        brushToAdjust.color.setSaturation(Math.abs(newValue));
       } else if (Interaction.currentType === Interaction.TYPES.slider.hue) {
         let newValue = (xInMiddleSection - 460) / 200;
         newValue += openPainting.hueRotation;
@@ -1590,9 +1599,10 @@ class UI {
     const sliderStart = width/2 - 300;
     if (Interaction.middleUIVisible) {
       let baseColor = openPainting.brushSettingsToAdjust.color;
-      let rotatedBaseHue = (baseColor.hue+openPainting.hueRotation) % 1;
+      const rotatedBaseHue = (baseColor.hue+openPainting.hueRotation) % 1;
+      const correctlyFlippedSaturation = (openPainting.hueRotation === 0) ? (1 + baseColor.saturation)/2 : (1 - baseColor.saturation)/2;
       UI.drawGradientSlider(sliderStart, 0, 200, 60,     baseColor.copy().setLuminance(0), baseColor.copy().setLuminance(1), baseColor.luminance);
-      UI.drawGradientSlider(sliderStart+200, 0, 200, 60, baseColor.copy().setSaturation(0), baseColor.copy().setSaturation(1), baseColor.saturation);
+      UI.drawGradientSlider(sliderStart+200, 0, 200, 60, baseColor.copy().setSaturation(0), baseColor.copy().setSaturation(1), correctlyFlippedSaturation, "double");
       UI.drawGradientSlider(sliderStart+400, 0, 200, 60, baseColor.copy().setHue(0+openPainting.hueRotation), baseColor.copy().setHue(1+openPainting.hueRotation), rotatedBaseHue);
   
       // show difference
@@ -1600,35 +1610,30 @@ class UI {
       if (settingsChangeInteractions.includes(Interaction.currentType) && openPainting.previousBrush !== undefined) {
         const prevColor = openPainting.previousBrush.color;
   
-        if (prevColor.luminance !== baseColor.luminance) {
+        if (Interaction.currentType === Interaction.TYPES.slider.luminance) {
           UI.drawSliderChange(
             sliderStart, 0, 200, 60, 
             prevColor.copy().setLuminance(0), prevColor.copy().setLuminance(1), 
             prevColor.luminance, baseColor.luminance, 
             "L: " + Math.floor(baseColor.luminance * 100) + "%"
           );
-        }
-        if (prevColor.saturation !== baseColor.saturation) {
+        } else if (Interaction.currentType === Interaction.TYPES.slider.saturation) {
           UI.drawSliderChange(
             sliderStart + 200, 0, 200, 60, 
             prevColor.copy().setSaturation(0), prevColor.copy().setSaturation(1), 
-            prevColor.saturation, baseColor.saturation, 
-            "S: " + Math.floor(baseColor.saturation * 100) + "%"
+            prevColor.saturation, (openPainting.hueRotation === 0) ? (1 + baseColor.saturation)/2 : (1 - baseColor.saturation)/2,
+            "S: " + ((openPainting.hueRotation === 0) ? "" : "-") +  Math.floor(baseColor.saturation * 100) + "%", "double"
           );
-        }
-        if (prevColor.hue !== baseColor.hue) {
+        } if (Interaction.currentType === Interaction.TYPES.slider.hue) {
           UI.drawSliderChange(
             sliderStart + 400, 0, 200, 60, 
             prevColor.copy().setHue(0+openPainting.hueRotation), prevColor.copy().setHue(1+openPainting.hueRotation), 
             (prevColor.hue+openPainting.hueRotation) % 1, (baseColor.hue+openPainting.hueRotation) % 1, 
             "H:" + Math.floor(baseColor.hue * 360) + "°"
           );
-        }
-  
-        if (openPainting.previousBrush.colorVar !== openPainting.currentBrush.colorVar) {
+        } else if (Interaction.currentType === Interaction.TYPES.knob.jitter) {
           UI.drawTooltipBelow(sliderStart + 630, 60, Math.round(openPainting.currentBrush.colorVar * 100) + "%");
-        }
-        if (openPainting.previousBrush.size !== openPainting.currentBrush.size) {
+        } else if (Interaction.currentType === Interaction.TYPES.knob.size) {
           UI.drawTooltipBelow(sliderStart - 30, 60, Math.round(openPainting.currentBrush.pxSize) + "px");
         }
       }
@@ -1848,39 +1853,62 @@ class UI {
     UI.buffer.strokeCap(ROUND);
   }
 
-  static drawSliderChange(x, y, w, h, start, end, componentBefore, componentAfter, componentName) {
-    UI.drawGradientSlider(x, 0, w, h/6, start, end, componentBefore);
-    UI.drawTooltipBelow(x + componentAfter * w, h, componentName);
+  static drawSliderChange(x, y, w, h, start, end, componentBefore, componentAfter, componentName, gradientType) {
+    //UI.drawGradientSlider(x, y, w, h/6, start, end, componentBefore, gradientType);
+    UI.drawTooltipBelow(x + componentAfter * w, h, componentName, gradientType);
   }
 
-  static drawGradientSlider(x, y, width, height, startColor, endColor, sliderPercent) {
+  static drawGradientSlider(x, y, width, height, startColor, endColor, sliderPercent, gradientType) {
     UI.buffer.drawingContext.save();
     UI.buffer.fill(UI.palette.constrastBg.toHexWithSetAlpha(0.5));
     UI.buffer.rect(x, y, width, height, 0, 0, 20, 20);
     UI.buffer.drawingContext.clip();
       
     const segments = width;
-    const currentSegment = Math.round(segments * (sliderPercent % 1));
 
-    for (let i = 0; i < segments; i++) {
-      const colorLerpAmt = (i + 0.5) / segments;
-      const lerpedColor = HSLColor.lerpColorInHSL(startColor, endColor, colorLerpAmt);
+    if (gradientType === "double") {
+      const currentSegment = Math.round(segments * (sliderPercent));
 
-      //const curvedHeight = height * Math.min((1 - Math.abs((i/segments)-0.5) * 2) * 6, 1) ** 0.12
+      for (let i = 0; i < segments; i++) {
+        const colorLerpAmt = ((i + 0.5) / segments) * 2 - 1;
+        const lerpedColor = ((colorLerpAmt * (openPainting.hueRotation === 0 ? 1 : -1)) > 0) 
+          ? HSLColor.lerpColorInHSL(startColor, endColor, Math.abs(colorLerpAmt))
+          : HSLColor.lerpColorInHSL(startColor.copy().setHue((startColor.hue + 0.5) % 1), endColor.copy().setHue((endColor.hue + 0.5) % 1), Math.abs(colorLerpAmt));
+    
+        UI.buffer.fill(lerpedColor.hex);
+        UI.buffer.rect(x + (i/segments) * width, y, width/segments, height);
   
-      UI.buffer.fill(lerpedColor.hex);
-      UI.buffer.rect(x + (i/segments) * width, y, width/segments, height);
+        if (i === currentSegment) {
+          UI.buffer.fill(new HSLColor(0,0,1,0.8).hex);
+          UI.buffer.rect(x + (i/segments) * width, y, width/segments, height);
+        }
+        if (i+1 === currentSegment) {
+          UI.buffer.fill(new HSLColor(0,0,0,0.8).hex);
+          UI.buffer.rect(x + (i/segments) * width, y, width/segments, height);
+        }
+      }  
 
-      if (i === currentSegment) {
-        UI.buffer.fill(new HSLColor(0,0,1,0.8).hex);
+    } else {
+      const currentSegment = Math.round(segments * (sliderPercent % 1));
+
+      for (let i = 0; i < segments; i++) {
+        const colorLerpAmt = (i + 0.5) / segments;
+        const lerpedColor = HSLColor.lerpColorInHSL(startColor, endColor, colorLerpAmt);
+    
+        UI.buffer.fill(lerpedColor.hex);
         UI.buffer.rect(x + (i/segments) * width, y, width/segments, height);
-      }
-      if (i+1 === currentSegment) {
-        UI.buffer.fill(new HSLColor(0,0,0,0.8).hex);
-        UI.buffer.rect(x + (i/segments) * width, y, width/segments, height);
-      }
+  
+        if (i === currentSegment) {
+          UI.buffer.fill(new HSLColor(0,0,1,0.8).hex);
+          UI.buffer.rect(x + (i/segments) * width, y, width/segments, height);
+        }
+        if (i+1 === currentSegment) {
+          UI.buffer.fill(new HSLColor(0,0,0,0.8).hex);
+          UI.buffer.rect(x + (i/segments) * width, y, width/segments, height);
+        }
+      }  
     }
-
+    
     UI.buffer.drawingContext.restore();
   }
 
