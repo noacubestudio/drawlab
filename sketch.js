@@ -41,7 +41,9 @@ function setup() {
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) { Interaction.lostFocus(); }
   });
-  document.addEventListener("keydown", (event) => Interaction.keyStart(event.key));
+  document.addEventListener("keydown", (event) => { 
+    if (!event.repeat ) Interaction.keyStart(event.key);
+  });
   document.addEventListener("keyup", (event) => Interaction.keyEnd(event.key));
   window.addEventListener("resize", () => Interaction.adjustCanvasSize(windowWidth, windowHeight));
 
@@ -622,6 +624,8 @@ class Interaction {
   }
 
   static keyStart(key) {
+    console.log("pressed " + key);
+    
     if (key === "c") {
       //Interaction.clearAction();
     } else if (key === "s") {
@@ -971,8 +975,8 @@ class Interaction {
 
       // start hover
       Interaction.currentType = Interaction.TYPES.painting.hover;
+      if (Interaction.currentUI !== Interaction.UI_STATES.nothing_open) return; // no hover preview in menus anyway, so don't even record
       Interaction.currentSequence.push(new_interaction);
-
 
     } else if (Interaction.currentType === Interaction.TYPES.painting.hover) {
 
@@ -983,6 +987,8 @@ class Interaction {
         Interaction.currentSequence = [];
         return;
       }
+
+      if (Interaction.currentUI !== Interaction.UI_STATES.nothing_open) return; // no hover preview in menus anyway, so don't even record
 
       // continue hover sequence if beyond minimum distance travelled from last point.
       const last_interaction = Interaction.currentSequence[Interaction.currentSequence.length-1];
@@ -1234,7 +1240,7 @@ class Interaction {
       }
 
       Interaction.currentType = null;
-      Interaction.lastInteractionEnd = Interaction.currentSequence[Interaction.currentSequence.length-1]
+      Interaction.lastInteractionEnd = Interaction.currentSequence[Interaction.currentSequence.length-1];
       Interaction.currentSequence = [];
 
     } else if (Interaction.currentType === Interaction.TYPES.gizmo.size) {
@@ -1663,14 +1669,15 @@ class UI {
     }
     
     // DEV STUFF, WIP
-    if (false) {
+    if (true) {
       UI.buffer.strokeWeight(2);
       UI.buffer.fill(UI.palette.fg.hex)
+      UI.buffer.textAlign(LEFT);
       UI.buffer.text('ui: '         + (Interaction.currentUI ?? 'none'),              20,  80);
       UI.buffer.text('gesture: '    + (Interaction.currentType ?? 'none'),            20, 100);
       UI.buffer.text('points: '     + (Interaction.currentSequence.length ?? 'none'), 20, 120);
       UI.buffer.text('zoom: '       + (Interaction.viewTransform.scale ?? 'none'),    20, 140);
-  
+      UI.buffer.text('last: '       + (Interaction.lastInteractionEnd ?? 'none'),     20, 160);
     
       if (Interaction.referencePosition !== undefined) {
         UI.buffer.stroke(new HSLColor(0.1, 1, 1.0).hex);
