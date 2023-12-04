@@ -339,6 +339,7 @@ class Painting {
     this.currentBrush = startingBrush;
     this.previousBrushes = [];
     this.canvasColor = backgroundColor;
+    this.hueRotation = 0;
 
     this.clearWithColor(backgroundColor); // WIP, this is currently missing anything for display density
   }
@@ -629,8 +630,13 @@ class Interaction {
   static keyStart(key) {
     console.log("pressed " + key);
 
-    if (key === "c") {
-      //Interaction.clearAction();
+    //Interaction.clearAction();
+    if (key === "r") {
+      openPainting.hueRotation += 0.5;
+      openPainting.hueRotation %= 1;
+      const rotatedHue = openPainting.brushSettingsToAdjust.color.hue + 0.5;
+      openPainting.brushSettingsToAdjust.color.setHue(rotatedHue % 1);
+      //console.log('rotate to: '+ openPainting.hueRotation, 'current hue: '+ openPainting.currentBrush.color.hue);
     } else if (key === "s") {
       Interaction.saveAction();
       Interaction.resetCurrentSequence();
@@ -758,7 +764,7 @@ class Interaction {
 
           if (xInMiddleSection < 60) {
             //var
-            return Interaction.TYPES.knob.jitter;
+            return Interaction.TYPES.knob.size;
 
           } else if (xInMiddleSection < 260) {
             // luminance
@@ -774,7 +780,7 @@ class Interaction {
 
           } else if (xInMiddleSection < 720) {
             // size
-            return Interaction.TYPES.knob.size;
+            return Interaction.TYPES.knob.jitter;
 
           }
         }
@@ -959,6 +965,7 @@ class Interaction {
         brushToAdjust.color.setSaturation(newValue);
       } else if (Interaction.currentType === Interaction.TYPES.slider.hue) {
         let newValue = (xInMiddleSection - 460) / 200;
+        newValue += openPainting.hueRotation;
         if (newValue > 1) newValue %= 1;
         if (newValue < 0) newValue = 1-(Math.abs(newValue) % 1);
         brushToAdjust.color.setHue(newValue);
@@ -1424,7 +1431,7 @@ class HSLColor {
   }
 
   #toRGBArray() {
-    return okhsl_to_srgb(this.h, this.s, this.l); // from conversion helpers file
+    return okhsl_to_srgb(this.hue, this.saturation, this.luminance); // from conversion helpers file
   }
 
   #alphaToHex(a = this.a) {
@@ -1445,12 +1452,6 @@ class HSLColor {
    * @param {number} value - The new hue value (between 0 and 1).
    */
   setHue(value) {
-    // if (value < -1) {
-    //   value = 1 + (value % 1);
-    // } else if (value > 2) {
-    //   value %= 1;
-    // }
-
     this.h = value;
     return this;
   }
@@ -1475,7 +1476,6 @@ class HSLColor {
     this.a = value;
     return this;
   }
-
   /**
    * Create a copy of the current color that is darker and limited in saturation.
    */
@@ -1512,6 +1512,8 @@ class HSLColor {
 
   get hue() {
     return this.h;
+    // if (value < 0) return 1 + (value % 1);
+    // if (value > 1) return value % 1;
   }
   get saturation() {
     return this.s;
@@ -1588,9 +1590,10 @@ class UI {
     const sliderStart = width/2 - 300;
     if (Interaction.middleUIVisible) {
       let baseColor = openPainting.brushSettingsToAdjust.color;
+      let rotatedBaseHue = (baseColor.hue+openPainting.hueRotation) % 1;
       UI.drawGradientSlider(sliderStart, 0, 200, 60,     baseColor.copy().setLuminance(0), baseColor.copy().setLuminance(1), baseColor.luminance);
       UI.drawGradientSlider(sliderStart+200, 0, 200, 60, baseColor.copy().setSaturation(0), baseColor.copy().setSaturation(1), baseColor.saturation);
-      UI.drawGradientSlider(sliderStart+400, 0, 200, 60, baseColor.copy().setHue(0), baseColor.copy().setHue(1), baseColor.hue);
+      UI.drawGradientSlider(sliderStart+400, 0, 200, 60, baseColor.copy().setHue(0+openPainting.hueRotation), baseColor.copy().setHue(1+openPainting.hueRotation), rotatedBaseHue);
   
       // show difference
       const settingsChangeInteractions = [...Object.values(Interaction.TYPES.knob),...Object.values(Interaction.TYPES.slider)];
@@ -1616,34 +1619,34 @@ class UI {
         if (prevColor.hue !== baseColor.hue) {
           UI.drawSliderChange(
             sliderStart + 400, 0, 200, 60, 
-            prevColor.copy().setHue(0), prevColor.copy().setHue(1), 
-            prevColor.hue, baseColor.hue, 
-            "H:" + Math.floor(baseColor.hue*360) + "°"
+            prevColor.copy().setHue(0+openPainting.hueRotation), prevColor.copy().setHue(1+openPainting.hueRotation), 
+            (prevColor.hue+openPainting.hueRotation) % 1, (baseColor.hue+openPainting.hueRotation) % 1, 
+            "H:" + Math.floor(baseColor.hue * 360) + "°"
           );
         }
   
         if (openPainting.previousBrush.colorVar !== openPainting.currentBrush.colorVar) {
-          UI.drawTooltipBelow(sliderStart - 30, 60, Math.round(openPainting.currentBrush.colorVar * 100) + "%");
+          UI.drawTooltipBelow(sliderStart + 630, 60, Math.round(openPainting.currentBrush.colorVar * 100) + "%");
         }
         if (openPainting.previousBrush.size !== openPainting.currentBrush.size) {
-          UI.drawTooltipBelow(sliderStart + 630, 60, Math.round(openPainting.currentBrush.pxSize) + "px");
+          UI.drawTooltipBelow(sliderStart - 30, 60, Math.round(openPainting.currentBrush.pxSize) + "px");
         }
       }
   
       // draw the variation indicator
       UI.buffer.drawingContext.save();
       UI.buffer.fill(UI.palette.constrastBg.toHexWithSetAlpha(0.5));
-      UI.buffer.rect(sliderStart - 60, 0, 60, 60, 20, 20, 20, 20);
+      UI.buffer.rect(sliderStart + 600, 0, 60, 60, 20, 20, 20, 20);
       UI.buffer.drawingContext.clip();
-      UI.drawVariedColorCircle(openPainting.currentBrush, 70, sliderStart - 30, 30);
+      UI.drawVariedColorCircle(openPainting.currentBrush, 70, sliderStart + 630, 30);
       UI.buffer.drawingContext.restore();
   
       // draw the size indicator
       UI.buffer.drawingContext.save();
       UI.buffer.fill(UI.palette.constrastBg.toHexWithSetAlpha(0.5));
-      UI.buffer.rect(sliderStart + 600, 0, 60, 60, 20, 20, 20, 20);
+      UI.buffer.rect(sliderStart - 60, 0, 60, 60, 20, 20, 20, 20);
       UI.buffer.drawingContext.clip();
-      UI.drawSizeIndicator(openPainting.currentBrush.pxSize, sliderStart + 630, 30);
+      UI.drawSizeIndicator(openPainting.currentBrush.pxSize, sliderStart - 30, 30);
       UI.buffer.drawingContext.restore();
     }
 
@@ -1857,7 +1860,7 @@ class UI {
     UI.buffer.drawingContext.clip();
       
     const segments = width;
-    const currentSegment = Math.round(segments * sliderPercent);
+    const currentSegment = Math.round(segments * (sliderPercent % 1));
 
     for (let i = 0; i < segments; i++) {
       const colorLerpAmt = (i + 0.5) / segments;
