@@ -953,6 +953,7 @@ class Interaction {
         brushToAdjust.size = constrain(openPainting.previousBrush.size + deltaValue, 0, 1);
       }
       if (Interaction.modifyLastStroke) openPainting.redrawLatestStroke();
+      //console.log("to", openPainting.latestStroke.settings.size, brushToAdjust.size)
 
     } else if (Object.values(Interaction.TYPES.slider).includes(Interaction.currentType)) {
 
@@ -1082,6 +1083,7 @@ class Interaction {
 
         } else if (Interaction.modifyLastStroke) {
           // move brushstroke
+          console.log("to", openPainting.latestStroke.settings.size)
           Interaction.currentType = Interaction.TYPES.painting.move;
           // WIP actually do something
 
@@ -1228,12 +1230,14 @@ class Interaction {
       // started on a knob
       Interaction.currentType = null;
       Interaction.currentSequence = [];
+      Interaction.modifyLastStroke = false;
 
     } else if (Object.values(Interaction.TYPES.slider).includes(Interaction.currentType)) {
 
       // started on a slider
       Interaction.currentType = null;
       Interaction.currentSequence = [];
+      Interaction.modifyLastStroke = false;
 
     } else if (Interaction.currentType === Interaction.TYPES.painting.draw) {
 
@@ -1342,18 +1346,17 @@ class Interaction {
     if (tiltX === undefined || tiltY === undefined) return undefined;
   
     //converts to radians
-    radX = map(tiltX, -90, 90, -HALF_PI, HALF_PI)
-    radY = map(tiltY, -90, 90,  HALF_PI, -HALF_PI)
+    const radX = map(tiltX, -90, 90, -Math.PI/2, +Math.PI/2);
+    const radY = map(tiltY, -90, 90, +Math.PI/2, -Math.PI/2);
   
     // from https://gist.github.com/k3a/2903719bb42b48c9198d20c2d6f73ac1
     const y =  Math.cos(radX) * Math.sin(radY); 
     const x = -Math.sin(radX) * -Math.cos(radY); 
     //const z = -Math.cos(radX) * -Math.cos(radY); 
-    let azimuthRad = -Math.atan2(y, x); //+ HALF_PI;
+    let azimuthRad = -Math.atan2(y, x);
   
-    // to range 0 to TWO_PI
-    if (azimuthRad < 0) azimuthRad += TWO_PI;
-  
+    // to range 0 to 2xPI
+    if (azimuthRad < 0) azimuthRad += Math.PI * 2;
     return azimuthRad;
   }
 

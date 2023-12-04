@@ -11,3 +11,7 @@ canvas {
    user-select: none;
    -webkit-user-select: none;
 }
+main {
+   user-select: none;
+   -webkit-user-select: none;
+}
