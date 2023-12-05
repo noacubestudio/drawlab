@@ -164,7 +164,7 @@ class BrushStroke {
   constructor(buffer, settings) {
     this.buffer = buffer;
     this.points = [];
-    this.settings = settings;
+    this.settings = settings.copy();
   }
 
   get bounds() {
@@ -191,7 +191,7 @@ class BrushStroke {
     this.settings = undefined;
   }
 
-  renderWholeStroke() {
+  drawWhole() {
     if(this.points.length < 2) {
       //console.log("can't draw stroke, too short:", strokeData.length, strokeData)
       return;
@@ -200,7 +200,7 @@ class BrushStroke {
     this.points.forEach((point, index) => {
       const lastPoint = this.points[index - 1];
       if (lastPoint !== undefined) { 
-        this.renderStrokePart(lastPoint, point);
+        this.drawPart(lastPoint, point);
       }
     });
   }
@@ -212,7 +212,7 @@ class BrushStroke {
    * @param {BrushStrokePoint} end The second point of the stroke segment.
    * @returns 
    */
-  renderStrokePart(start, end) {
+  drawPart(start, end) {
 
     if (start === undefined || end === undefined) {
       console.log("can't draw this stroke part, point(s) missing!");
@@ -369,7 +369,8 @@ class Painting {
   }
 
   get brushSettingsToAdjust() {
-    return Interaction.modifyLastStroke ? this.latestStroke.settings : openPainting.currentBrush;
+    if (Interaction.editingLastStroke) return this.latestStroke.settings;
+    return openPainting.currentBrush;
   }
 
   clearWithColor(color) {
@@ -443,7 +444,7 @@ class Painting {
     }
     this.latestStroke.buffer.clear();
     this.latestStroke.movePoints(x, y);
-    this.latestStroke.renderWholeStroke();
+    this.latestStroke.drawWhole();
   }
 
   redrawLatestStroke() {
@@ -452,7 +453,7 @@ class Painting {
       return;
     }
     this.latestStroke.buffer.clear();
-    this.latestStroke.renderWholeStroke();
+    this.latestStroke.drawWhole();
   }
 
   continueDrawing() {
@@ -473,7 +474,7 @@ class Painting {
     const lastPoint = this.latestStroke.points[this.latestStroke.points.length-2];
     const newPoint  = this.latestStroke.points[this.latestStroke.points.length-1];
 
-    this.latestStroke.renderStrokePart(lastPoint, newPoint);
+    this.latestStroke.drawPart(lastPoint, newPoint);
   }
 
   getPointRGB(point) {
@@ -522,7 +523,7 @@ class Interaction {
   // temporary edit mode.
   // if true, sliders and gizmos etc. will modify the last stroke
   // rather than the brush settings for the upcoming one
-  static modifyLastStroke = false;
+  static editingLastStroke = false;
   static UI_STATES = {
     nothing_open: 'default',
     eyedropper_open: 'eyedropper',
@@ -583,10 +584,6 @@ class Interaction {
     return (Interaction.currentType !== null && Interaction.currentType !== Interaction.TYPES.painting.hover);
   }
 
-  static get referencePosition() {
-    return Interaction.lastInteractionEnd ?? Interaction.currentSequence[0];
-  }
-
   static adjustCanvasSize(windowWidth, windowHeight) {
     resizeCanvas(windowWidth, windowHeight);
     UI.buffer.resizeCanvas(width, height);
@@ -633,15 +630,19 @@ class Interaction {
     //Interaction.clearAction();
     if (key === "r") {
       Interaction.rotateHueAction();
+      Interaction.currentUI = Interaction.UI_STATES.nothing_open;
       //console.log('rotate to: '+ openPainting.hueRotation, 'current hue: '+ openPainting.currentBrush.color.hue);
     } else if (key === "s") {
       Interaction.saveAction();
+      Interaction.currentUI = Interaction.UI_STATES.nothing_open;
       Interaction.resetCurrentSequence();
     } else if (key === "u") {
       Interaction.undoAction();
+      Interaction.currentUI = Interaction.UI_STATES.nothing_open;
       Interaction.resetCurrentSequence();
     } else if (key === "e") {
       Interaction.editAction();
+      Interaction.currentUI = Interaction.UI_STATES.nothing_open;
       Interaction.resetCurrentSequence();
     } else if (key === "1") {
       Interaction.addToBrushHistory();
@@ -665,6 +666,8 @@ class Interaction {
     Interaction.currentType = null;
     if (Interaction.currentSequence.length > 0) {
       Interaction.lastInteractionEnd = Interaction.currentSequence[Interaction.currentSequence.length-1];
+    } else {
+      console.log("no current point, so nothing to keep")
     }
     Interaction.currentSequence = [];
   }
@@ -678,7 +681,7 @@ class Interaction {
     }
 
     if (key !== "e") {
-      Interaction.modifyLastStroke = false;
+      Interaction.editingLastStroke = false;
     }
 
     Interaction.currentType = null;
@@ -686,7 +689,9 @@ class Interaction {
   }
 
   static addToBrushHistory() {
-    openPainting.previousBrushes.push(openPainting.currentBrush.copy());
+    // adds a copy of the brush settings that are about to be changed to the
+    // brush history. wip: if there was no change, this should be reverted
+    openPainting.previousBrushes.push(openPainting.brushSettingsToAdjust.copy());
     if (openPainting.previousBrushes.length > Interaction.MAX_BRUSH_HISTORY_LENGTH) {
       openPainting.previousBrushes.shift();
     }
@@ -713,12 +718,17 @@ class Interaction {
 
   static undoAction() {
     openPainting.popLatestStroke();
-    Interaction.modifyLastStroke = false;
+    Interaction.editingLastStroke = false;
   }
 
   static editAction() {
-    Interaction.modifyLastStroke = !Interaction.modifyLastStroke;
-    if (openPainting.editableStrokesCount === 0) Interaction.modifyLastStroke = false;
+    //toggle off again or prevent turning on because there are no strokes to edit
+    if (Interaction.editingLastStroke || openPainting.editableStrokesCount === 0) {
+      Interaction.editingLastStroke = false; 
+      return;
+    }
+    Interaction.editingLastStroke = true;
+    // openPainting.redrawLatestStroke(); // only useful for debug purposes
   }
 
   static pickToolAction(index) {
@@ -726,9 +736,9 @@ class Interaction {
     modifyBrush.tool = PRESET_TOOLS[index].tool;
     modifyBrush.texture = PRESET_TOOLS[index].texture;
 
-    if (Interaction.modifyLastStroke) {
+    if (Interaction.editingLastStroke) {
       openPainting.redrawLatestStroke();
-      Interaction.modifyLastStroke = false;
+      Interaction.editingLastStroke = false;
     }
     Interaction.currentUI = Interaction.UI_STATES.nothing_open;
   }
@@ -836,9 +846,12 @@ class Interaction {
         Interaction.currentSequence = [new_interaction];
       } else if (Object.values(Interaction.TYPES.slider).includes(Interaction.currentType)) {
         // started on a slider
+        // WIP, this should already lead to a color change since it does not rely on delta!
         Interaction.addToBrushHistory();
         Interaction.currentSequence = [new_interaction];
         Interaction.currentUI = Interaction.UI_STATES.nothing_open;
+      } else {
+        Interaction.currentSequence = [new_interaction];
       }
       return;
     }
@@ -936,13 +949,15 @@ class Interaction {
         // if no longer on the button, reset 
         console.log("left the button")
         Interaction.currentType = null;
+        Interaction.currentSequence = [new_interaction];
       }
 
     } else if (Object.values(Interaction.TYPES.knob).includes(Interaction.currentType)) {
 
       // started on a knob
       Interaction.currentUI = Interaction.UI_STATES.nothing_open;
-      const deltaX = new_interaction.x - Interaction.currentSequence[0].x;
+      Interaction.currentSequence[1] = new_interaction;
+      const deltaX = Interaction.currentSequence[1].x - Interaction.currentSequence[0].x;
 
       if (deltaX === 0) return;
       const brushToAdjust = openPainting.brushSettingsToAdjust;
@@ -952,14 +967,14 @@ class Interaction {
       } else if (Interaction.currentType === Interaction.TYPES.knob.size) {
         brushToAdjust.size = constrain(openPainting.previousBrush.size + deltaValue, 0, 1);
       }
-      if (Interaction.modifyLastStroke) openPainting.redrawLatestStroke();
-      //console.log("to", openPainting.latestStroke.settings.size, brushToAdjust.size)
+      if (Interaction.editingLastStroke) openPainting.redrawLatestStroke();
 
     } else if (Object.values(Interaction.TYPES.slider).includes(Interaction.currentType)) {
 
       // started on a slider
+      Interaction.currentSequence[1] = new_interaction;
       const middle_width = 720;
-      let xInMiddleSection = new_interaction.x - width/2 + middle_width/2;
+      const xInMiddleSection = new_interaction.x - width/2 + middle_width/2;
       const brushToAdjust = openPainting.brushSettingsToAdjust;
 
       if (Interaction.currentType === Interaction.TYPES.slider.luminance) {
@@ -980,7 +995,7 @@ class Interaction {
         if (newValue < 0) newValue = 1-(Math.abs(newValue) % 1);
         brushToAdjust.color.setHue(newValue);
       }
-      if (Interaction.modifyLastStroke) openPainting.redrawLatestStroke();
+      if (Interaction.editingLastStroke) openPainting.redrawLatestStroke();
 
     } else if (Interaction.currentType === null) {
 
@@ -1008,7 +1023,11 @@ class Interaction {
         return;
       }
 
-      if (Interaction.currentUI !== Interaction.UI_STATES.nothing_open) return; // no hover preview in menus anyway, so don't even record
+      if (Interaction.currentUI !== Interaction.UI_STATES.nothing_open) {
+        // in menus, just keep one point
+        Interaction.currentSequence = [new_interaction];
+        return; 
+      } 
 
       // continue hover sequence if beyond minimum distance travelled from last point.
       const last_interaction = Interaction.currentSequence[Interaction.currentSequence.length-1];
@@ -1043,12 +1062,10 @@ class Interaction {
         if (Interaction.currentUI === Interaction.UI_STATES.clover_open) {
 
           // open specific gizmo
-          const basePosition = Interaction.referencePosition;
           const deltaPos = {
-            x: new_interaction.x - basePosition.x,
-            y: new_interaction.y - basePosition.y
+            x: new_interaction.x - Interaction.lastInteractionEnd.x,
+            y: new_interaction.y - Interaction.lastInteractionEnd.y
           }
-
           if (Math.abs(deltaPos.x) > 10 || Math.abs(deltaPos.y) > 10) {
             if (Math.abs(deltaPos.x) > Math.abs(deltaPos.y)) {
               // horizontal
@@ -1057,11 +1074,13 @@ class Interaction {
                 Interaction.addToBrushHistory();
                 Interaction.currentUI = Interaction.UI_STATES.size_open;
                 Interaction.currentType = Interaction.TYPES.gizmo.size;
+                Interaction.currentSequence = [Interaction.currentSequence[0]]; //start with just the last point as reference
               } else {
                 // start hue and var
                 Interaction.addToBrushHistory();
                 Interaction.currentUI = Interaction.UI_STATES.hueAndVar_open;
                 Interaction.currentType = Interaction.TYPES.gizmo.hueAndVar;
+                Interaction.currentSequence = [Interaction.currentSequence[0]]; //start with just the last point as reference
               }
             } else {
               // vertical
@@ -1070,27 +1089,28 @@ class Interaction {
                 Interaction.addToBrushHistory();
                 Interaction.currentType = Interaction.TYPES.painting.eyedropper;
                 Interaction.currentUI = Interaction.UI_STATES.eyedropper_open;
+                Interaction.currentSequence = [Interaction.currentSequence[0]]; //start with just the last point as reference
               } else {
                 // start lum and sat
                 Interaction.addToBrushHistory();
                 Interaction.currentUI = Interaction.UI_STATES.satAndLum_open;
                 Interaction.currentType = Interaction.TYPES.gizmo.satAndLum;
+                Interaction.currentSequence = [Interaction.currentSequence[0]]; //start with just the last point as reference
               }
             }  
-          }
+          } 
+          // in pointerEnd, an initStroke while the clover menu is open can be processed.
+          // that would mean the cursor remained in the middle the whole time.
 
-          // wip, clicks in middle should open the last used gizmo immediately?
-
-        } else if (Interaction.modifyLastStroke) {
+        } else if (Interaction.editingLastStroke) {
           // move brushstroke
-          console.log("to", openPainting.latestStroke.settings.size)
           Interaction.currentType = Interaction.TYPES.painting.move;
-          // WIP actually do something
+          // WIP, should this already lead to movement in this first interaction?
 
         } else {
           // start brushstroke
           Interaction.currentType = Interaction.TYPES.painting.draw;
-          openPainting.startStroke(openPainting.currentBrush);
+          openPainting.startStroke(openPainting.currentBrush.copy());
 
           // draw the existing segments that have not been drawn yet all at once
           // this code isn't pretty but seems to works
@@ -1143,30 +1163,32 @@ class Interaction {
       const brushToAdjust = openPainting.brushSettingsToAdjust;
       const combinedRGB = openPainting.getPointRGB(new_interaction.addPaintingTransform());
       brushToAdjust.color = HSLColor.fromRGBwithFallback(combinedRGB[0], combinedRGB[1], combinedRGB[2], brushToAdjust.color);
-      if (Interaction.modifyLastStroke) openPainting.redrawLatestStroke();
+      if (Interaction.editingLastStroke) openPainting.redrawLatestStroke();
 
     } else if (Interaction.currentType === Interaction.TYPES.gizmo.satAndLum) { 
 
+      Interaction.currentSequence[1] = new_interaction;
       const brushToAdjust = openPainting.brushSettingsToAdjust;
       const brushToReference = openPainting.previousBrush;
 
-      const deltaX = new_interaction.x - Interaction.currentSequence[0].x;
-      const deltaY = new_interaction.y - Interaction.currentSequence[0].y;
+      const deltaX = Interaction.currentSequence[1].x - Interaction.currentSequence[0].x;
+      const deltaY = Interaction.currentSequence[1].y - Interaction.currentSequence[0].y;
       const rangeX = GIZMO_SIZE * 2;
       const rangeY = GIZMO_SIZE * 2;
 
       // Map to chroma and luminance
       brushToAdjust.color.setSaturation(map( deltaX + rangeX * brushToReference.color.saturation, 0, rangeX, 0, 1, true));
       brushToAdjust.color.setLuminance(map(-deltaY + rangeY * brushToReference.color.luminance, 0, rangeY, 0, 1, true));
-      if (Interaction.modifyLastStroke) openPainting.redrawLatestStroke();
+      if (Interaction.editingLastStroke) openPainting.redrawLatestStroke();
 
     } else if (Interaction.currentType === Interaction.TYPES.gizmo.hueAndVar) { 
 
+      Interaction.currentSequence[1] = new_interaction;
       const brushToAdjust = openPainting.brushSettingsToAdjust;
       const brushToReference = openPainting.previousBrush;
 
-      const deltaX = new_interaction.x - Interaction.currentSequence[0].x;
-      const deltaY = new_interaction.y - Interaction.currentSequence[0].y;
+      const deltaX = Interaction.currentSequence[1].x - Interaction.currentSequence[0].x;
+      const deltaY = Interaction.currentSequence[1].y - Interaction.currentSequence[0].y;
       const rangeX = GIZMO_SIZE * 2;
       const rangeY = GIZMO_SIZE * 2;
 
@@ -1175,18 +1197,19 @@ class Interaction {
       if (newHue < 0) newHue = 1-(Math.abs(newHue) % 1);
       brushToAdjust.color.setHue(newHue);
       brushToAdjust.colorVar = map(-deltaY + rangeY * brushToReference.colorVar, 0, rangeY, 0, 1, true);
-      if (Interaction.modifyLastStroke) openPainting.redrawLatestStroke();
+      if (Interaction.editingLastStroke) openPainting.redrawLatestStroke();
       
     } else if (Interaction.currentType === Interaction.TYPES.gizmo.size) { 
 
+      Interaction.currentSequence[1] = new_interaction;
       const brushToAdjust = openPainting.brushSettingsToAdjust;
       const brushToReference = openPainting.previousBrush;
 
-      const deltaY = new_interaction.y - Interaction.currentSequence[0].y;
+      const deltaY = Interaction.currentSequence[1].y - Interaction.currentSequence[0].y;
       const rangeY = GIZMO_SIZE * 2;
       
       brushToAdjust.size = map(-deltaY + rangeY * brushToReference.size, 0, rangeY, 0, 1, true);
-      if (Interaction.modifyLastStroke) openPainting.redrawLatestStroke();
+      if (Interaction.editingLastStroke) openPainting.redrawLatestStroke();
     }
   }
 
@@ -1223,35 +1246,31 @@ class Interaction {
       } if (Interaction.currentType === Interaction.TYPES.button.tool2) {
         Interaction.pickToolAction(2);
       }
-      Interaction.currentType = null;
-      
-    } else if (Object.values(Interaction.TYPES.knob).includes(Interaction.currentType)) {
+      Interaction.resetCurrentSequence();
+    } 
+    
+    if (Object.values(Interaction.TYPES.knob).includes(Interaction.currentType)) {
 
       // started on a knob
-      Interaction.currentType = null;
-      Interaction.currentSequence = [];
-      Interaction.modifyLastStroke = false;
+      Interaction.resetCurrentSequence();
+      Interaction.editingLastStroke = false;
 
     } else if (Object.values(Interaction.TYPES.slider).includes(Interaction.currentType)) {
 
       // started on a slider
-      Interaction.currentType = null;
-      Interaction.currentSequence = [];
-      Interaction.modifyLastStroke = false;
+      Interaction.resetCurrentSequence();
+      Interaction.editingLastStroke = false;
 
     } else if (Interaction.currentType === Interaction.TYPES.painting.draw) {
 
       // try drawing here still,wip?
-      Interaction.currentType = null;
-      Interaction.lastInteractionEnd = Interaction.currentSequence[Interaction.currentSequence.length-1];
-      Interaction.currentSequence = [];
+      Interaction.resetCurrentSequence();
 
     } else if (Interaction.currentType === Interaction.TYPES.painting.move) {
 
       // try moving here still,wip?
-      Interaction.currentType = null;
-      Interaction.currentSequence = [];
-      Interaction.modifyLastStroke = false;
+      Interaction.resetCurrentSequence();
+      Interaction.editingLastStroke = false;
 
     } else if (Interaction.currentType === Interaction.TYPES.painting.initStroke) {
 
@@ -1259,46 +1278,42 @@ class Interaction {
       if (Interaction.currentUI === Interaction.UI_STATES.nothing_open) {
         Interaction.currentUI = Interaction.UI_STATES.clover_open;
       } else {
+        // close clover
         Interaction.currentUI = Interaction.UI_STATES.nothing_open;
+        Interaction.editingLastStroke = false;
       }
 
-      Interaction.currentType = null;
-      Interaction.lastInteractionEnd = Interaction.currentSequence[Interaction.currentSequence.length-1];
-      Interaction.currentSequence = [];
+      Interaction.resetCurrentSequence();
 
     } else if (Interaction.currentType === Interaction.TYPES.gizmo.size) {
 
-      Interaction.currentType = null;
-      Interaction.currentSequence = [];
+      Interaction.resetCurrentSequence();
       Interaction.currentUI = Interaction.UI_STATES.nothing_open;
-      Interaction.modifyLastStroke = false;
+      Interaction.editingLastStroke = false;
 
     } else if (Interaction.currentType === Interaction.TYPES.gizmo.hueAndVar) {
 
-      Interaction.currentType = null;
-      Interaction.currentSequence = [];
+      Interaction.resetCurrentSequence();
       Interaction.currentUI = Interaction.UI_STATES.nothing_open;
-      Interaction.modifyLastStroke = false;
+      Interaction.editingLastStroke = false;
 
     } else if (Interaction.currentType === Interaction.TYPES.gizmo.satAndLum) {
 
-      Interaction.currentType = null;
-      Interaction.currentSequence = [];
+      Interaction.resetCurrentSequence();
       Interaction.currentUI = Interaction.UI_STATES.nothing_open;
-      Interaction.modifyLastStroke = false;
+      Interaction.editingLastStroke = false;
 
     } else if (Interaction.currentType === Interaction.TYPES.painting.eyedropper) {
 
       // actually pick the color again, wip?
-      Interaction.currentType = null;
-      Interaction.currentSequence = [];
+      Interaction.resetCurrentSequence();
       Interaction.currentUI = Interaction.UI_STATES.nothing_open;
-      Interaction.modifyLastStroke = false;
+      Interaction.editingLastStroke = false;
 
     } else {
-
-      console.log("unprocessed pointerEnd, interaction type was: " + Interaction.currentType);
-    
+      // was hover or none
+      console.log("just resetting since the pointerEnd had no specific interaction: it was of type " + Interaction.currentType);
+      Interaction.resetCurrentSequence();
     }
   }
 
@@ -1586,7 +1601,7 @@ class UI {
   
     const noEditableStrokes = (openPainting.editableStrokesCount === 0);
     UI.drawButton("undo" ,       UI.BUTTON_WIDTH*0, 0, noEditableStrokes ? UI.palette.fgDisabled : UI.palette.fg);
-    UI.drawButton("edit" ,       UI.BUTTON_WIDTH*1, 0, Interaction.modifyLastStroke || noEditableStrokes ? UI.palette.fgDisabled : UI.palette.fg);
+    UI.drawButton("edit" ,       UI.BUTTON_WIDTH*1, 0, Interaction.editingLastStroke || noEditableStrokes ? UI.palette.fgDisabled : UI.palette.fg);
     UI.drawButton("clear", width-UI.BUTTON_WIDTH*2, 0, new HSLColor(0.1, 0.8, (UI.palette.fg.luminance > 0.5) ? 0.7 : 0.4));
     UI.drawButton("save" , width-UI.BUTTON_WIDTH*1, 0, UI.palette.fg);
 
@@ -1672,7 +1687,7 @@ class UI {
     }
   
     // draw rectangle around stroke being edited
-    if (Interaction.modifyLastStroke) {
+    if (Interaction.editingLastStroke) {
       UI.drawBounds(openPainting.latestStroke.bounds);
     }
   
@@ -1690,21 +1705,22 @@ class UI {
       UI.buffer.text('gesture: '    + (Interaction.currentType ?? 'none'),            20, 100);
       UI.buffer.text('points: '     + (Interaction.currentSequence.length ?? 'none'), 20, 120);
       UI.buffer.text('zoom: '       + (Interaction.viewTransform.scale ?? 'none'),    20, 140);
-      UI.buffer.text('last: '       + (Interaction.lastInteractionEnd ?? 'none'),     20, 160);
+      UI.buffer.text('fps: '        + Math.round(frameRate()) + ", " + frameCount,    20, 160);
+
+      UI.buffer.text('scaleX: '+ Math.round(Interaction.viewTransform.scale * openPainting.width),  300, 80);
+      UI.buffer.text('scaleY: '+ Math.round(Interaction.viewTransform.scale * openPainting.height), 300,100);
+      UI.buffer.text('posX: '+ Interaction.viewTransform.flooredCornerX(), 300, 120);
+      UI.buffer.text('posY: '+ Interaction.viewTransform.flooredCornerY(), 300, 140);
     
-      if (Interaction.referencePosition !== undefined) {
+      if (Interaction.lastInteractionEnd !== null) {
         UI.buffer.stroke(new HSLColor(0.1, 1, 1.0).hex);
         UI.buffer.push();
-        UI.buffer.translate(Interaction.referencePosition.x, Interaction.referencePosition.y);
-        UI.buffer.line(-4, -4, 4, 4);
-        UI.buffer.line(-4, 4, 4, -4);
+        UI.buffer.translate(Interaction.lastInteractionEnd.x, Interaction.lastInteractionEnd.y);
+        UI.buffer.line(-6, -6, 6,  6);
+        UI.buffer.line(-6,  6, 6, -6);
         UI.buffer.pop();
       }
       
-      // Interaction.lastInteractionEnd.forEach((point) => {
-      //   buffer.fill(new HSLColor(0.6, 1, 1.0).hex);
-      //   buffer.rect(point.x, point.y, 2, 2)
-      // })
       UI.buffer.strokeWeight(2);
       Interaction.currentSequence.forEach((point) => {
         
@@ -1719,7 +1735,7 @@ class UI {
     // hover indicator
     if (Interaction.currentType === Interaction.TYPES.painting.hover 
       && Interaction.currentSequence.length > 1
-      && !Interaction.modifyLastStroke
+      && !Interaction.editingLastStroke
       && Interaction.currentUI === Interaction.UI_STATES.nothing_open) {
       
       UI.drawHoverDisplay()
@@ -1733,12 +1749,12 @@ class UI {
     const start = new BrushStrokePoint(startInteraction.x, startInteraction.y, startInteraction.angle);
     const end = new BrushStrokePoint(endInteraction.x, endInteraction.y, endInteraction.angle);
 
-    new BrushStroke(UI.buffer, openPainting.currentBrush.copy()).renderStrokePart(start, end);
+    new BrushStroke(UI.buffer, openPainting.currentBrush.copy()).drawPart(start, end);
   }
 
   static displayTool(menuBrushTool, menuTexture, x, y, menuName) {
-  
-    const settings = openPainting.currentBrush.copy();
+    
+    const settings = openPainting.brushSettingsToAdjust.copy();
     settings.size = constrain(settings.size, 0.1, 0.3);
     settings.tool = menuBrushTool;
     settings.texture = menuTexture;
@@ -1755,7 +1771,7 @@ class UI {
     const start = new BrushStrokePoint(0, 30, 86, undefined);
     const end = new BrushStrokePoint(80, 30, 86, undefined);
     
-    new BrushStroke(UI.buffer, settings).renderStrokePart(start, end);
+    new BrushStroke(UI.buffer, settings).drawPart(start, end);
 
     UI.buffer.noStroke();
     UI.buffer.fill(UI.palette.constrastBg.toHexWithSetAlpha(isSelected ? 0.8 : 0.3));
@@ -1947,7 +1963,7 @@ class UI {
     }
 
     // draw the brush setting gadgets
-    const basePosition = Interaction.referencePosition;
+    const basePosition = Interaction.lastInteractionEnd;
 
     if (basePosition === undefined) return;
 
