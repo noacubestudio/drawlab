@@ -725,17 +725,17 @@ class Interaction {
   static editAction() {
     //toggle off again or prevent turning on because there are no strokes to edit
     if (openPainting.editableStrokesCount === 0) return;
-    if (Interaction.editingLastStroke) {
-      Interaction.stopEditing(); 
-      return;
-    }
+    if (Interaction.stopEditing()) return;
     Interaction.editingLastStroke = true;
     Interaction.hueRotationBeforeEditing = openPainting.hueRotation;
   }
 
   static stopEditing() {
-    Interaction.editingLastStroke = false;
-    openPainting.hueRotation = Interaction.hueRotationBeforeEditing;
+    if (Interaction.editingLastStroke) {
+      Interaction.editingLastStroke = false;
+      openPainting.hueRotation = Interaction.hueRotationBeforeEditing;
+      return true;
+    }
   }
 
   static pickToolAction(index) {
@@ -1568,6 +1568,9 @@ class HSLColor {
 class UI {
 
   static BUTTON_WIDTH = 80;
+  static BUTTON_HEIGHT = 60;
+  static ELEMENT_MARGIN = 4;
+  static ELEMENT_RADIUS = 16;
 
   static showingHelp = false;
   static buffer = undefined;
@@ -1597,7 +1600,7 @@ class UI {
     if (Interaction.currentUI === Interaction.UI_STATES.clover_open) {
       PRESET_TOOLS.forEach((preset, index) => {
         const x = 0;
-        const y = height/2 + 60 * (-PRESET_TOOLS.length*0.5 + index);
+        const y = height/2 + UI.BUTTON_HEIGHT * (-PRESET_TOOLS.length*0.5 + index);
         UI.displayTool(preset.tool, preset.texture, x, y, preset.menuName);
       });
     }
@@ -1613,7 +1616,7 @@ class UI {
     UI.drawButton("save" , width-UI.BUTTON_WIDTH*1, 0, UI.palette.fg);
 
     if (width > MOBILE_WIDTH_BREAKPOINT) {
-      UI.drawButton("help" , width-UI.BUTTON_WIDTH*1, height-60, UI.showingHelp ? UI.palette.fgDisabled : UI.palette.fg);
+      UI.drawButton("help" , width-UI.BUTTON_WIDTH, height-UI.BUTTON_HEIGHT, UI.showingHelp ? UI.palette.fgDisabled : UI.palette.fg);
     }
     
     UI.buffer.fill(UI.palette.fg.hex);
@@ -1626,9 +1629,9 @@ class UI {
       let baseColor = openPainting.brushSettingsToAdjust.color;
       const rotatedBaseHue = (baseColor.hue+openPainting.hueRotation) % 1;
       const correctlyFlippedSaturation = (openPainting.hueRotation === 0) ? (1 + baseColor.saturation)/2 : (1 - baseColor.saturation)/2;
-      UI.drawGradientSlider(sliderStart, 0, 200, 60,     baseColor.copy().setLuminance(0), baseColor.copy().setLuminance(1), baseColor.luminance);
-      UI.drawGradientSlider(sliderStart+200, 0, 200, 60, baseColor.copy().setSaturation(0), baseColor.copy().setSaturation(1), correctlyFlippedSaturation, "double");
-      UI.drawGradientSlider(sliderStart+400, 0, 200, 60, baseColor.copy().setHue(0+openPainting.hueRotation), baseColor.copy().setHue(1+openPainting.hueRotation), rotatedBaseHue);
+      UI.drawGradientSlider(sliderStart    , 0, 200, UI.BUTTON_HEIGHT, baseColor.copy().setLuminance(0), baseColor.copy().setLuminance(1), baseColor.luminance);
+      UI.drawGradientSlider(sliderStart+200, 0, 200, UI.BUTTON_HEIGHT, baseColor.copy().setSaturation(0), baseColor.copy().setSaturation(1), correctlyFlippedSaturation, "double");
+      UI.drawGradientSlider(sliderStart+400, 0, 200, UI.BUTTON_HEIGHT, baseColor.copy().setHue(0+openPainting.hueRotation), baseColor.copy().setHue(1+openPainting.hueRotation), rotatedBaseHue);
   
       // show difference
       const settingsChangeInteractions = [...Object.values(Interaction.TYPES.knob),...Object.values(Interaction.TYPES.slider)];
@@ -1637,52 +1640,52 @@ class UI {
   
         if (Interaction.currentType === Interaction.TYPES.slider.luminance) {
           UI.drawSliderChange(
-            sliderStart, 0, 200, 60, 
+            sliderStart, 0, 200, UI.BUTTON_HEIGHT, 
             prevColor.copy().setLuminance(0), prevColor.copy().setLuminance(1), 
             prevColor.luminance, baseColor.luminance, 
             "L: " + Math.floor(baseColor.luminance * 100) + "%"
           );
         } else if (Interaction.currentType === Interaction.TYPES.slider.saturation) {
           UI.drawSliderChange(
-            sliderStart + 200, 0, 200, 60, 
+            sliderStart + 200, 0, 200, UI.BUTTON_HEIGHT, 
             prevColor.copy().setSaturation(0), prevColor.copy().setSaturation(1), 
             prevColor.saturation, (openPainting.hueRotation === 0) ? (1 + baseColor.saturation)/2 : (1 - baseColor.saturation)/2,
             "S: " + ((openPainting.hueRotation === 0) ? "" : "-") +  Math.floor(baseColor.saturation * 100) + "%", "double"
           );
         } if (Interaction.currentType === Interaction.TYPES.slider.hue) {
           UI.drawSliderChange(
-            sliderStart + 400, 0, 200, 60, 
+            sliderStart + 400, 0, 200, UI.BUTTON_HEIGHT, 
             prevColor.copy().setHue(0+openPainting.hueRotation), prevColor.copy().setHue(1+openPainting.hueRotation), 
             (prevColor.hue+openPainting.hueRotation) % 1, (baseColor.hue+openPainting.hueRotation) % 1, 
             "H:" + Math.floor(baseColor.hue * 360) + "°"
           );
         } else if (Interaction.currentType === Interaction.TYPES.knob.jitter) {
-          UI.drawTooltipBelow(sliderStart + 630, 60, Math.round(openPainting.currentBrush.colorVar * 100) + "%");
+          UI.drawTooltipBelow(sliderStart + 630, UI.BUTTON_HEIGHT, Math.round(openPainting.currentBrush.colorVar * 100) + "%");
         } else if (Interaction.currentType === Interaction.TYPES.knob.size) {
-          UI.drawTooltipBelow(sliderStart - 30, 60, Math.round(openPainting.currentBrush.pxSize) + "px");
+          UI.drawTooltipBelow(sliderStart - 30, UI.BUTTON_HEIGHT, Math.round(openPainting.currentBrush.pxSize) + "px");
         }
       }
   
       // draw the variation indicator
       UI.buffer.drawingContext.save();
       UI.buffer.fill(UI.palette.constrastBg.toHexWithSetAlpha(0.5));
-      UI.buffer.rect(sliderStart + 600, 0, 60, 60, 20, 20, 20, 20);
+      UI.buffer.rect(sliderStart + 600, 0, 60, UI.BUTTON_HEIGHT, UI.ELEMENT_RADIUS);
       UI.buffer.drawingContext.clip();
-      UI.drawVariedColorCircle(openPainting.brushSettingsToAdjust, 70, sliderStart + 630, 30);
+      UI.drawVariedColorCircle(openPainting.brushSettingsToAdjust, 80, sliderStart + 630, UI.BUTTON_HEIGHT / 2);
       UI.buffer.drawingContext.restore();
   
       // draw the size indicator
       UI.buffer.drawingContext.save();
       UI.buffer.fill(UI.palette.constrastBg.toHexWithSetAlpha(0.5));
-      UI.buffer.rect(sliderStart - 60, 0, 60, 60, 20, 20, 20, 20);
+      UI.buffer.rect(sliderStart - 60, 0, 60, UI.BUTTON_HEIGHT, UI.ELEMENT_RADIUS);
       UI.buffer.drawingContext.clip();
       const indicatorSize = openPainting.brushSettingsToAdjust.pxSize; // WIP: * average pressure of max(0, end-10) in last brushstroke 
-      UI.drawSizeIndicator(indicatorSize, sliderStart - 30, 30);
+      UI.drawSizeIndicator(indicatorSize, sliderStart - 30, UI.BUTTON_HEIGHT / 2);
       UI.buffer.drawingContext.restore();
     }
 
     if (Interaction.currentUI === Interaction.UI_STATES.clover_open) {
-      UI.drawPalette(openPainting.previousBrushes, width/2, 70, 30, 10);
+      UI.drawPalette(openPainting.previousBrushes, width/2, UI.BUTTON_HEIGHT + 10, 30, 10);
     }
   
     // bottom left/ top middle text
@@ -1772,7 +1775,7 @@ class UI {
     UI.buffer.translate(x, y);
 
     UI.buffer.fill(UI.palette.constrastBg.toHexWithSetAlpha(isSelected ? 0.2 : 1));
-    UI.buffer.rect(0, 2, 100, 60-4, 0, 20, 20, 0);
+    UI.buffer.rect(0, UI.ELEMENT_MARGIN/2, 100, UI.BUTTON_HEIGHT-UI.ELEMENT_MARGIN, 0, UI.ELEMENT_RADIUS, UI.ELEMENT_RADIUS, 0);
 
     // draw example
     // wip, not sure why the angle 86 even makes sense.
@@ -1783,7 +1786,7 @@ class UI {
 
     UI.buffer.noStroke();
     UI.buffer.fill(UI.palette.constrastBg.toHexWithSetAlpha(isSelected ? 0.8 : 0.3));
-    UI.buffer.rect(0, 2, 100, 60-4, 0, 20, 20, 0);
+    UI.buffer.rect(0, UI.ELEMENT_MARGIN/2, 100, UI.BUTTON_HEIGHT-UI.ELEMENT_MARGIN, 0, UI.ELEMENT_RADIUS, UI.ELEMENT_RADIUS, 0);
 
     UI.buffer.textAlign(CENTER);
     UI.buffer.fill(isSelected ? UI.palette.fgDisabled.hex : UI.palette.fg.hex);
@@ -1806,7 +1809,7 @@ class UI {
     }
 
     UI.buffer.drawingContext.save();
-    UI.buffer.rect(topLeft.x, topLeft.y, totalWidth, tileHeight, 20, 20, 20, 20);
+    UI.buffer.rect(topLeft.x, topLeft.y, totalWidth, tileHeight, UI.ELEMENT_RADIUS);
     UI.buffer.drawingContext.clip();
 
     settingsArray.forEach((setting, index) => {
@@ -1819,9 +1822,13 @@ class UI {
 
   static drawButton(text, x, y, textColor) {
     UI.buffer.fill(UI.palette.constrastBg.toHexWithSetAlpha(0.5));
-    UI.buffer.rect(x+3, y+4, UI.BUTTON_WIDTH-6, 60-8, 20, 20, 20, 20);
+    UI.buffer.rect(
+      x+UI.ELEMENT_MARGIN, y+UI.ELEMENT_MARGIN, 
+      UI.BUTTON_WIDTH-UI.ELEMENT_MARGIN*2, UI.BUTTON_HEIGHT-UI.ELEMENT_MARGIN*2, 
+      UI.ELEMENT_RADIUS,
+    );
     UI.buffer.fill(textColor.hex);
-    UI.buffer.text(text, x, y, UI.BUTTON_WIDTH, 60 - 8);
+    UI.buffer.text(text, x, y, UI.BUTTON_WIDTH, UI.BUTTON_HEIGHT - 8);
   }
 
   static drawVariedColorCircle(brush, size, x, y) {
@@ -1888,7 +1895,7 @@ class UI {
   static drawGradientSlider(x, y, width, height, startColor, endColor, sliderPercent, gradientType) {
     UI.buffer.drawingContext.save();
     UI.buffer.fill(UI.palette.constrastBg.toHexWithSetAlpha(0.5));
-    UI.buffer.rect(x, y, width, height, 0, 0, 20, 20);
+    UI.buffer.rect(x, y, width, height, UI.ELEMENT_RADIUS, UI.ELEMENT_RADIUS, UI.ELEMENT_RADIUS, UI.ELEMENT_RADIUS);
     UI.buffer.drawingContext.clip();
       
     const segments = width;
@@ -1947,7 +1954,7 @@ class UI {
     }
     let bbox = FONT_MEDIUM.textBounds(text, textPos.x, textPos.y);
     UI.buffer.fill(UI.palette.constrastBg.toHexWithSetAlpha(0.5));
-    UI.buffer.rect(bbox.x - bbox.w/2 - 13, bbox.y + bbox.h/2 - 4, bbox.w+26, bbox.h+12, 20);
+    UI.buffer.rect(bbox.x - bbox.w/2 - 13, bbox.y + bbox.h/2 - 4, bbox.w+26, bbox.h+12, UI.ELEMENT_RADIUS);
     UI.buffer.fill(UI.palette.fg.hex);
     UI.buffer.text(text, textPos.x, textPos.y);
   }
