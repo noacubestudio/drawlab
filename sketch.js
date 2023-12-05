@@ -1620,13 +1620,46 @@ class UI {
       UI.drawButton("help" , width-UI.BUTTON_WIDTH, height-UI.BUTTON_HEIGHT, UI.showingHelp ? UI.palette.fgDisabled : UI.palette.fg);
     }
     
-    UI.buffer.fill(UI.palette.fg.hex);
     UI.buffer.textAlign(LEFT);
     UI.buffer.textFont(FONT_MEDIUM);
   
-    // draw the sliders at the top
+    // draw the sliders and knobs at the top
     const sliderStart = width/2 - UI.SLIDER_WIDTH * 1.5;
     if (Interaction.middleUIVisible) {
+
+      // bg
+      UI.buffer.fill(UI.palette.constrastBg.hex);
+      UI.buffer.rect(sliderStart-60, 0,  UI.SLIDER_WIDTH * 3 + 120, UI.BUTTON_HEIGHT, UI.ELEMENT_RADIUS + UI.ELEMENT_MARGIN);
+
+      // for the size overlay
+      let indicatorSize = openPainting.brushSettingsToAdjust.pxSize * (openPainting.brushSettingsToAdjust.texture === "Round" ? 0.7 : 1);
+      let pressureForSizeIndicator = undefined;
+      if (Interaction.currentSequence.length > 0 && Interaction.isAlreadyDown) {
+        const last_interaction = Interaction.currentSequence[Interaction.currentSequence.length-1];
+        if (last_interaction.pressure !== undefined) {
+          pressureForSizeIndicator = last_interaction.pressure;
+          indicatorSize *= map(pressureForSizeIndicator, 0, 1, 0.1, 2.0, true);
+        }
+      }  
+      // draw the size knob
+      UI.buffer.drawingContext.save();
+      UI.buffer.fill(UI.palette.fg.toHexWithSetAlpha(0.2));
+      UI.buffer.rect(sliderStart - 60 + UI.ELEMENT_MARGIN, UI.ELEMENT_MARGIN, 60 - UI.ELEMENT_MARGIN*2, UI.BUTTON_HEIGHT - UI.ELEMENT_MARGIN*2, UI.ELEMENT_RADIUS);
+      UI.buffer.drawingContext.clip();
+      UI.drawSizeIndicator(sliderStart - 30, UI.BUTTON_HEIGHT / 2, pressureForSizeIndicator);
+      UI.buffer.drawingContext.restore();
+
+      // circle overlay
+      UI.buffer.noFill();
+      UI.buffer.strokeWeight(4);
+      UI.buffer.stroke(UI.palette.constrastBg.toHexWithSetAlpha(0.2));
+      UI.buffer.ellipse(sliderStart - 30, UI.BUTTON_HEIGHT / 2, indicatorSize-2, indicatorSize-2);
+      UI.buffer.strokeWeight(2);
+      UI.buffer.stroke(UI.palette.fg.toHexWithSetAlpha(0.5));
+      UI.buffer.ellipse(sliderStart - 30, UI.BUTTON_HEIGHT / 2, indicatorSize, indicatorSize);
+      UI.buffer.noStroke();
+
+      // sliders
       let baseColor = openPainting.brushSettingsToAdjust.color;
       const rotatedBaseHue = (baseColor.hue+openPainting.hueRotation) % 1;
       const correctlyFlippedSaturation = (openPainting.hueRotation === 0) ? (1 + baseColor.saturation)/2 : (1 - baseColor.saturation)/2;
@@ -1666,34 +1699,8 @@ class UI {
           UI.drawTooltipBelow(sliderStart - 30, UI.BUTTON_HEIGHT, Math.round(openPainting.currentBrush.pxSize) + "px");
         }
       }
-  
-      // draw the size indicator
-      let indicatorSize = openPainting.brushSettingsToAdjust.pxSize * (openPainting.brushSettingsToAdjust.texture === "Round" ? 0.7 : 1);
-      let pressureForSizeIndicator = undefined;
-      if (Interaction.currentSequence.length > 0 && Interaction.isAlreadyDown) {
-        const last_interaction = Interaction.currentSequence[Interaction.currentSequence.length-1];
-        if (last_interaction.pressure !== undefined) {
-          pressureForSizeIndicator = last_interaction.pressure;
-          indicatorSize *= map(pressureForSizeIndicator, 0, 1, 0.1, 2.0, true);
-        }
-      }
-      
-      UI.buffer.noFill();
-      UI.buffer.strokeWeight(4);
-      UI.buffer.stroke(UI.palette.constrastBg.toHexWithSetAlpha(0.2));
-      UI.buffer.ellipse(sliderStart - 30, UI.BUTTON_HEIGHT / 2, indicatorSize-2, indicatorSize-2);
-      UI.buffer.strokeWeight(2);
-      UI.buffer.stroke(UI.palette.fg.toHexWithSetAlpha(0.5));
-      UI.buffer.ellipse(sliderStart - 30, UI.BUTTON_HEIGHT / 2, indicatorSize, indicatorSize);
-      UI.buffer.noStroke();
-      UI.buffer.drawingContext.save();
-      UI.buffer.fill(UI.palette.onBrush.hex);
-      UI.buffer.rect(sliderStart - 60 + UI.ELEMENT_MARGIN, UI.ELEMENT_MARGIN, 60 - UI.ELEMENT_MARGIN*2, UI.BUTTON_HEIGHT - UI.ELEMENT_MARGIN*2, UI.ELEMENT_RADIUS);
-      UI.buffer.drawingContext.clip();
-      UI.drawSizeIndicator(sliderStart - 30, UI.BUTTON_HEIGHT / 2, pressureForSizeIndicator);
-      UI.buffer.drawingContext.restore();
 
-      // draw the variation indicator
+      // draw the variation knob
       UI.buffer.drawingContext.save();
       UI.buffer.fill(UI.palette.constrastBg.toHexWithSetAlpha(0.5));
       UI.buffer.rect(sliderStart + UI.SLIDER_WIDTH*3 + UI.ELEMENT_MARGIN, UI.ELEMENT_MARGIN, 60 - UI.ELEMENT_MARGIN*2, UI.BUTTON_HEIGHT - UI.ELEMENT_MARGIN*2, UI.ELEMENT_RADIUS);
