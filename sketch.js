@@ -1,10 +1,6 @@
 // init in setup()
 let openPainting = undefined;
 
-// constants
-const GIZMO_SIZE = 120; 
-const MOBILE_WIDTH_BREAKPOINT = 576;
-
 const PRESET_TOOLS = [
   {tool: "Brush Tool", texture: "Regular", menuName: "Default"},
   {tool: "Brush Tool", texture: "Rake",    menuName: "Rake" },
@@ -568,7 +564,7 @@ class Interaction {
     slider: {
       hue: 'hueSlider',
       saturation: 'saturationSlider',
-      luminance: 'luminanceSlider'
+      lightness: 'lightnessSlider'
     },
     gizmo: {
       hueAndVar: 'hueAndVarGizmo',
@@ -757,6 +753,32 @@ class Interaction {
     openPainting.brushSettingsToAdjust.color.setHue(rotatedHue % 1);
   }
 
+  static processSlider(new_interaction) {
+    const middle_width = UI.SLIDER_WIDTH * 3 + 120;
+    const xInMiddleSection = new_interaction.x - width/2 + middle_width/2;
+    const brushToAdjust = openPainting.brushSettingsToAdjust;
+    const percentOfSlider = (sliderNumber) => map(xInMiddleSection - 60 - UI.SLIDER_WIDTH * sliderNumber, UI.ELEMENT_MARGIN, UI.SLIDER_WIDTH-UI.ELEMENT_MARGIN, 0, 1);
+
+    if (Interaction.currentType === Interaction.TYPES.slider.lightness) {
+      const newValue = constrain(percentOfSlider(0), 0, 1);
+      brushToAdjust.color.setLightness(newValue);
+    } else if (Interaction.currentType === Interaction.TYPES.slider.saturation) {
+      const newValue = constrain(percentOfSlider(1), 0, 1)*2 - 1;
+      if (newValue < 0 && openPainting.hueRotation === 0) {
+        Interaction.rotateHueAction();
+      } else if (newValue >= 0 && openPainting.hueRotation !== 0) {
+        Interaction.rotateHueAction();
+      }
+      brushToAdjust.color.setSaturation(Math.abs(newValue));
+    } else if (Interaction.currentType === Interaction.TYPES.slider.hue) {
+      let newValue = percentOfSlider(2);
+      newValue += openPainting.hueRotation;
+      if (newValue > 1) newValue %= 1;
+      if (newValue < 0) newValue = 1-(Math.abs(newValue) % 1);
+      brushToAdjust.color.setHue(newValue);
+    }
+  }
+
   static wasSurfaceType(x, y) {
     if (y < UI.BUTTON_HEIGHT) {
       const middle_width = UI.SLIDER_WIDTH * 3 + 120;
@@ -786,11 +808,11 @@ class Interaction {
             return Interaction.TYPES.knob.size;
 
           } else if (xInMiddleSection < 60 + UI.SLIDER_WIDTH) {
-            // luminance
-            return Interaction.TYPES.slider.luminance;
+            // lightness
+            return Interaction.TYPES.slider.lightness;
 
           } else if (xInMiddleSection < 60 + UI.SLIDER_WIDTH * 2) {
-            // luminance
+            // lightness
             return Interaction.TYPES.slider.saturation;
 
           } else if (xInMiddleSection < 60 + UI.SLIDER_WIDTH * 3) {
@@ -819,7 +841,7 @@ class Interaction {
       }
     }
 
-    if (x > width - UI.BUTTON_WIDTH && y > height - UI.BUTTON_HEIGHT && width > MOBILE_WIDTH_BREAKPOINT) {
+    if (x > width - UI.BUTTON_WIDTH && y > height - UI.BUTTON_HEIGHT && width > UI.MOBILE_WIDTH_BREAKPOINT) {
       return Interaction.TYPES.button.help;
     }
 
@@ -851,10 +873,10 @@ class Interaction {
         Interaction.currentSequence = [new_interaction];
       } else if (Object.values(Interaction.TYPES.slider).includes(Interaction.currentType)) {
         // started on a slider
-        // WIP, this should already lead to a color change since it does not rely on delta!
         Interaction.addToBrushHistory();
         Interaction.currentSequence = [new_interaction];
         Interaction.currentUI = Interaction.UI_STATES.nothing_open;
+        Interaction.processSlider(new_interaction); // change the color
       } else {
         Interaction.currentSequence = [new_interaction];
       }
@@ -978,29 +1000,8 @@ class Interaction {
 
       // started on a slider
       Interaction.currentSequence[1] = new_interaction;
-      const middle_width = UI.SLIDER_WIDTH * 3 + 120;
-      const xInMiddleSection = new_interaction.x - width/2 + middle_width/2;
-      const brushToAdjust = openPainting.brushSettingsToAdjust;
-      const percentOfSlider = (sliderNumber) => map(xInMiddleSection - 60 - UI.SLIDER_WIDTH * sliderNumber, UI.ELEMENT_MARGIN, UI.SLIDER_WIDTH-UI.ELEMENT_MARGIN, 0, 1);
+      Interaction.processSlider(new_interaction);
 
-      if (Interaction.currentType === Interaction.TYPES.slider.luminance) {
-        const newValue = constrain(percentOfSlider(0), 0, 1);
-        brushToAdjust.color.setLuminance(newValue);
-      } else if (Interaction.currentType === Interaction.TYPES.slider.saturation) {
-        const newValue = constrain(percentOfSlider(1), 0, 1)*2 - 1;
-        if (newValue < 0 && openPainting.hueRotation === 0) {
-          Interaction.rotateHueAction();
-        } else if (newValue >= 0 && openPainting.hueRotation !== 0) {
-          Interaction.rotateHueAction();
-        }
-        brushToAdjust.color.setSaturation(Math.abs(newValue));
-      } else if (Interaction.currentType === Interaction.TYPES.slider.hue) {
-        let newValue = percentOfSlider(2);
-        newValue += openPainting.hueRotation;
-        if (newValue > 1) newValue %= 1;
-        if (newValue < 0) newValue = 1-(Math.abs(newValue) % 1);
-        brushToAdjust.color.setHue(newValue);
-      }
       if (Interaction.editingLastStroke) openPainting.redrawLatestStroke();
 
     } else if (Interaction.currentType === null) {
@@ -1179,12 +1180,12 @@ class Interaction {
 
       const deltaX = Interaction.currentSequence[1].x - Interaction.currentSequence[0].x;
       const deltaY = Interaction.currentSequence[1].y - Interaction.currentSequence[0].y;
-      const rangeX = GIZMO_SIZE * 2;
-      const rangeY = GIZMO_SIZE * 2;
+      const rangeX = UI.GIZMO_SIZE * 2;
+      const rangeY = UI.GIZMO_SIZE * 2;
 
-      // Map to chroma and luminance
+      // Map to chroma and lightness
       brushToAdjust.color.setSaturation(map( deltaX + rangeX * brushToReference.color.saturation, 0, rangeX, 0, 1, true));
-      brushToAdjust.color.setLuminance(map(-deltaY + rangeY * brushToReference.color.luminance, 0, rangeY, 0, 1, true));
+      brushToAdjust.color.setLightness(map(-deltaY + rangeY * brushToReference.color.lightness, 0, rangeY, 0, 1, true));
       if (Interaction.editingLastStroke) openPainting.redrawLatestStroke();
 
     } else if (Interaction.currentType === Interaction.TYPES.gizmo.hueAndVar) { 
@@ -1195,8 +1196,8 @@ class Interaction {
 
       const deltaX = Interaction.currentSequence[1].x - Interaction.currentSequence[0].x;
       const deltaY = Interaction.currentSequence[1].y - Interaction.currentSequence[0].y;
-      const rangeX = GIZMO_SIZE * 2;
-      const rangeY = GIZMO_SIZE * 2;
+      const rangeX = UI.GIZMO_SIZE * 2;
+      const rangeY = UI.GIZMO_SIZE * 2;
 
       let newHue = map(deltaX + rangeX * brushToReference.color.hue, 0, rangeX, 0, 1);
       if (newHue > 1) newHue %= 1;
@@ -1212,7 +1213,7 @@ class Interaction {
       const brushToReference = openPainting.previousBrush;
 
       const deltaY = Interaction.currentSequence[1].y - Interaction.currentSequence[0].y;
-      const rangeY = GIZMO_SIZE * 2;
+      const rangeY = UI.GIZMO_SIZE * 2;
       
       brushToAdjust.size = map(-deltaY + rangeY * brushToReference.size, 0, rangeY, 0, 1, true);
       if (Interaction.editingLastStroke) openPainting.redrawLatestStroke();
@@ -1464,7 +1465,7 @@ class HSLColor {
   }
 
   #toRGBArray() {
-    return okhsl_to_srgb(this.hue, this.saturation, this.luminance); // from conversion helpers file
+    return okhsl_to_srgb(this.hue, this.saturation, this.lightness); // from conversion helpers file
   }
 
   #alphaToHex(a = this.a) {
@@ -1496,9 +1497,9 @@ class HSLColor {
     return this;
   }
   /**
-   * @param {number} value - The new luminance value (between 0 and 1).
+   * @param {number} value - The new lightness value (between 0 and 1).
    */
-  setLuminance(value) {
+  setLightness(value) {
     this.l = value;
     return this;
   }
@@ -1551,7 +1552,7 @@ class HSLColor {
   get saturation() {
     return this.s;
   }
-  get luminance() {
+  get lightness() {
     return this.l;
   }
 
@@ -1562,9 +1563,13 @@ class HSLColor {
   }
 }
 
-// Drawn to a buffer every frame - anything on top of the painting.
-// Buttons etc. are realized here, not in HTML/CSS for extra control.
+// This class is really just for namespacing and contains some general constants for the interface as well as methods to draw everything.
+// Buttons etc. are drawn entirely with canvas, not in HTML/CSS for extra control.
 class UI {
+
+  // constants
+  static GIZMO_SIZE = 120; 
+  static MOBILE_WIDTH_BREAKPOINT = 576;
 
   static ELEMENT_MARGIN = 4;
   static ELEMENT_RADIUS = 16;
@@ -1573,9 +1578,16 @@ class UI {
   static BUTTON_HEIGHT = 60;
   static SLIDER_WIDTH = 200 + UI.ELEMENT_MARGIN * 2;
 
+  // state
   static showingHelp = false;
-  static buffer = undefined;
-  static palette = {};
+  static buffer = undefined; // from createGraphics in setup()
+  static palette = {
+    bg: undefined,
+    fg: undefined,
+    fgDisabled: undefined,
+    constrastBg: undefined,
+    onBrush: undefined
+  };
 
   static redrawInterface() {
     // reset
@@ -1588,12 +1600,12 @@ class UI {
     // Interface Colors
     UI.palette.bg = openPainting.canvasColor.behind();
     UI.palette.fg = UI.palette.bg.copy()
-      .setLuminance(lerp(openPainting.canvasColor.luminance, (openPainting.canvasColor.luminance>0.5) ? 0 : 1, 0.8)); 
+      .setLightness(lerp(openPainting.canvasColor.lightness, (openPainting.canvasColor.lightness>0.5) ? 0 : 1, 0.8)); 
     UI.palette.fgDisabled = UI.palette.fg.copy().setAlpha(0.4);
     UI.palette.constrastBg = UI.palette.fg.copy()
-      .setLuminance(lerp(openPainting.canvasColor.luminance, openPainting.canvasColor.luminance > 0.5 ? 1 : 0, 0.7)); 
+      .setLightness(lerp(openPainting.canvasColor.lightness, openPainting.canvasColor.lightness > 0.5 ? 1 : 0, 0.7)); 
     UI.palette.onBrush = openPainting.currentBrush.color.copy()
-      .setLuminance(lerp(openPainting.currentBrush.color.luminance, (openPainting.currentBrush.color.luminance>0.5) ? 0:1, 0.7))
+      .setLightness(lerp(openPainting.currentBrush.color.lightness, (openPainting.currentBrush.color.lightness>0.5) ? 0:1, 0.7))
       .setSaturation(openPainting.currentBrush.color.saturation * 0.5);
     
     // MENUS
@@ -1613,10 +1625,10 @@ class UI {
     const noEditableStrokes = (openPainting.editableStrokesCount === 0);
     UI.drawButton("undo" ,       UI.BUTTON_WIDTH*0, 0, noEditableStrokes ? UI.palette.fgDisabled : UI.palette.fg);
     UI.drawButton("edit" ,       UI.BUTTON_WIDTH*1, 0, Interaction.editingLastStroke || noEditableStrokes ? UI.palette.fgDisabled : UI.palette.fg);
-    UI.drawButton("clear", width-UI.BUTTON_WIDTH*2, 0, new HSLColor(0.1, 0.8, (UI.palette.fg.luminance > 0.5) ? 0.7 : 0.4));
+    UI.drawButton("clear", width-UI.BUTTON_WIDTH*2, 0, new HSLColor(0.1, 0.8, (UI.palette.fg.lightness > 0.5) ? 0.7 : 0.4));
     UI.drawButton("save" , width-UI.BUTTON_WIDTH*1, 0, UI.palette.fg);
 
-    if (width > MOBILE_WIDTH_BREAKPOINT) {
+    if (width > UI.MOBILE_WIDTH_BREAKPOINT) {
       UI.drawButton("help" , width-UI.BUTTON_WIDTH, height-UI.BUTTON_HEIGHT, UI.showingHelp ? UI.palette.fgDisabled : UI.palette.fg);
     }
     
@@ -1648,6 +1660,12 @@ class UI {
       UI.buffer.drawingContext.clip();
       UI.drawSizeIndicator(sliderStart - 30, UI.BUTTON_HEIGHT / 2, pressureForSizeIndicator);
       UI.buffer.drawingContext.restore();
+      // outline
+      UI.buffer.noFill();
+      UI.buffer.strokeWeight(1);
+      UI.buffer.stroke(UI.palette.fg.toHexWithSetAlpha(0.2));
+      UI.buffer.rect(sliderStart - 60 + UI.ELEMENT_MARGIN, UI.ELEMENT_MARGIN, 60 - UI.ELEMENT_MARGIN*2, UI.BUTTON_HEIGHT - UI.ELEMENT_MARGIN*2, UI.ELEMENT_RADIUS);
+      UI.buffer.noStroke();
 
       // circle overlay
       UI.buffer.noFill();
@@ -1663,35 +1681,35 @@ class UI {
       let baseColor = openPainting.brushSettingsToAdjust.color;
       const rotatedBaseHue = (baseColor.hue+openPainting.hueRotation) % 1;
       const correctlyFlippedSaturation = (openPainting.hueRotation === 0) ? (1 + baseColor.saturation)/2 : (1 - baseColor.saturation)/2;
-      UI.drawGradientSlider(sliderStart                  , 0, UI.SLIDER_WIDTH, UI.BUTTON_HEIGHT, baseColor.copy().setLuminance(0), baseColor.copy().setLuminance(1), baseColor.luminance);
+      UI.drawGradientSlider(sliderStart                  , 0, UI.SLIDER_WIDTH, UI.BUTTON_HEIGHT, baseColor.copy().setLightness(0), baseColor.copy().setLightness(1), baseColor.lightness);
       UI.drawGradientSlider(sliderStart+UI.SLIDER_WIDTH  , 0, UI.SLIDER_WIDTH, UI.BUTTON_HEIGHT, baseColor.copy().setSaturation(0), baseColor.copy().setSaturation(1), correctlyFlippedSaturation, "double");
-      UI.drawGradientSlider(sliderStart+UI.SLIDER_WIDTH*2, 0, UI.SLIDER_WIDTH, UI.BUTTON_HEIGHT, baseColor.copy().setHue(0+openPainting.hueRotation), baseColor.copy().setHue(1+openPainting.hueRotation), rotatedBaseHue);
+      UI.drawGradientSlider(sliderStart+UI.SLIDER_WIDTH*2, 0, UI.SLIDER_WIDTH, UI.BUTTON_HEIGHT, baseColor.copy().setHue(0+openPainting.hueRotation), baseColor.copy().setHue(1+openPainting.hueRotation), rotatedBaseHue, "wrap");
   
       // show difference
       const settingsChangeInteractions = [...Object.values(Interaction.TYPES.knob),...Object.values(Interaction.TYPES.slider)];
       if (settingsChangeInteractions.includes(Interaction.currentType) && openPainting.previousBrush !== undefined) {
         const prevColor = openPainting.previousBrush.color;
   
-        if (Interaction.currentType === Interaction.TYPES.slider.luminance) {
+        if (Interaction.currentType === Interaction.TYPES.slider.lightness) {
           UI.drawSliderChange(
             sliderStart, 0, UI.SLIDER_WIDTH, UI.BUTTON_HEIGHT, 
-            prevColor.copy().setLuminance(0), prevColor.copy().setLuminance(1), 
-            prevColor.luminance, baseColor.luminance, 
-            "L: " + Math.floor(baseColor.luminance * 100) + "%"
+            prevColor.copy().setLightness(0), prevColor.copy().setLightness(1), 
+            prevColor.lightness, baseColor.lightness, 
+            "L " + Math.floor(baseColor.lightness * 100) + "%"
           );
         } else if (Interaction.currentType === Interaction.TYPES.slider.saturation) {
           UI.drawSliderChange(
             sliderStart + UI.SLIDER_WIDTH, 0, UI.SLIDER_WIDTH, UI.BUTTON_HEIGHT, 
             prevColor.copy().setSaturation(0), prevColor.copy().setSaturation(1), 
             prevColor.saturation, (openPainting.hueRotation === 0) ? (1 + baseColor.saturation)/2 : (1 - baseColor.saturation)/2,
-            "S: " + ((openPainting.hueRotation === 0) ? "" : "-") +  Math.floor(baseColor.saturation * 100) + "%", "double"
+            "S " + ((openPainting.hueRotation === 0) ? "" : "-") +  Math.floor(baseColor.saturation * 100) + "%", "double"
           );
         } if (Interaction.currentType === Interaction.TYPES.slider.hue) {
           UI.drawSliderChange(
             sliderStart + UI.SLIDER_WIDTH*2, 0, UI.SLIDER_WIDTH, UI.BUTTON_HEIGHT, 
             prevColor.copy().setHue(0+openPainting.hueRotation), prevColor.copy().setHue(1+openPainting.hueRotation), 
             (prevColor.hue+openPainting.hueRotation) % 1, (baseColor.hue+openPainting.hueRotation) % 1, 
-            "H:" + Math.floor(baseColor.hue * 360) + "°"
+            "H " + Math.floor(baseColor.hue * 360) + "°"
           );
         } else if (Interaction.currentType === Interaction.TYPES.knob.jitter) {
           UI.drawTooltipBelow(sliderStart + UI.SLIDER_WIDTH*3+30, UI.BUTTON_HEIGHT, Math.round(openPainting.currentBrush.colorVar * 100) + "%");
@@ -1707,6 +1725,12 @@ class UI {
       UI.buffer.drawingContext.clip();
       UI.drawVariedColorCircle(openPainting.brushSettingsToAdjust, 80, sliderStart + UI.SLIDER_WIDTH*3 + 30, UI.BUTTON_HEIGHT / 2);
       UI.buffer.drawingContext.restore();
+      // outline
+      UI.buffer.noFill();
+      UI.buffer.strokeWeight(1);
+      UI.buffer.stroke(UI.palette.fg.toHexWithSetAlpha(0.2));
+      UI.buffer.rect(sliderStart + UI.SLIDER_WIDTH*3 + UI.ELEMENT_MARGIN, UI.ELEMENT_MARGIN, 60 - UI.ELEMENT_MARGIN*2, UI.BUTTON_HEIGHT - UI.ELEMENT_MARGIN*2, UI.ELEMENT_RADIUS);
+      UI.buffer.noStroke();
     }
 
     if (Interaction.currentUI === Interaction.UI_STATES.clover_open) {
@@ -1872,6 +1896,15 @@ class UI {
       UI.buffer.fill(brush.getColorWithVar(i).hex);
       UI.buffer.arc(0, 0, size, size, start, stop);
     }
+
+    // if (size > 50) {
+    //   //UI.buffer.rotate(Math.PI * 2 * -0.4);
+    //   UI.buffer.noFill();
+    //   UI.buffer.stroke(UI.palette.onBrush.toHexWithSetAlpha(0.6));
+    //   UI.buffer.strokeWeight(size/4);
+    //   UI.buffer.arc(0, 0, size*0.8, size*0.8, -intensityAngle-Math.PI*0.5, -Math.PI*0.5);
+    // }
+
     UI.buffer.pop();
   }
 
@@ -1924,12 +1957,12 @@ class UI {
     UI.buffer.strokeCap(ROUND);
   }
 
-  static drawSliderChange(x, y, w, h, start, end, componentBefore, componentAfter, componentName, gradientType) {
+  static drawSliderChange(x, y, w, h, start, end, componentBefore, componentAfter, componentName, sliderType) {
     //UI.drawGradientSlider(x, y, w, h/6, start, end, componentBefore, gradientType);
-    UI.drawTooltipBelow(x + componentAfter * w, h, componentName, gradientType);
+    UI.drawTooltipBelow(x + componentAfter * w, h, componentName, sliderType);
   }
 
-  static drawGradientSlider(x, y, width, height, startColor, endColor, sliderPercent, gradientType) {
+  static drawGradientSlider(x, y, width, height, startColor, endColor, sliderPercent, sliderType) {
 
     width -= UI.ELEMENT_MARGIN * 2;
     height -= UI.ELEMENT_MARGIN * 2;
@@ -1945,7 +1978,7 @@ class UI {
       
     const segments = width / 2;
 
-    if (gradientType === "double") {
+    if (sliderType === "double") {
       for (let i = 0; i < segments; i++) {
         const colorLerpAmt = ((i + 0.5) / segments) * 2 - 1;
         const lerpedColor = ((colorLerpAmt * (openPainting.hueRotation === 0 ? 1 : -1)) > 0) 
@@ -1965,16 +1998,32 @@ class UI {
       }  
     }
 
+    // circle
     UI.buffer.noFill();
+
     UI.buffer.strokeWeight(4);
     UI.buffer.stroke(new HSLColor(0,0,0,0.8).hex);
     UI.buffer.ellipse(x + width * sliderPercent, y + height / 2, 32, 32);
     UI.buffer.strokeWeight(2);
     UI.buffer.stroke(new HSLColor(0,0,1,0.8).hex);
     UI.buffer.ellipse(x + width * sliderPercent, y + height / 2, 30, 30);
-    UI.buffer.noStroke();
-    
+
+    if (sliderType === "wrap") {
+      const wrapPos = x + width * sliderPercent + (sliderPercent < 0.5 ? width : - width);
+      UI.buffer.strokeWeight(4);
+      UI.buffer.stroke(new HSLColor(0,0,0,0.8).hex);
+      UI.buffer.ellipse(wrapPos, y + height / 2, 32, 32);
+      UI.buffer.strokeWeight(2);
+      UI.buffer.stroke(new HSLColor(0,0,1,0.8).hex);
+      UI.buffer.ellipse(wrapPos, y + height / 2, 30, 30);
+    }
+
     UI.buffer.drawingContext.restore();
+
+    UI.buffer.strokeWeight(1);
+    UI.buffer.stroke(UI.palette.fg.toHexWithSetAlpha(0.2));
+    UI.buffer.rect(x, y, width, height, UI.ELEMENT_RADIUS);
+    UI.buffer.noStroke();
   }
 
   static drawTooltipBelow(x, y, text) {
@@ -2018,7 +2067,7 @@ class UI {
     UI.buffer.noStroke();
     UI.buffer.fill(brushToVisualize.color.hex);
 
-    const sideDist = GIZMO_SIZE; //(Math.max(width, height) > 4* gadgetRadius) ? gadgetRadius : gadgetRadius*0.5;
+    const sideDist = UI.GIZMO_SIZE; //(Math.max(width, height) > 4* gadgetRadius) ? gadgetRadius : gadgetRadius*0.5;
     const ankerX = constrain(basePosition.x, sideDist, width - sideDist);
     const ankerY = constrain(basePosition.y, sideDist, height - sideDist);
 
@@ -2057,8 +2106,8 @@ class UI {
           const endColorSat   = brushToVisualize.color.copy().setSaturation(1);
           UI.drawColorAxis(6, posX - size/3, posY, posX + size/3, posY, startColorSat, endColorSat, size);
           
-          const startColorLum = brushToVisualize.color.copy().setLuminance(1);
-          const endColorLum   = brushToVisualize.color.copy().setLuminance(0);
+          const startColorLum = brushToVisualize.color.copy().setLightness(1);
+          const endColorLum   = brushToVisualize.color.copy().setLightness(0);
           UI.drawColorAxis(6, posX, posY - size/3, posX, posY + size/3, startColorLum, endColorLum, size);
 
         } else if (text === "S") {
@@ -2093,18 +2142,18 @@ class UI {
     
     } else if (Interaction.currentUI === Interaction.UI_STATES.hueAndVar_open) {
 
-      const radius = GIZMO_SIZE;
+      const radius = UI.GIZMO_SIZE;
       UI.buffer.push();
       UI.buffer.translate(ankerX, ankerY);
 
       UI.buffer.fill("black")
-      UI.buffer.ellipse(0, 0, constrain(brushToVisualize.pxSize, 8, GIZMO_SIZE/3)+2)
+      UI.buffer.ellipse(0, 0, constrain(brushToVisualize.pxSize, 8, UI.GIZMO_SIZE/3)+2)
 
       // var
       UI.buffer.stroke("black");
       UI.buffer.strokeWeight(16);
       UI.buffer.line(0, radius*2 * (brushToVisualize.colorVar - 1), 0, radius*2 * brushToVisualize.colorVar);
-      UI.drawColorAxis(14, 0, radius*2 * (brushToVisualize.colorVar - 1), 0, radius*2 * brushToVisualize.colorVar, brushToVisualize.color, brushToVisualize.color, GIZMO_SIZE, 1.0, 0.0);
+      UI.drawColorAxis(14, 0, radius*2 * (brushToVisualize.colorVar - 1), 0, radius*2 * brushToVisualize.colorVar, brushToVisualize.color, brushToVisualize.color, UI.GIZMO_SIZE, 1.0, 0.0);
 
       // hue
       // stay centered since hue is a circle anyway
@@ -2114,7 +2163,7 @@ class UI {
 
       const startColorHue = brushToVisualize.color.copy().setHue(brushToVisualize.color.hue - 0.5); 
       const endColorHue   = brushToVisualize.color.copy().setHue(brushToVisualize.color.hue + 0.5);
-      UI.drawColorAxis(14, radius*2 * -0.5, 0, radius*2 * (1-0.5), 0, startColorHue, endColorHue, GIZMO_SIZE);
+      UI.drawColorAxis(14, radius*2 * -0.5, 0, radius*2 * (1-0.5), 0, startColorHue, endColorHue, UI.GIZMO_SIZE);
 
       UI.buffer.pop();
 
@@ -2124,26 +2173,26 @@ class UI {
 
     } else if (Interaction.currentUI === Interaction.UI_STATES.satAndLum_open) {
 
-      const radius = GIZMO_SIZE;
+      const radius = UI.GIZMO_SIZE;
       UI.buffer.push();
       UI.buffer.translate(ankerX, ankerY);
 
       UI.buffer.fill("black")
-      UI.buffer.ellipse(0, 0, constrain(brushToVisualize.pxSize, 8, GIZMO_SIZE/3)+2)
+      UI.buffer.ellipse(0, 0, constrain(brushToVisualize.pxSize, 8, UI.GIZMO_SIZE/3)+2)
 
-      const startColorLum = brushToVisualize.color.copy().setLuminance(1);
-      const endColorLum   = brushToVisualize.color.copy().setLuminance(0);
+      const startColorLum = brushToVisualize.color.copy().setLightness(1);
+      const endColorLum   = brushToVisualize.color.copy().setLightness(0);
       UI.buffer.stroke("black");
       UI.buffer.strokeWeight(16);
-      UI.buffer.line(0, radius*2 * (-1 + brushToVisualize.color.luminance), 0, radius*2 * brushToVisualize.color.luminance);
-      UI.drawColorAxis(14, 0, radius*2 * (-1 + brushToVisualize.color.luminance), 0, radius*2 * brushToVisualize.color.luminance, startColorLum, endColorLum, GIZMO_SIZE);
+      UI.buffer.line(0, radius*2 * (-1 + brushToVisualize.color.lightness), 0, radius*2 * brushToVisualize.color.lightness);
+      UI.drawColorAxis(14, 0, radius*2 * (-1 + brushToVisualize.color.lightness), 0, radius*2 * brushToVisualize.color.lightness, startColorLum, endColorLum, UI.GIZMO_SIZE);
 
       const startColorSat = brushToVisualize.color.copy().setSaturation(0);
       const endColorSat   = brushToVisualize.color.copy().setSaturation(1);
       UI.buffer.stroke("black");
       UI.buffer.strokeWeight(16);
       UI.buffer.line(radius*2 * -brushToVisualize.color.saturation, 0, radius*2 * (1-brushToVisualize.color.saturation), 0);
-      UI.drawColorAxis(14, radius*2 * -brushToVisualize.color.saturation, 0, radius*2 * (1-brushToVisualize.color.saturation), 0, startColorSat, endColorSat, GIZMO_SIZE);
+      UI.drawColorAxis(14, radius*2 * -brushToVisualize.color.saturation, 0, radius*2 * (1-brushToVisualize.color.saturation), 0, startColorSat, endColorSat, UI.GIZMO_SIZE);
       
       UI.buffer.pop();
 
@@ -2154,16 +2203,16 @@ class UI {
     } else if (Interaction.currentUI === Interaction.UI_STATES.size_open) {
 
       const posX = ankerX;
-      const posY = ankerY - GIZMO_SIZE;
-      const lineAddY = GIZMO_SIZE * 2 * brushToVisualize.size;
+      const posY = ankerY - UI.GIZMO_SIZE;
+      const lineAddY = UI.GIZMO_SIZE * 2 * brushToVisualize.size;
       const lineTranslateY = posY + lineAddY;
 
       UI.buffer.stroke(UI.palette.constrastBg.toHexWithSetAlpha(0.3));
       UI.buffer.strokeWeight(12);
-      UI.buffer.line(posX, lineTranslateY - GIZMO_SIZE,posX, lineTranslateY + GIZMO_SIZE);
+      UI.buffer.line(posX, lineTranslateY - UI.GIZMO_SIZE,posX, lineTranslateY + UI.GIZMO_SIZE);
       UI.buffer.strokeWeight(10);
       UI.buffer.stroke(UI.palette.fg.toHexWithSetAlpha(0.3));
-      UI.buffer.line(posX, lineTranslateY - GIZMO_SIZE,posX, lineTranslateY + GIZMO_SIZE);
+      UI.buffer.line(posX, lineTranslateY - UI.GIZMO_SIZE,posX, lineTranslateY + UI.GIZMO_SIZE);
       UI.buffer.noStroke();
 
       UI.buffer.fill(brushToVisualize.color.toHexWithSetAlpha(0.5));
