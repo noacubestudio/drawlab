@@ -524,6 +524,7 @@ class Interaction {
   // if true, sliders and gizmos etc. will modify the last stroke
   // rather than the brush settings for the upcoming one
   static editingLastStroke = false;
+  static hueRotationBeforeEditing = null;
   static UI_STATES = {
     nothing_open: 'default',
     eyedropper_open: 'eyedropper',
@@ -681,7 +682,7 @@ class Interaction {
     }
 
     if (key !== "e") {
-      Interaction.editingLastStroke = false;
+      Interaction.stopEditing();
     }
 
     Interaction.currentType = null;
@@ -718,17 +719,23 @@ class Interaction {
 
   static undoAction() {
     openPainting.popLatestStroke();
-    Interaction.editingLastStroke = false;
+    Interaction.stopEditing();
   }
 
   static editAction() {
     //toggle off again or prevent turning on because there are no strokes to edit
-    if (Interaction.editingLastStroke || openPainting.editableStrokesCount === 0) {
-      Interaction.editingLastStroke = false; 
+    if (openPainting.editableStrokesCount === 0) return;
+    if (Interaction.editingLastStroke) {
+      Interaction.stopEditing(); 
       return;
     }
     Interaction.editingLastStroke = true;
-    // openPainting.redrawLatestStroke(); // only useful for debug purposes
+    Interaction.hueRotationBeforeEditing = openPainting.hueRotation;
+  }
+
+  static stopEditing() {
+    Interaction.editingLastStroke = false;
+    openPainting.hueRotation = Interaction.hueRotationBeforeEditing;
   }
 
   static pickToolAction(index) {
@@ -738,7 +745,7 @@ class Interaction {
 
     if (Interaction.editingLastStroke) {
       openPainting.redrawLatestStroke();
-      Interaction.editingLastStroke = false;
+      Interaction.stopEditing();
     }
     Interaction.currentUI = Interaction.UI_STATES.nothing_open;
   }
@@ -1253,13 +1260,13 @@ class Interaction {
 
       // started on a knob
       Interaction.resetCurrentSequence();
-      Interaction.editingLastStroke = false;
+      Interaction.stopEditing();
 
     } else if (Object.values(Interaction.TYPES.slider).includes(Interaction.currentType)) {
 
       // started on a slider
       Interaction.resetCurrentSequence();
-      Interaction.editingLastStroke = false;
+      Interaction.stopEditing();
 
     } else if (Interaction.currentType === Interaction.TYPES.painting.draw) {
 
@@ -1270,7 +1277,7 @@ class Interaction {
 
       // try moving here still,wip?
       Interaction.resetCurrentSequence();
-      Interaction.editingLastStroke = false;
+      Interaction.stopEditing();
 
     } else if (Interaction.currentType === Interaction.TYPES.painting.initStroke) {
 
@@ -1280,7 +1287,7 @@ class Interaction {
       } else {
         // close clover
         Interaction.currentUI = Interaction.UI_STATES.nothing_open;
-        Interaction.editingLastStroke = false;
+        Interaction.stopEditing();
       }
 
       Interaction.resetCurrentSequence();
@@ -1289,26 +1296,26 @@ class Interaction {
 
       Interaction.resetCurrentSequence();
       Interaction.currentUI = Interaction.UI_STATES.nothing_open;
-      Interaction.editingLastStroke = false;
+      Interaction.stopEditing();
 
     } else if (Interaction.currentType === Interaction.TYPES.gizmo.hueAndVar) {
 
       Interaction.resetCurrentSequence();
       Interaction.currentUI = Interaction.UI_STATES.nothing_open;
-      Interaction.editingLastStroke = false;
+      Interaction.stopEditing();
 
     } else if (Interaction.currentType === Interaction.TYPES.gizmo.satAndLum) {
 
       Interaction.resetCurrentSequence();
       Interaction.currentUI = Interaction.UI_STATES.nothing_open;
-      Interaction.editingLastStroke = false;
+      Interaction.stopEditing();
 
     } else if (Interaction.currentType === Interaction.TYPES.painting.eyedropper) {
 
       // actually pick the color again, wip?
       Interaction.resetCurrentSequence();
       Interaction.currentUI = Interaction.UI_STATES.nothing_open;
-      Interaction.editingLastStroke = false;
+      Interaction.stopEditing();
 
     } else {
       // was hover or none
@@ -1661,7 +1668,7 @@ class UI {
       UI.buffer.fill(UI.palette.constrastBg.toHexWithSetAlpha(0.5));
       UI.buffer.rect(sliderStart + 600, 0, 60, 60, 20, 20, 20, 20);
       UI.buffer.drawingContext.clip();
-      UI.drawVariedColorCircle(openPainting.currentBrush, 70, sliderStart + 630, 30);
+      UI.drawVariedColorCircle(openPainting.brushSettingsToAdjust, 70, sliderStart + 630, 30);
       UI.buffer.drawingContext.restore();
   
       // draw the size indicator
@@ -1669,7 +1676,8 @@ class UI {
       UI.buffer.fill(UI.palette.constrastBg.toHexWithSetAlpha(0.5));
       UI.buffer.rect(sliderStart - 60, 0, 60, 60, 20, 20, 20, 20);
       UI.buffer.drawingContext.clip();
-      UI.drawSizeIndicator(openPainting.currentBrush.pxSize, sliderStart - 30, 30);
+      const indicatorSize = openPainting.brushSettingsToAdjust.pxSize; // WIP: * average pressure of max(0, end-10) in last brushstroke 
+      UI.drawSizeIndicator(indicatorSize, sliderStart - 30, 30);
       UI.buffer.drawingContext.restore();
     }
 
