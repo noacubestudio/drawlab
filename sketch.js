@@ -119,26 +119,33 @@ class BrushSettings {
     return pxSize;
   }
 
+  finalPxSizeWithPressure(pressure) {
+    const size = this.pxSize * (this.texture === "Round" ? 0.7 : 1);
+    if (pressure === undefined) return size;
+    return size * map(pressure, 0, 1, 0.1, 2.0, true);
+  }
+
   getColorWithVar(seed) {
     return this.color.copy().varyComponents(seed, this.colorVar);
   }
 }
 
 
-class BrushStrokePoint {
+class BrushPoint {
   /**
    * Creates an instance of BrushStrokePoint.
    * @param {number} x The x coordinate of the point.
    * @param {number} y The y coordinate of the point.
    * @param {number|undefined} azimuth The angle of the pen at this point.
    * @param {number|undefined} pressure The pen pressure detected at this point.
+   * @param {number|undefined} timeStamp The timeStamp of the event that added this point.
    */
-  constructor(x, y, azimuth, pressure) {
+  constructor(x, y, azimuth, pressure, timeStamp) {
     this.x = x;
     this.y = y;
     this.azimuth = azimuth;
     this.pressure = pressure;
-    this.seed = x * 2 + y * 3;
+    this.seed = (timeStamp ? timeStamp/1000000 + (x^y)/1000000 : x * 2 + y * 3);
   }
 
   move(xDelta, yDelta) {
@@ -150,7 +157,7 @@ class BrushStrokePoint {
 }
 
 
-class BrushStroke {
+class Brushstroke {
   /**
    * Creates an instance of BrushStroke.
    * Contains an array of points.
@@ -161,6 +168,7 @@ class BrushStroke {
     this.buffer = buffer;
     this.points = [];
     this.settings = settings.copy();
+    this.brushstrokeSeed = frameCount / 100000;
   }
 
   get bounds() {
@@ -172,8 +180,23 @@ class BrushStroke {
     return {x: xmin, y:ymin, width: xmax-xmin, height: ymax-ymin};
   }
 
+  averagePressureInLast(n) {
+    if (this.points.length === 0) return;
+    if (this.points[0].pressure === undefined) return;
+
+    const firstIndexToCheck = Math.max(0, this.points.length - n);
+    let totalPressure = 0;
+    let count = 0;
+    for (let i = firstIndexToCheck; i <  this.points.length; i++) {
+      totalPressure += this.points[i].pressure;
+      count++;
+    }
+    
+    return totalPressure / count;
+  }
+
   addPoint(point) {
-    this.points.push(new BrushStrokePoint(point.x,  point.y,  point.azimuth, point.pressure));
+    this.points.push(new BrushPoint(point.x,  point.y,  point.azimuth, point.pressure, point.timeStamp));
   }
 
   movePoints(xDelta, yDelta) {
@@ -185,6 +208,7 @@ class BrushStroke {
     this.buffer.clear();
     this.points = [];
     this.settings = undefined;
+    this.brushstrokeSeed = frameCount / 100000;
   }
 
   drawWhole() {
@@ -204,8 +228,8 @@ class BrushStroke {
   // WIP, currently ignores tool
   /**
    * Render two points of the stroke.
-   * @param {BrushStrokePoint} start The first point of the stroke segment.
-   * @param {BrushStrokePoint} end The second point of the stroke segment.
+   * @param {BrushPoint} start The first point of the stroke segment.
+   * @param {BrushPoint} end The second point of the stroke segment.
    * @returns 
    */
   drawPart(start, end) {
@@ -216,19 +240,66 @@ class BrushStroke {
     } 
     if (start.x === end.x && start.y === end.y) return;
 
+    // dev version
+    if (false) {
+      this.buffer.strokeWeight(6)
+      this.buffer.stroke(this.settings.getColorWithVar(end.seed).hex)
+      this.buffer.line(start.x, start.y, end.x, end.y)
+      this.buffer.stroke(this.settings.getColorWithVar(end.seed * 1.12134 + 30).hex)
+      this.buffer.line(start.x+7, start.y, end.x+7, end.y)
+      this.buffer.stroke(this.settings.getColorWithVar(end.seed * 1.2241 + 20).hex)
+      this.buffer.line(start.x+15, start.y, end.x+15, end.y)
+      return;
+    }
+
     start.azimuth ??= end.azimuth;
     start.azimuth ??= p5.Vector.angleBetween(createVector(0, -1), createVector(end.x-start.x, end.y-start.y));
       end.azimuth ??= p5.Vector.angleBetween(createVector(0, -1), createVector(end.x-start.x, end.y-start.y));
+    const averageDirection = atan2(sin(start.azimuth)+sin(end.azimuth), cos(start.azimuth)+cos(end.azimuth));
 
+      //if (start.pressure === 0.5) start.pressure = 0
       end.pressure ??= start.pressure;
-      end.pressure ??= 0.5;
-    start.pressure ??= 0.5;
+      end.pressure ??= (openPainting.averagePressure ?? 0.5);
+    start.pressure ??= (openPainting.averagePressure ?? 0.5);
     const avgPressure = (start.pressure + end.pressure) / 2;
 
     this.buffer.noStroke();
 
+    const rf = 2 * this.settings.colorVar * this.settings.colorVar; // randomness matches increasing variation
     const brushSize = this.settings.pxSize * (this.settings.texture === "Round" ? 0.7 : 1);
     const strips = Math.floor(map(brushSize, 10, 300, 10, 200) * (this.settings.texture === "Round" ? 0.3 : 1));
+
+    // draw background shape
+    const lowSideLerpPart = HSLColor.symmetricalNoise(0 + end.seed) * 0.5 + 0.5;
+    const highSideLerpPart = HSLColor.symmetricalNoise(strips-1 + end.seed) * 0.5 + 0.5;
+    const lowSideMiddlePos = {x: lerp(start.x, end.x, lowSideLerpPart), y: lerp(start.y, end.y, lowSideLerpPart)};
+    const highSideMiddlePos = {x: lerp(start.x, end.x, highSideLerpPart), y: lerp(start.y, end.y, highSideLerpPart)};
+
+    const startEdgeVectorLower  = p5.Vector.fromAngle(start.azimuth, -0.5*brushSize*map(start.pressure, 0, 1, 0.1, 2.0, true));
+    const startEdgeVectorHigher = p5.Vector.fromAngle(start.azimuth, 0.5*brushSize*map(start.pressure, 0, 1, 0.1, 2.0, true));
+    const endEdgeVectorLower    = p5.Vector.fromAngle(end.azimuth, -0.5*brushSize*map(end.pressure, 0, 1, 0.1, 2.0, true));
+    const endEdgeVectorHigher   = p5.Vector.fromAngle(end.azimuth, 0.5*brushSize*map(end.pressure, 0, 1, 0.1, 2.0, true));
+    const midEdgeVectorLower    = p5.Vector.fromAngle(averageDirection, -0.5*brushSize*map(avgPressure, 0, 1, 0.1, 2.0, true));
+    const midEdgeVectorHigher   = p5.Vector.fromAngle(averageDirection, 0.5*brushSize*map(avgPressure, 0, 1, 0.1, 2.0, true));
+
+    this.buffer.fill(this.settings.color.hex);
+    this.buffer.strokeWeight(1);
+    this.buffer.stroke(this.settings.color.toHexWithSetAlpha(0.5));
+    this.buffer.beginShape();
+    this.buffer.vertex(start.x + startEdgeVectorLower.x , start.y + startEdgeVectorLower.y );
+    this.buffer.vertex(start.x + startEdgeVectorHigher.x, start.y + startEdgeVectorHigher.y);
+    this.buffer.vertex(highSideMiddlePos.x + midEdgeVectorHigher.x, highSideMiddlePos.y + midEdgeVectorHigher.y);
+    this.buffer.vertex(end.x + endEdgeVectorHigher.x, end.y + endEdgeVectorHigher.y);
+    this.buffer.vertex(end.x + endEdgeVectorLower.x, end.y + endEdgeVectorLower.y);
+    this.buffer.vertex(lowSideMiddlePos.x + midEdgeVectorLower.x,    lowSideMiddlePos.y + midEdgeVectorLower.y);
+    this.buffer.vertex(start.x + startEdgeVectorLower.x , start.y + startEdgeVectorLower.y );
+    this.buffer.endShape();
+    this.buffer.noStroke();
+
+    const sX = lerp(start.x, end.x, -0.05);
+    const sY = lerp(start.y, end.y, -0.05);
+    const eX = lerp(start.x, end.x, 1.05);
+    const eY = lerp(start.y, end.y, 1.05);
 
     for (let i = 0; i < strips; i++) {
 
@@ -237,10 +308,8 @@ class BrushStroke {
       if (drawThisStrip) {
         const lowerSide = i/strips - 0.5;
         const higherSide = (i+1)/strips - 0.5;
-    
-        const rf = 0.1 * brushSize * map(avgPressure, 0, 1, 0.1, 2.0, true) * this.settings.colorVar; // randomness matches increasing variation
 
-        const lerpPart = HSLColor.pseudoRandomSymmetricNumber(i) * 0.5 + 0.5;
+        const lerpPart = HSLColor.symmetricalNoise(i + end.seed) * 0.5 + 0.5;
         const middleX = lerp(start.x, end.x, lerpPart);
         const middleY = lerp(start.y, end.y, lerpPart);
 
@@ -250,13 +319,11 @@ class BrushStroke {
         const endEdgeVectorLower    = p5.Vector.fromAngle(end.azimuth, lowerSide*brushSize*map(end.pressure, 0, 1, 0.1, 2.0, true));
         const endEdgeVectorHigher   = p5.Vector.fromAngle(end.azimuth, higherSide*brushSize*map(end.pressure, 0, 1, 0.1, 2.0, true));
 
-        const averageDirection = atan2(sin(start.azimuth)+sin(end.azimuth), cos(start.azimuth)+cos(end.azimuth));
-
         const midEdgeVectorLower    = p5.Vector.fromAngle(averageDirection, lowerSide*brushSize*map(avgPressure, 0, 1, 0.1, 2.0, true));
         const midEdgeVectorHigher   = p5.Vector.fromAngle(averageDirection, higherSide*brushSize*map(avgPressure, 0, 1, 0.1, 2.0, true));
 
-        if (HSLColor.pseudoRandomSymmetricNumber(start.seed + i) < start.pressure * 4) {
-          const brushCol = this.settings.getColorWithVar(i + start.seed);
+        // if (HSLColor.symmetricalNoise(start.seed + i) < start.pressure * 4) {
+          const brushCol = this.settings.getColorWithVar(i + start.seed).varyComponents(i + this.brushstrokeSeed, 0.1 + this.settings.colorVar * 0.3);
 
           if (this.settings.texture === "Round") {
             this.buffer.stroke(brushCol.hex);
@@ -271,17 +338,18 @@ class BrushStroke {
             );
           } else {
             this.buffer.fill(brushCol.hex);
+            //this.buffer.stroke(brushCol.hex);
             this.buffer.beginShape();
-            randomizedVertex(this.buffer, start.x, startEdgeVectorLower.x , start.y, startEdgeVectorLower.y , i, rf);
-            randomizedVertex(this.buffer, start.x, startEdgeVectorHigher.x, start.y, startEdgeVectorHigher.y, i, rf);
-            randomizedVertex(this.buffer, middleX, midEdgeVectorHigher.x,   middleY, midEdgeVectorHigher.y,   i, rf);
-            randomizedVertex(this.buffer, middleX, midEdgeVectorLower.x,    middleY, midEdgeVectorLower.y,    i, rf);
+            randomizedVertex(this.buffer, sX, startEdgeVectorLower.x ,    sY, startEdgeVectorLower.y , rf);
+            randomizedVertex(this.buffer, sX, startEdgeVectorHigher.x,    sY, startEdgeVectorHigher.y, rf);
+            randomizedVertex(this.buffer, middleX, midEdgeVectorHigher.x, middleY, midEdgeVectorHigher.y,   rf);
+            randomizedVertex(this.buffer, middleX, midEdgeVectorLower.x,  middleY, midEdgeVectorLower.y,    rf);
             this.buffer.endShape();
           }
-        }
+        // }
 
-        if (HSLColor.pseudoRandomSymmetricNumber(end.seed + i) < end.pressure * 4) {
-          const brushCol2 = this.settings.getColorWithVar(i + end.seed);
+        // if (HSLColor.symmetricalNoise(end.seed + i) < end.pressure * 4) {
+          const brushCol2 = this.settings.getColorWithVar(i + end.seed).varyComponents(i + this.brushstrokeSeed, 0.1 + this.settings.colorVar * 0.3);
 
           if (this.settings.texture === "Round") {
             this.buffer.stroke(brushCol2.hex);
@@ -296,21 +364,22 @@ class BrushStroke {
             );
           } else {
             this.buffer.fill(brushCol2.hex);
+            //this.buffer.stroke(brushCol2.hex);
             this.buffer.beginShape();
-            randomizedVertex(this.buffer, middleX, midEdgeVectorLower.x , middleY, midEdgeVectorLower.y , i, rf);
-            randomizedVertex(this.buffer, middleX, midEdgeVectorHigher.x, middleY, midEdgeVectorHigher.y, i, rf);
-            randomizedVertex(this.buffer, end.x  , endEdgeVectorHigher.x, end.y  , endEdgeVectorHigher.y, i, rf);
-            randomizedVertex(this.buffer, end.x  , endEdgeVectorLower.x , end.y  , endEdgeVectorLower.y , i, rf);
+            randomizedVertex(this.buffer, middleX, midEdgeVectorLower.x , middleY, midEdgeVectorLower.y , rf);
+            randomizedVertex(this.buffer, middleX, midEdgeVectorHigher.x, middleY, midEdgeVectorHigher.y, rf);
+            randomizedVertex(this.buffer, eX  , endEdgeVectorHigher.x, eY  , endEdgeVectorHigher.y, rf);
+            randomizedVertex(this.buffer, eX  , endEdgeVectorLower.x , eY  , endEdgeVectorLower.y , rf);
             this.buffer.endShape();
           }
-        }
+        // }
       }
     }
 
-    function randomizedVertex(buffer, x, xOff, y, yOff, randomI, randomFactor) {
+    function randomizedVertex(buffer, x, xOff, y, yOff, randomFactor) {
       buffer.vertex(
-        x + xOff + HSLColor.pseudoRandomSymmetricNumber(x+y*2+randomI) * randomFactor, 
-        y + yOff + HSLColor.pseudoRandomSymmetricNumber(x*2+y+randomI) * randomFactor
+        x + xOff + HSLColor.symmetricalNoise(x*4 + xOff*2) * randomFactor, 
+        y + yOff + HSLColor.symmetricalNoise(y*4 + yOff*2) * randomFactor
       );
     }
   }
@@ -331,11 +400,12 @@ class Painting {
     this.height = height;
     this.mainBuffer = createGraphics(width, height);
     this.editableStrokesInUse = 0;
-    this.editableStrokes = Array.from({ length: 16 }, () => new BrushStroke(createGraphics(width, height), startingBrush));
+    this.editableStrokes = Array.from({ length: 16 }, () => new Brushstroke(createGraphics(width, height), startingBrush));
     this.currentBrush = startingBrush;
     this.previousBrushes = [];
     this.canvasColor = backgroundColor;
     this.hueRotation = 0;
+    this.averagePressure = undefined;
 
     this.clearWithColor(backgroundColor); // WIP, this is currently missing anything for display density
   }
@@ -396,6 +466,7 @@ class Painting {
   }
 
   startStroke(brushSettings) {
+    if (this.editableStrokesInUse > 0) this.averagePressure = this.latestStroke.averagePressureInLast(20);
     if (this.editableStrokesInUse > this.editableStrokes.length - 1) this.applyOldestStroke();
     this.editableStrokesInUse += 1;
     //console.log("started new stroke:", this.editableStrokesInUse);
@@ -414,7 +485,8 @@ class Painting {
       x: newInteraction.x,
       y: newInteraction.y,
       azimuth: newInteraction.azimuth,
-      pressure: newInteraction.pressure
+      pressure: newInteraction.pressure,
+      timeStamp: newInteraction.timeStamp
     });
   }
 
@@ -1422,16 +1494,9 @@ class Interaction {
 
 // Main color representation in OKHSL. Converted to hex color using the helper file.
 class HSLColor {
-  static RANDOM_VALUES = Array.from({ length: 1024 }, () => Math.random() * 2 - 1);
 
-  // static RANDOM_VALUES = Array.from({ length: 1024 }, (_, index) => {
-  //   const t = (index / (1024 - 1)) * 2 - 1; // Normalize index to the range [-1, 1]
-  //   return Math.sin(t * Math.PI * 0.5); // Use sine function for smooth transition
-  // });
-
-  static pseudoRandomSymmetricNumber(seed) {
-    const randomArray = this.RANDOM_VALUES;
-    return randomArray[Math.floor(Math.abs(xorshift(1030*seed))) % randomArray.length];
+  static symmetricalNoise(seed) {
+    return (noise(seed * 10000)) * 2 - 1
   }
 
   static lerpColorInHSL(color1, color2, lerpAmount) {
@@ -1520,17 +1585,22 @@ class HSLColor {
   varyComponents(seed, chaos = 0.5) {
     if (chaos === 0) return this;
 
-    const easedRandomNoise = (value, chaos) => ((1-chaos)*value**3) / 8 + lerp(value**3, value, 0.5)*chaos;
+    const lowCurve = (x) => (x * x * x) * 0.5;
+    const highCurve = (x) => 1 - Math.pow(1 - x, 3);
+    const customColorEasing = (value, chaos) => lerp(lowCurve(value), highCurve(value), chaos * chaos);
 
-    // get random [-1, 1] value from seed for each color parameter
-    const lNoiseValue = HSLColor.pseudoRandomSymmetricNumber(seed);
-    const hNoiseValue = HSLColor.pseudoRandomSymmetricNumber(seed+1);
-    const sNoiseValue = HSLColor.pseudoRandomSymmetricNumber(seed+2);
+    // OLD
+    //const easedRandomNoise = (value, chaos) => ((1-chaos)*value**3) / 8 + lerp(value**3, value, 0.5)*chaos;
 
-    // each could theoretically vary by +-0.5, but the chaos function never really goes that high.
-    this.l += 0.5 * easedRandomNoise(lNoiseValue, chaos*0.8);
-    this.h += 0.6 * easedRandomNoise(hNoiseValue, chaos*lerp(1.0, 0.7, easeOutCubic(this.s)));
-    this.s += 0.5 * easedRandomNoise(sNoiseValue, chaos*0.5);
+    // get [-1, 1] value from seed for each color parameter
+    const lNoiseValue = HSLColor.symmetricalNoise(seed);
+    const hNoiseValue = HSLColor.symmetricalNoise(seed*1.1);
+    const sNoiseValue = HSLColor.symmetricalNoise(seed*0.9);
+
+    // each can max vary by +-0.5
+    this.l += 0.4 * customColorEasing(lNoiseValue, chaos*0.6);
+    this.h += 0.5 * customColorEasing(hNoiseValue, chaos*lerp(0.9, 0.6, easeOutCubic(this.s)));
+    this.s += 0.4 * customColorEasing(sNoiseValue, chaos*0.5);
     // make sure the components are still in range
     this.l = Math.max(0, Math.min(1, this.l));
     this.s = Math.max(0, Math.min(1, this.s));
@@ -1643,16 +1713,17 @@ class UI {
       UI.buffer.fill(UI.palette.constrastBg.hex);
       UI.buffer.rect(sliderStart-60, 0,  UI.SLIDER_WIDTH * 3 + 120, UI.BUTTON_HEIGHT, UI.ELEMENT_RADIUS + UI.ELEMENT_MARGIN);
 
-      // for the size overlay
-      let indicatorSize = openPainting.brushSettingsToAdjust.pxSize * (openPainting.brushSettingsToAdjust.texture === "Round" ? 0.7 : 1);
+      // show current pressure
       let pressureForSizeIndicator = undefined;
       if (Interaction.currentSequence.length > 0 && Interaction.isAlreadyDown) {
         const last_interaction = Interaction.currentSequence[Interaction.currentSequence.length-1];
         if (last_interaction.pressure !== undefined) {
           pressureForSizeIndicator = last_interaction.pressure;
-          indicatorSize *= map(pressureForSizeIndicator, 0, 1, 0.1, 2.0, true);
         }
-      }  
+      } else if (openPainting.averagePressure !== undefined) {
+        pressureForSizeIndicator = openPainting.averagePressure;
+      }
+
       // draw the size knob
       UI.buffer.drawingContext.save();
       UI.buffer.fill(UI.palette.fg.toHexWithSetAlpha(0.2));
@@ -1666,6 +1737,9 @@ class UI {
       UI.buffer.stroke(UI.palette.fg.toHexWithSetAlpha(0.2));
       UI.buffer.rect(sliderStart - 60 + UI.ELEMENT_MARGIN, UI.ELEMENT_MARGIN, 60 - UI.ELEMENT_MARGIN*2, UI.BUTTON_HEIGHT - UI.ELEMENT_MARGIN*2, UI.ELEMENT_RADIUS);
       UI.buffer.noStroke();
+
+      // show average pressure
+      const indicatorSize = openPainting.brushSettingsToAdjust.finalPxSizeWithPressure(openPainting.averagePressure);
 
       // circle overlay
       UI.buffer.noFill();
@@ -1712,9 +1786,9 @@ class UI {
             "H " + Math.floor(baseColor.hue * 360) + "°"
           );
         } else if (Interaction.currentType === Interaction.TYPES.knob.jitter) {
-          UI.drawTooltipBelow(sliderStart + UI.SLIDER_WIDTH*3+30, UI.BUTTON_HEIGHT, Math.round(openPainting.currentBrush.colorVar * 100) + "%");
+          UI.drawTooltipBelow(sliderStart + UI.SLIDER_WIDTH*3+30, UI.BUTTON_HEIGHT, Math.round(openPainting.brushSettingsToAdjust.colorVar * 100) + "%");
         } else if (Interaction.currentType === Interaction.TYPES.knob.size) {
-          UI.drawTooltipBelow(sliderStart - 30, UI.BUTTON_HEIGHT, Math.round(openPainting.currentBrush.pxSize) + "px");
+          UI.drawTooltipBelow(sliderStart - 30, UI.BUTTON_HEIGHT, Math.round(openPainting.brushSettingsToAdjust.pxSize) + "px");
         }
       }
 
@@ -1806,10 +1880,10 @@ class UI {
     const startInteraction = Interaction.currentSequence[Interaction.currentSequence.length-2];
     const endInteraction = Interaction.currentSequence[Interaction.currentSequence.length-1];
 
-    const start = new BrushStrokePoint(startInteraction.x, startInteraction.y, startInteraction.angle);
-    const end = new BrushStrokePoint(endInteraction.x, endInteraction.y, endInteraction.angle);
+    const start = new BrushPoint(startInteraction.x, startInteraction.y, startInteraction.angle);
+    const end = new BrushPoint(endInteraction.x, endInteraction.y, endInteraction.angle);
 
-    new BrushStroke(UI.buffer, openPainting.currentBrush.copy()).drawPart(start, end);
+    new Brushstroke(UI.buffer, openPainting.currentBrush.copy()).drawPart(start, end);
   }
 
   static displayTool(menuBrushTool, menuTexture, x, y, menuName) {
@@ -1828,10 +1902,10 @@ class UI {
 
     // draw example
     // wip, not sure why the angle 86 even makes sense.
-    const start = new BrushStrokePoint(0, 30, 86, undefined);
-    const end = new BrushStrokePoint(80, 30, 86, undefined);
+    const start = new BrushPoint(0, 30, 86, undefined);
+    const end = new BrushPoint(80, 30, 86, undefined);
     
-    new BrushStroke(UI.buffer, settings).drawPart(start, end);
+    new Brushstroke(UI.buffer, settings).drawPart(start, end);
 
     UI.buffer.noStroke();
     UI.buffer.fill(UI.palette.constrastBg.toHexWithSetAlpha(isSelected ? 0.8 : 0.3));
@@ -1909,21 +1983,15 @@ class UI {
   }
 
   static drawSizeIndicator(x, y, pressure) {
-    // UI.buffer.fill(UI.palette.fg.toHexWithSetAlpha(0.4));
-    // UI.buffer.ellipse(x, y, size, size)
-    // UI.buffer.fill(UI.palette.constrastBg.toHexWithSetAlpha(0.3));
-    // UI.buffer.ellipse(x, y, size*0.66, size*0.66)
-    // UI.buffer.ellipse(x, y, size*0.33, size*0.33)
-
     UI.buffer.push();
     UI.buffer.translate(x, y);
     //UI.buffer.rotate(-Math.PI * 0.25);
 
     // draw example
-    // wip, not sure why the angle 86 even makes sense.
-    const start = new BrushStrokePoint(-30, 0, 86, pressure);
-    const end = new BrushStrokePoint(30, 0, 86, pressure);
-    new BrushStroke(UI.buffer, openPainting.brushSettingsToAdjust).drawPart(start, end);
+    // not sure why the angle 86 even makes sense.
+    const start = new BrushPoint(-40, 0, 86, pressure);
+    const end = new BrushPoint(40, 0, 86, pressure);
+    new Brushstroke(UI.buffer, openPainting.brushSettingsToAdjust).drawPart(start, end);
     
     UI.buffer.pop();
   }
@@ -2196,8 +2264,6 @@ class UI {
       
       UI.buffer.pop();
 
-      // Show color at reference position
-      //const currentColorSize = constrain(brushToVisualize.pxSize, 8, gadgetRadius/3);
       UI.drawVariedColorCircle(brushToVisualize, 40, ankerX, ankerY);
 
     } else if (Interaction.currentUI === Interaction.UI_STATES.size_open) {
@@ -2215,10 +2281,12 @@ class UI {
       UI.buffer.line(posX, lineTranslateY - UI.GIZMO_SIZE,posX, lineTranslateY + UI.GIZMO_SIZE);
       UI.buffer.noStroke();
 
+      const indicatorSize = brushToVisualize.finalPxSizeWithPressure(openPainting.averagePressure);
+
       UI.buffer.fill(brushToVisualize.color.toHexWithSetAlpha(0.5));
-      UI.buffer.ellipse(posX, ankerY, brushToVisualize.pxSize);
+      UI.buffer.ellipse(posX, ankerY, indicatorSize);
       UI.buffer.fill(brushToVisualize.color.hex);
-      UI.drawCrosshair(brushToVisualize.pxSize, posX, ankerY);
+      UI.drawCrosshair(indicatorSize, posX, ankerY);
     }
   }
 
