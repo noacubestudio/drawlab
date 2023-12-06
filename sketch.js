@@ -267,39 +267,42 @@ class Brushstroke {
 
     const rf = 2 * this.settings.colorVar * this.settings.colorVar; // randomness matches increasing variation
     const brushSize = this.settings.pxSize * (this.settings.texture === "Round" ? 0.7 : 1);
-    const strips = Math.floor(map(brushSize, 10, 300, 10, 200) * (this.settings.texture === "Round" ? 0.3 : 1));
+    const avgBrushSize = this.settings.finalPxSizeWithPressure(openPainting.averagePressure) ?? brushSize;
+    const strips = Math.floor(map(avgBrushSize, 10, 300, 10, 200) * (this.settings.texture === "Round" ? 0.7 : 1));
 
     // draw background shape
-    const lowSideLerpPart = HSLColor.symmetricalNoise(0 + end.seed) * 0.5 + 0.5;
-    const highSideLerpPart = HSLColor.symmetricalNoise(strips-1 + end.seed) * 0.5 + 0.5;
-    const lowSideMiddlePos = {x: lerp(start.x, end.x, lowSideLerpPart), y: lerp(start.y, end.y, lowSideLerpPart)};
-    const highSideMiddlePos = {x: lerp(start.x, end.x, highSideLerpPart), y: lerp(start.y, end.y, highSideLerpPart)};
+    if (this.settings.texture !== "Rake") {
+      const lowSideLerpPart = HSLColor.symmetricalNoise(0 + end.seed) * 0.5 + 0.5;
+      const highSideLerpPart = HSLColor.symmetricalNoise(strips-1 + end.seed) * 0.5 + 0.5;
+      const lowSideMiddlePos = {x: lerp(start.x, end.x, lowSideLerpPart), y: lerp(start.y, end.y, lowSideLerpPart)};
+      const highSideMiddlePos = {x: lerp(start.x, end.x, highSideLerpPart), y: lerp(start.y, end.y, highSideLerpPart)};
+  
+      const startEdgeVectorLower  = p5.Vector.fromAngle(start.azimuth, -0.5*brushSize*map(start.pressure, 0, 1, 0.1, 2.0, true));
+      const startEdgeVectorHigher = p5.Vector.fromAngle(start.azimuth, 0.5*brushSize*map(start.pressure, 0, 1, 0.1, 2.0, true));
+      const endEdgeVectorLower    = p5.Vector.fromAngle(end.azimuth, -0.5*brushSize*map(end.pressure, 0, 1, 0.1, 2.0, true));
+      const endEdgeVectorHigher   = p5.Vector.fromAngle(end.azimuth, 0.5*brushSize*map(end.pressure, 0, 1, 0.1, 2.0, true));
+      const midEdgeVectorLower    = p5.Vector.fromAngle(averageDirection, -0.5*brushSize*map(avgPressure, 0, 1, 0.1, 2.0, true));
+      const midEdgeVectorHigher   = p5.Vector.fromAngle(averageDirection, 0.5*brushSize*map(avgPressure, 0, 1, 0.1, 2.0, true));
+  
+      this.buffer.fill(this.settings.color.hex);
+      this.buffer.strokeWeight(1);
+      this.buffer.stroke(this.settings.color.toHexWithSetAlpha(0.5));
+      this.buffer.beginShape();
+      this.buffer.vertex(start.x + startEdgeVectorLower.x , start.y + startEdgeVectorLower.y );
+      this.buffer.vertex(start.x + startEdgeVectorHigher.x, start.y + startEdgeVectorHigher.y);
+      this.buffer.vertex(highSideMiddlePos.x + midEdgeVectorHigher.x, highSideMiddlePos.y + midEdgeVectorHigher.y);
+      this.buffer.vertex(end.x + endEdgeVectorHigher.x, end.y + endEdgeVectorHigher.y);
+      this.buffer.vertex(end.x + endEdgeVectorLower.x, end.y + endEdgeVectorLower.y);
+      this.buffer.vertex(lowSideMiddlePos.x + midEdgeVectorLower.x,    lowSideMiddlePos.y + midEdgeVectorLower.y);
+      this.buffer.vertex(start.x + startEdgeVectorLower.x , start.y + startEdgeVectorLower.y );
+      this.buffer.endShape();
+      this.buffer.noStroke();
+    }
 
-    const startEdgeVectorLower  = p5.Vector.fromAngle(start.azimuth, -0.5*brushSize*map(start.pressure, 0, 1, 0.1, 2.0, true));
-    const startEdgeVectorHigher = p5.Vector.fromAngle(start.azimuth, 0.5*brushSize*map(start.pressure, 0, 1, 0.1, 2.0, true));
-    const endEdgeVectorLower    = p5.Vector.fromAngle(end.azimuth, -0.5*brushSize*map(end.pressure, 0, 1, 0.1, 2.0, true));
-    const endEdgeVectorHigher   = p5.Vector.fromAngle(end.azimuth, 0.5*brushSize*map(end.pressure, 0, 1, 0.1, 2.0, true));
-    const midEdgeVectorLower    = p5.Vector.fromAngle(averageDirection, -0.5*brushSize*map(avgPressure, 0, 1, 0.1, 2.0, true));
-    const midEdgeVectorHigher   = p5.Vector.fromAngle(averageDirection, 0.5*brushSize*map(avgPressure, 0, 1, 0.1, 2.0, true));
-
-    this.buffer.fill(this.settings.color.hex);
-    this.buffer.strokeWeight(1);
-    this.buffer.stroke(this.settings.color.toHexWithSetAlpha(0.5));
-    this.buffer.beginShape();
-    this.buffer.vertex(start.x + startEdgeVectorLower.x , start.y + startEdgeVectorLower.y );
-    this.buffer.vertex(start.x + startEdgeVectorHigher.x, start.y + startEdgeVectorHigher.y);
-    this.buffer.vertex(highSideMiddlePos.x + midEdgeVectorHigher.x, highSideMiddlePos.y + midEdgeVectorHigher.y);
-    this.buffer.vertex(end.x + endEdgeVectorHigher.x, end.y + endEdgeVectorHigher.y);
-    this.buffer.vertex(end.x + endEdgeVectorLower.x, end.y + endEdgeVectorLower.y);
-    this.buffer.vertex(lowSideMiddlePos.x + midEdgeVectorLower.x,    lowSideMiddlePos.y + midEdgeVectorLower.y);
-    this.buffer.vertex(start.x + startEdgeVectorLower.x , start.y + startEdgeVectorLower.y );
-    this.buffer.endShape();
-    this.buffer.noStroke();
-
-    const sX = lerp(start.x, end.x, -0.05);
-    const sY = lerp(start.y, end.y, -0.05);
-    const eX = lerp(start.x, end.x, 1.05);
-    const eY = lerp(start.y, end.y, 1.05);
+    const sX = lerp(start.x, end.x, -0.02);
+    const sY = lerp(start.y, end.y, -0.02);
+    const eX = lerp(start.x, end.x, 1.02);
+    const eY = lerp(start.y, end.y, 1.02);
 
     for (let i = 0; i < strips; i++) {
 
