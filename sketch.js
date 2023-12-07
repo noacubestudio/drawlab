@@ -47,7 +47,7 @@ function setup() {
   const INITIAL_CANVAS_COLOR = new HSLColor(0.6, 0.1, 0.15);
   const smaller_side = Math.min(width, height);
   const INITIAL_CANVAS_DIMENSIONS = {
-    x: Math.round(smaller_side*0.9),
+    x: Math.round(smaller_side*0.9), //*(2/3) for vertical, WIP add formats.
     y: Math.round(smaller_side*0.9)
   }
   const INITIAL_BRUSH_SETTINGS = new BrushSettings(
@@ -63,29 +63,36 @@ function draw() {
   // behind everything
   background(openPainting.canvasColor.behind().hex);
 
+  push();
+ 
+  translate(Interaction.viewTransform.centerPos().x, Interaction.viewTransform.centerPos().y);
+  rotate(Interaction.viewTransform.rotation);
+
+  translate(-Interaction.viewTransform.scale * openPainting.width/2, -Interaction.viewTransform.scale * openPainting.height/2);
+
   // draw the painting buffers
-  drawCenteredCanvas(openPainting.oldStrokesBuffer);
+  drawScaledCanvas(openPainting.oldStrokesBuffer);
   openPainting.usedEditableStrokes.forEach((stroke) => {
-    drawCenteredCanvas(stroke.buffer);
+    drawScaledCanvas(stroke.buffer);
   });
+
+  pop();
 
   // draw the new UI to the buffer, then show on top of the screen
   UI.redrawInterface(); 
   image(UI.buffer, 0, 0);
 
 
-  function drawCenteredCanvas(buffer) {
+  function drawScaledCanvas(buffer) {
     if (Interaction.viewTransform.scale === 1) {
-      image(buffer, Interaction.viewTransform.flooredCornerX(), Interaction.viewTransform.flooredCornerY());
+      image(buffer, 0, 0);
       return;
     }
     const scaledSize = {
       x: Math.round(Interaction.viewTransform.scale * openPainting.width),
       y: Math.round(Interaction.viewTransform.scale * openPainting.height)
     };
-    image(buffer, Interaction.viewTransform.flooredCornerX(), Interaction.viewTransform.flooredCornerY(), 
-      scaledSize.x, scaledSize.y
-    );
+    image(buffer, 0, 0, scaledSize.x, scaledSize.y);
   }
 }
 
@@ -255,7 +262,7 @@ class Brushstroke {
     start.azimuth ??= end.azimuth;
     start.azimuth ??= p5.Vector.angleBetween(createVector(0, -1), createVector(end.x-start.x, end.y-start.y));
       end.azimuth ??= p5.Vector.angleBetween(createVector(0, -1), createVector(end.x-start.x, end.y-start.y));
-    const averageDirection = atan2(sin(start.azimuth)+sin(end.azimuth), cos(start.azimuth)+cos(end.azimuth));
+    const averageDirection = averageAngle(start.azimuth, end.azimuth);
 
       //if (start.pressure === 0.5) start.pressure = 0
       end.pressure ??= start.pressure;
@@ -585,10 +592,22 @@ class Interaction {
   // WIP, just defaults. these should really adapt
   static viewTransform = {
     scale: 1,
+    rotation: 0,
     panX: 0,
     panY: 0,
-    flooredCornerX: () => Math.floor(Interaction.viewTransform.panX + width /2 - (Math.round(openPainting.width*Interaction.viewTransform.scale))/2),
-    flooredCornerY: () => Math.floor(Interaction.viewTransform.panY + height/2 - (Math.round(openPainting.height*Interaction.viewTransform.scale))/2)
+    centerPos: () => {
+      // rotated around center and scaled, where is the corner?
+      // const point = rotatePoint(
+      //   (-openPainting.width/2)*Interaction.viewTransform.scale, 
+      //   (-openPainting.height/2)*Interaction.viewTransform.scale, 
+      //   Interaction.viewTransform.rotation
+      // );
+      // actually translate to center and add panning
+      return {
+        x: Interaction.viewTransform.panX + width/2, 
+        y: Interaction.viewTransform.panY + height/2
+      };
+    }
   };
 
   // temporary edit mode.
@@ -674,6 +693,15 @@ class Interaction {
     const zoomFactor = Math.pow(1.002, -event.deltaY);
 
     Interaction.zoomTo(new_interaction.x, new_interaction.y, zoomFactor);
+
+    //Interaction.rotateAround(new_interaction.x, new_interaction.y, 0.0001 * -event.deltaY);
+  }
+
+  static resetViewTransform() {
+    Interaction.viewTransform.scale = 1;
+    Interaction.viewTransform.panX = 0;
+    Interaction.viewTransform.panY = 0;
+    Interaction.viewTransform.rotation = 0;
   }
 
   static zoomTo(screenX, screenY, factor) {
@@ -682,18 +710,29 @@ class Interaction {
     Interaction.viewTransform.scale *= factor;
 
     // reset all if the zoom was too far out
-    if (Interaction.viewTransform.scale < 0.3) {
-      Interaction.viewTransform.scale = 1;
-      Interaction.viewTransform.panX = 0;
-      Interaction.viewTransform.panY = 0;
-      return;
-    }
+    // if (Interaction.viewTransform.scale < 0.3) {
+    //   Interaction.resetViewTransform();
+    //   return;
+    // }
 
     // add offset - subtract zoom position, scale, then add again.
     const screenXfromCenter = screenX - width / 2;
     const screenYfromCenter = screenY - height / 2;
     Interaction.viewTransform.panX = (Interaction.viewTransform.panX - screenXfromCenter) * factor + screenXfromCenter;
     Interaction.viewTransform.panY = (Interaction.viewTransform.panY - screenYfromCenter) * factor + screenYfromCenter;
+  }
+
+  static rotateAround(screenX, screenY, angle) {
+
+    // do the rotation
+    Interaction.viewTransform.rotation += angle;
+
+    //add offset - subtract rotation pivot, rotate, then add again.
+    const screenXfromCenter = screenX - width / 2 
+    const screenYfromCenter = screenY - height / 2; 
+    const rotatedPoint = rotatePoint(Interaction.viewTransform.panX - screenXfromCenter, Interaction.viewTransform.panY - screenYfromCenter, angle);
+    Interaction.viewTransform.panX = rotatedPoint.x + screenXfromCenter;
+    Interaction.viewTransform.panY = rotatedPoint.y + screenYfromCenter;
   }
 
   static keyStart(key) {
@@ -932,6 +971,10 @@ class Interaction {
       if (Interaction.currentType === Interaction.TYPES.painting.initStroke) {
         Interaction.currentType = Interaction.TYPES.painting.zoom;
         Interaction.currentSequence.push(new_interaction);
+      } else if (Interaction.currentType === Interaction.TYPES.painting.zoom) {
+        // third finger resets al transforms.
+        Interaction.resetViewTransform();
+        Interaction.currentSequence = [];
       }
       return;
     }
@@ -1008,26 +1051,38 @@ class Interaction {
         return;
       }
 
-      // get distance and average of the points.
+      // get distance, pre move position and angle through the points.
       const previousDistance = Interaction.distance2d(Interaction.currentSequence[0], Interaction.currentSequence[1]);
+      //const previousPosition = {x: Interaction.currentSequence[movedPoint].x, y: Interaction.currentSequence[movedPoint].y};
+      const previousAngle = pointsToAngle(
+        Interaction.currentSequence[0].x, Interaction.currentSequence[0].y,
+        Interaction.currentSequence[1].x, Interaction.currentSequence[1].y
+      );
       const previousAverage = {
         x: (Interaction.currentSequence[0].x + Interaction.currentSequence[1].x) / 2,
         y: (Interaction.currentSequence[0].y + Interaction.currentSequence[1].y) / 2,
       }
 
-      // update the points.
-      // replace a point
+      // update the point that changed
+      // which point moved?
+      let movedPoint = null;
       if (Interaction.currentSequence[0].id === event.pointerId) {
-        Interaction.currentSequence[0] = new_interaction;
+        movedPoint = 0;
       } else if (Interaction.currentSequence[1].id === event.pointerId) {
-        Interaction.currentSequence[1] = new_interaction;
+        movedPoint = 1;
       } else {
         console.log("could not find a point that corredsponds to one of the zoom touches!")
         return;
       }
+      Interaction.currentSequence[movedPoint] = new_interaction;
 
-      // get distance and average of the new points.
+      // get distance, average position and angle through the new points.
       const newDistance = Interaction.distance2d(Interaction.currentSequence[0], Interaction.currentSequence[1]);
+      //const newPosition = {x: Interaction.currentSequence[movedPoint].x, y: Interaction.currentSequence[movedPoint].y};
+      const newAngle = pointsToAngle(
+        Interaction.currentSequence[0].x, Interaction.currentSequence[0].y,
+        Interaction.currentSequence[1].x, Interaction.currentSequence[1].y
+      );
       const newAverage = {
         x: (Interaction.currentSequence[0].x + Interaction.currentSequence[1].x) / 2,
         y: (Interaction.currentSequence[0].y + Interaction.currentSequence[1].y) / 2,
@@ -1035,6 +1090,8 @@ class Interaction {
 
       // zoom on new center
       Interaction.zoomTo(newAverage.x, newAverage.y,  newDistance / previousDistance);
+      // rotate around new center
+      Interaction.rotateAround(newAverage.x, newAverage.y,  newAngle - previousAngle);
       // pan.
       Interaction.viewTransform.panX += newAverage.x - previousAverage.x;
       Interaction.viewTransform.panY += newAverage.y - previousAverage.y;
@@ -1233,8 +1290,8 @@ class Interaction {
 
       const last_interaction = Interaction.currentSequence[Interaction.currentSequence.length-1];
       const deltaMove = {
-        x: new_interaction.x - last_interaction.x,
-        y: new_interaction.y - last_interaction.y
+        x: new_interaction.addPaintingTransform().x - last_interaction.addPaintingTransform().x,
+        y: new_interaction.addPaintingTransform().y - last_interaction.addPaintingTransform().y
       }
       openPainting.moveLatestStroke(deltaMove.x, deltaMove.y);
       Interaction.currentSequence.push(new_interaction);
@@ -1486,10 +1543,17 @@ class Interaction {
 
   addPaintingTransform() {
     const modifiedInteraction = this.copy();
-    modifiedInteraction.x -= Interaction.viewTransform.flooredCornerX();
-    modifiedInteraction.y -= Interaction.viewTransform.flooredCornerY();
-    modifiedInteraction.x /= Interaction.viewTransform.scale;
-    modifiedInteraction.y /= Interaction.viewTransform.scale;
+
+    const positionFromCenter = {
+      x: modifiedInteraction.x - Interaction.viewTransform.centerPos().x, 
+      y: modifiedInteraction.y - Interaction.viewTransform.centerPos().y
+    };
+    const rotatedPosition = rotatePoint(positionFromCenter.x, positionFromCenter.y, -Interaction.viewTransform.rotation);
+    const scaledPosition = {x: rotatedPosition.x / Interaction.viewTransform.scale, y: rotatedPosition.y / Interaction.viewTransform.scale};
+    const fromPaintingCornerPosition = {x: scaledPosition.x + openPainting.width/2, y: scaledPosition.y + openPainting.height/2};
+
+    modifiedInteraction.x = fromPaintingCornerPosition.x;
+    modifiedInteraction.y = fromPaintingCornerPosition.y;
     return modifiedInteraction;
   }
 }
@@ -1842,12 +1906,13 @@ class UI {
       UI.buffer.text('gesture: '    + (Interaction.currentType ?? 'none'),            20, 100);
       UI.buffer.text('points: '     + (Interaction.currentSequence.length ?? 'none'), 20, 120);
       UI.buffer.text('zoom: '       + (Interaction.viewTransform.scale ?? 'none'),    20, 140);
-      UI.buffer.text('fps: '        + Math.round(frameRate()) + ", " + frameCount,    20, 160);
+      UI.buffer.text('rotation: '   + (Interaction.viewTransform.rotation ?? 'none'), 300,160);
+      //UI.buffer.text('fps: '        + Math.round(frameRate()) + ", " + frameCount,    20, 180);
 
       UI.buffer.text('scaleX: '+ Math.round(Interaction.viewTransform.scale * openPainting.width),  300, 80);
       UI.buffer.text('scaleY: '+ Math.round(Interaction.viewTransform.scale * openPainting.height), 300,100);
-      UI.buffer.text('posX: '+ Interaction.viewTransform.flooredCornerX(), 300, 120);
-      UI.buffer.text('posY: '+ Interaction.viewTransform.flooredCornerY(), 300, 140);
+      UI.buffer.text('posX: '+ Interaction.viewTransform.centerPos().x, 300, 120);
+      UI.buffer.text('posY: '+ Interaction.viewTransform.centerPos().y, 300, 140);
     
       if (Interaction.lastInteractionEnd !== null) {
         UI.buffer.stroke(new HSLColor(0.1, 1, 1.0).hex);
@@ -2320,8 +2385,10 @@ class UI {
   static screenToViewTransform() {
     // WIP. consider that this could be done by actually changing the coords, not using scale.
     // then these UI elements would stay crisp and lines equally sized on screen.
-    UI.buffer.translate(Interaction.viewTransform.flooredCornerX(), Interaction.viewTransform.flooredCornerY());
+    UI.buffer.translate(Interaction.viewTransform.centerPos().x, Interaction.viewTransform.centerPos().y);
     UI.buffer.scale(Interaction.viewTransform.scale)
+    UI.buffer.rotate(Interaction.viewTransform.rotation)
+    UI.buffer.translate(-openPainting.width/2, -openPainting.height/2);
   }
 
   static drawBounds(bounds) {
@@ -2353,6 +2420,12 @@ class UI {
 
 
 // math utils
+const pointsToAngle = (x1, y1, x2, y2) => Math.atan2(y2 - y1, x2 - x1);
+const averageAngle = (first, second) => Math.atan2(Math.sin(first)+Math.sin(second), Math.cos(first)+Math.cos(second));
+const rotatePoint = (x, y, angle) => ({
+  x: x * Math.cos(angle) - y * Math.sin(angle),
+  y: x * Math.sin(angle) + y * Math.cos(angle)
+});
 const easeInCirc = (x) => 1 - Math.sqrt(1 - Math.pow(x, 2));
 const easeOutCubic = (x) => 1 - Math.pow(1 - x, 3);
 const xorshift = (seed) => {
