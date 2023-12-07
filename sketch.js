@@ -249,17 +249,6 @@ class Brushstroke {
     } 
     if (start.x === end.x && start.y === end.y) return;
 
-    if (dev_mode) {
-      this.buffer.strokeWeight(6)
-      this.buffer.stroke(this.settings.getColorWithVar(end.seed).hex)
-      this.buffer.line(start.x, start.y, end.x, end.y)
-      this.buffer.stroke(this.settings.getColorWithVar(end.seed * 1.12134 + 30).hex)
-      this.buffer.line(start.x+7, start.y, end.x+7, end.y)
-      this.buffer.stroke(this.settings.getColorWithVar(end.seed * 1.2241 + 20).hex)
-      this.buffer.line(start.x+15, start.y, end.x+15, end.y)
-      return;
-    }
-
     start.azimuth ??= end.azimuth;
     start.azimuth ??= p5.Vector.angleBetween(createVector(0, -1), createVector(end.x-start.x, end.y-start.y));
       end.azimuth ??= p5.Vector.angleBetween(createVector(0, -1), createVector(end.x-start.x, end.y-start.y));
@@ -634,7 +623,9 @@ class Interaction {
   static currentSequence = [];
   static lastInteractionEnd = null;
 
-  static currentType = null;
+  static currentType = null; // actual type of the gesture
+  static typeAtCurrentElement = null; // starting/hover type if there is an element at the pointer
+
   // 'enum' of possible current interactions that gestures belong to
   static TYPES = {
     painting: {
@@ -931,7 +922,7 @@ class Interaction {
     }
   }
 
-  static wasSurfaceType(x, y) {
+  static typeFromCoords(x, y) {
     if (y < UI.BUTTON_HEIGHT) {
       const middle_width = UI.SLIDER_WIDTH * 3 + 120;
 
@@ -1026,12 +1017,13 @@ class Interaction {
       return;
     }
 
-    // tapped menu buttons
-    const surfaceType = Interaction.wasSurfaceType(new_interaction.x, new_interaction.y) ?? null;
+    // tapped on an element?
+    Interaction.typeAtCurrentElement = Interaction.typeFromCoords(new_interaction.x, new_interaction.y) ?? null;
+    
     // when no second pointer was already down
-    if (surfaceType !== null && !Interaction.isAlreadyDown) {
+    if (Interaction.typeAtCurrentElement !== null && !Interaction.isAlreadyDown) {
 
-      Interaction.currentType = surfaceType;
+      Interaction.currentType = Interaction.typeAtCurrentElement;
       if (Object.values(Interaction.TYPES.knob).includes(Interaction.currentType)) {
         // started on a knob
         Interaction.addToBrushHistory();
@@ -1147,11 +1139,15 @@ class Interaction {
 
     if (!event.isPrimary && event.pointerType === "touch") return;
 
+
+    // single pointer
+    // check if currently over an element, and return which.
+    Interaction.typeAtCurrentElement = Interaction.typeFromCoords(new_interaction.x, new_interaction.y);
+
     if (Object.values(Interaction.TYPES.button).includes(Interaction.currentType)) {
 
       // started on a button
-      const surfaceType = Interaction.wasSurfaceType(new_interaction.x, new_interaction.y);
-      if (surfaceType !== Interaction.currentType) {
+      if (Interaction.typeAtCurrentElement !== Interaction.currentType) {
         // if no longer on the button, reset 
         console.log("left the button")
         Interaction.currentType = null;
@@ -1189,9 +1185,8 @@ class Interaction {
       // default, because no pointer down or last interaction was cancelled.
       // if pointerMove happens in this state, it starts the hover interaction which leaves a trace behind
 
-      // check if over a button
-      const surfaceType = Interaction.wasSurfaceType(new_interaction.x, new_interaction.y) ?? null;
-      if (surfaceType !== null) {
+      // only if not over an element
+      if (Interaction.typeAtCurrentElement !== null) {
         return;
       }
 
@@ -1202,9 +1197,8 @@ class Interaction {
 
     } else if (Interaction.currentType === Interaction.TYPES.painting.hover) {
 
-      // check if hover over a button
-      const surfaceType = Interaction.wasSurfaceType(new_interaction.x, new_interaction.y) ?? null;
-      if (surfaceType !== null) {
+      // stop if hover goes over an element
+      if (Interaction.typeAtCurrentElement !== null) {
         Interaction.currentType = null;
         Interaction.currentSequence = [];
         return;
@@ -1412,6 +1406,7 @@ class Interaction {
     if (!event.isPrimary && event.pointerType === "touch") return;
 
     const new_interaction = Interaction.fromEvent(event);
+    Interaction.typeAtCurrentElement = null;
 
     if (Object.values(Interaction.TYPES.button).includes(Interaction.currentType)) {
 
@@ -1697,7 +1692,11 @@ class HSLColor {
    * Create a copy of the current color that is darker and limited in saturation.
    */
   behind() {
-    return new HSLColor(this.h, Math.min(this.s, 0.2), this.l * 0.8, this.a);
+    return new HSLColor(this.h, Math.min(this.s, 0.5), this.l * 0.7, this.a);
+  }
+
+  brighter() {
+    return new HSLColor(this.h, this.s, Math.min(this.l + 0.2, 1), this.a);
   }
 
   varyComponents(seed, chaos = 0.5) {
@@ -1817,13 +1816,13 @@ class UI {
     UI.buffer.textFont(FONT_MEDIUM);
   
     const noEditableStrokes = (openPainting.editableStrokesCount === 0);
-    UI.drawButton("undo" ,       UI.BUTTON_WIDTH*0, 0, noEditableStrokes ? UI.palette.fgDisabled : UI.palette.fg);
-    UI.drawButton("edit" ,       UI.BUTTON_WIDTH*1, 0, Interaction.editingLastStroke || noEditableStrokes ? UI.palette.fgDisabled : UI.palette.fg);
-    UI.drawButton("clear", width-UI.BUTTON_WIDTH*2, 0, noEditableStrokes ? UI.palette.fgDisabled : UI.palette.warning);
-    UI.drawButton("save" , width-UI.BUTTON_WIDTH*1, 0, UI.palette.fg);
+    UI.drawButton("undo" ,       UI.BUTTON_WIDTH*0, 0, Interaction.TYPES.button.undo , noEditableStrokes ? UI.palette.fgDisabled : UI.palette.fg);
+    UI.drawButton("edit" ,       UI.BUTTON_WIDTH*1, 0, Interaction.TYPES.button.edit , Interaction.editingLastStroke || noEditableStrokes ? UI.palette.fgDisabled : UI.palette.fg);
+    UI.drawButton("clear", width-UI.BUTTON_WIDTH*2, 0, Interaction.TYPES.button.clear, noEditableStrokes ? UI.palette.fgDisabled : UI.palette.warning);
+    UI.drawButton("save" , width-UI.BUTTON_WIDTH*1, 0, Interaction.TYPES.button.save , UI.palette.fg);
 
     if (width > UI.MOBILE_WIDTH_BREAKPOINT) {
-      UI.drawButton("help" , width-UI.BUTTON_WIDTH, height-UI.BUTTON_HEIGHT, UI.showingHelp ? UI.palette.fgDisabled : UI.palette.fg);
+      UI.drawButton("help" , width-UI.BUTTON_WIDTH, height-UI.BUTTON_HEIGHT, Interaction.TYPES.button.help, UI.showingHelp ? UI.palette.fgDisabled : UI.palette.fg);
     }
     
     UI.buffer.textAlign(LEFT);
@@ -1883,38 +1882,42 @@ class UI {
       UI.drawGradientSlider(sliderStart+UI.SLIDER_WIDTH  , 0, UI.SLIDER_WIDTH, UI.BUTTON_HEIGHT, baseColor.copy().setSaturation(0), baseColor.copy().setSaturation(1), correctlyFlippedSaturation, "double");
       UI.drawGradientSlider(sliderStart+UI.SLIDER_WIDTH*2, 0, UI.SLIDER_WIDTH, UI.BUTTON_HEIGHT, baseColor.copy().setHue(0+openPainting.hueRotation), baseColor.copy().setHue(1+openPainting.hueRotation), rotatedBaseHue, "wrap");
   
-      // show difference
-      const settingsChangeInteractions = [...Object.values(Interaction.TYPES.knob),...Object.values(Interaction.TYPES.slider)];
-      if (settingsChangeInteractions.includes(Interaction.currentType) && openPainting.previousBrush !== undefined) {
-        const prevColor = openPainting.previousBrush.color;
-  
-        if (Interaction.currentType === Interaction.TYPES.slider.lightness) {
-          UI.drawSliderChange(
-            sliderStart, 0, UI.SLIDER_WIDTH, UI.BUTTON_HEIGHT, 
-            prevColor.copy().setLightness(0), prevColor.copy().setLightness(1), 
-            prevColor.lightness, baseColor.lightness, 
-            "L " + Math.floor(baseColor.lightness * 100) + "%"
-          );
-        } else if (Interaction.currentType === Interaction.TYPES.slider.saturation) {
-          UI.drawSliderChange(
-            sliderStart + UI.SLIDER_WIDTH, 0, UI.SLIDER_WIDTH, UI.BUTTON_HEIGHT, 
-            prevColor.copy().setSaturation(0), prevColor.copy().setSaturation(1), 
-            prevColor.saturation, (openPainting.hueRotation === 0) ? (1 + baseColor.saturation)/2 : (1 - baseColor.saturation)/2,
-            "S " + ((openPainting.hueRotation === 0) ? "" : "-") +  Math.floor(baseColor.saturation * 100) + "%", "double"
-          );
-        } if (Interaction.currentType === Interaction.TYPES.slider.hue) {
-          UI.drawSliderChange(
-            sliderStart + UI.SLIDER_WIDTH*2, 0, UI.SLIDER_WIDTH, UI.BUTTON_HEIGHT, 
-            prevColor.copy().setHue(0+openPainting.hueRotation), prevColor.copy().setHue(1+openPainting.hueRotation), 
-            (prevColor.hue+openPainting.hueRotation) % 1, (baseColor.hue+openPainting.hueRotation) % 1, 
-            "H " + Math.floor(baseColor.hue * 360) + "°"
-          );
-        } else if (Interaction.currentType === Interaction.TYPES.knob.jitter) {
-          UI.drawTooltipBelow(sliderStart + UI.SLIDER_WIDTH*3+30, UI.BUTTON_HEIGHT, Math.round(openPainting.brushSettingsToAdjust.colorVar * 100) + "%");
-        } else if (Interaction.currentType === Interaction.TYPES.knob.size) {
-          UI.drawTooltipBelow(sliderStart - 30, UI.BUTTON_HEIGHT, Math.round(openPainting.brushSettingsToAdjust.pxSize) + "px");
-        }
+      // show tooltip
+      const relevantElements = [...Object.values(Interaction.TYPES.knob),...Object.values(Interaction.TYPES.slider)];
+      // display the hover for whichever slider is currently interacted with. If none, show regular hover state.
+      const currentElement = relevantElements.includes(Interaction.currentType) ? Interaction.currentType : Interaction.typeAtCurrentElement;
+
+      if (currentElement === Interaction.TYPES.slider.lightness) {
+
+        const x = sliderStart + baseColor.lightness * UI.SLIDER_WIDTH;
+        const text = "L " + Math.floor(baseColor.lightness * 100) + "%";
+        UI.drawTooltipBelow(x, UI.BUTTON_HEIGHT, text);
+
+      } else if (currentElement === Interaction.TYPES.slider.saturation) {
+
+        const horizontalOfSlider = (openPainting.hueRotation === 0) ? (1 + baseColor.saturation)/2 : (1 - baseColor.saturation)/2;
+        const x = sliderStart + horizontalOfSlider * UI.SLIDER_WIDTH + UI.SLIDER_WIDTH;
+        const text = "S " + ((openPainting.hueRotation === 0) ? "" : "-") +  Math.floor(baseColor.saturation * 100) + "%";
+        UI.drawTooltipBelow(x, UI.BUTTON_HEIGHT, text);
+
+
+      } if (currentElement === Interaction.TYPES.slider.hue) {
+
+        const horizontalOfSlider = (baseColor.hue+openPainting.hueRotation) % 1;
+        const x = sliderStart + horizontalOfSlider * UI.SLIDER_WIDTH + UI.SLIDER_WIDTH * 2;
+        const text = "H " + Math.floor(baseColor.hue * 360) + "°";
+        UI.drawTooltipBelow(x, UI.BUTTON_HEIGHT, text);
+
+      } else if (currentElement === Interaction.TYPES.knob.jitter) {
+
+        UI.drawTooltipBelow(sliderStart + UI.SLIDER_WIDTH*3+30, UI.BUTTON_HEIGHT, Math.round(openPainting.brushSettingsToAdjust.colorVar * 100) + "%");
+
+      } else if (currentElement === Interaction.TYPES.knob.size) {
+
+        UI.drawTooltipBelow(sliderStart - 30, UI.BUTTON_HEIGHT, Math.round(openPainting.brushSettingsToAdjust.pxSize) + "px");
+
       }
+      
 
       // draw the variation knob
       UI.buffer.drawingContext.save();
@@ -1985,8 +1988,9 @@ class UI {
       UI.buffer.text('ui: '         + (Interaction.currentUI ?? 'none'),              20,  80);
       UI.buffer.text('gesture: '    + (Interaction.currentType ?? 'none'),            20, 100);
       UI.buffer.text('points: '     + (Interaction.currentSequence.length ?? 'none'), 20, 120);
-      UI.buffer.text('zoom: '       + (Interaction.viewTransform.scale ?? 'none'),    20, 140);
-      UI.buffer.text('rotation: '   + (Interaction.viewTransform.rotation ?? 'none'), 300,160);
+      UI.buffer.text('on ui: '      + (Interaction.typeAtCurrentElement ?? 'none'),   20, 140);
+      UI.buffer.text('zoom: '       + (Interaction.viewTransform.scale ?? 'none'),    20, 160);
+      UI.buffer.text('rotation: '   + (Interaction.viewTransform.rotation ?? 'none'), 20, 180);
       //UI.buffer.text('fps: '        + Math.round(frameRate()) + ", " + frameCount,    20, 180);
 
       UI.buffer.text('scaleX: '+ Math.round(Interaction.viewTransform.scale * openPainting.width),  300, 80);
@@ -2083,8 +2087,10 @@ class UI {
     UI.buffer.textAlign(LEFT);
   }
 
-  static drawButton(text, x, y, textColor) {
-    UI.buffer.fill(UI.palette.constrastBg.toHexWithSetAlpha(0.5));
+  static drawButton(text, x, y, type, textColor) {
+    const isHover = (type === Interaction.typeAtCurrentElement);
+    const bgColor = UI.palette.constrastBg
+    UI.buffer.fill(isHover ? bgColor.brighter().toHexWithSetAlpha(0.5) : bgColor.toHexWithSetAlpha(0.5));
     UI.buffer.rect(
       x+UI.ELEMENT_MARGIN, y+UI.ELEMENT_MARGIN, 
       UI.BUTTON_WIDTH-UI.ELEMENT_MARGIN*2, UI.BUTTON_HEIGHT-UI.ELEMENT_MARGIN*2, 
