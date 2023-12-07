@@ -1,6 +1,8 @@
 // init in setup()
 let openPainting = undefined;
 
+let dev_mode = false;
+
 const PRESET_TOOLS = [
   {tool: "Brush Tool", texture: "Regular", menuName: "Default"},
   {tool: "Brush Tool", texture: "Rake",    menuName: "Rake" },
@@ -247,8 +249,7 @@ class Brushstroke {
     } 
     if (start.x === end.x && start.y === end.y) return;
 
-    // dev version
-    if (false) {
+    if (dev_mode) {
       this.buffer.strokeWeight(6)
       this.buffer.stroke(this.settings.getColorWithVar(end.seed).hex)
       this.buffer.line(start.x, start.y, end.x, end.y)
@@ -316,7 +317,7 @@ class Brushstroke {
       const drawThisStrip = (this.settings.texture !== "Rake" || i % 3 == 0 || i == strips-1)
 
       if (drawThisStrip) {
-        const lowerSide = i/strips - 0.5;
+        const lowerSide = i/strips - 0.5; 
         const higherSide = (i+1)/strips - 0.5;
 
         const lerpPart = HSLColor.symmetricalNoise(i + end.seed) * 0.5 + 0.5;
@@ -350,10 +351,10 @@ class Brushstroke {
             this.buffer.fill(brushCol.hex);
             //this.buffer.stroke(brushCol.hex);
             this.buffer.beginShape();
-            randomizedVertex(this.buffer, sX, startEdgeVectorLower.x ,    sY, startEdgeVectorLower.y , rf);
-            randomizedVertex(this.buffer, sX, startEdgeVectorHigher.x,    sY, startEdgeVectorHigher.y, rf);
-            randomizedVertex(this.buffer, middleX, midEdgeVectorHigher.x, middleY, midEdgeVectorHigher.y,   rf);
-            randomizedVertex(this.buffer, middleX, midEdgeVectorLower.x,  middleY, midEdgeVectorLower.y,    rf);
+            this.randomizedVertex(this.buffer, sX, startEdgeVectorLower.x ,    sY, startEdgeVectorLower.y ,    rf);
+            this.randomizedVertex(this.buffer, sX, startEdgeVectorHigher.x,    sY, startEdgeVectorHigher.y,    rf);
+            this.randomizedVertex(this.buffer, middleX, midEdgeVectorHigher.x, middleY, midEdgeVectorHigher.y, rf);
+            this.randomizedVertex(this.buffer, middleX, midEdgeVectorLower.x,  middleY, midEdgeVectorLower.y,  rf);
             this.buffer.endShape();
           }
         // }
@@ -376,22 +377,22 @@ class Brushstroke {
             this.buffer.fill(brushCol2.hex);
             //this.buffer.stroke(brushCol2.hex);
             this.buffer.beginShape();
-            randomizedVertex(this.buffer, middleX, midEdgeVectorLower.x , middleY, midEdgeVectorLower.y , rf);
-            randomizedVertex(this.buffer, middleX, midEdgeVectorHigher.x, middleY, midEdgeVectorHigher.y, rf);
-            randomizedVertex(this.buffer, eX  , endEdgeVectorHigher.x, eY  , endEdgeVectorHigher.y, rf);
-            randomizedVertex(this.buffer, eX  , endEdgeVectorLower.x , eY  , endEdgeVectorLower.y , rf);
+            this.randomizedVertex(this.buffer, middleX, midEdgeVectorLower.x , middleY, midEdgeVectorLower.y , rf);
+            this.randomizedVertex(this.buffer, middleX, midEdgeVectorHigher.x, middleY, midEdgeVectorHigher.y, rf);
+            this.randomizedVertex(this.buffer, eX  , endEdgeVectorHigher.x, eY  , endEdgeVectorHigher.y, rf);
+            this.randomizedVertex(this.buffer, eX  , endEdgeVectorLower.x , eY  , endEdgeVectorLower.y , rf);
             this.buffer.endShape();
           }
         // }
       }
     }
+  }
 
-    function randomizedVertex(buffer, x, xOff, y, yOff, randomFactor) {
-      buffer.vertex(
-        x + xOff + HSLColor.symmetricalNoise(x*4 + xOff*2) * randomFactor, 
-        y + yOff + HSLColor.symmetricalNoise(y*4 + yOff*2) * randomFactor
-      );
-    }
+  randomizedVertex(buffer, x, xOff, y, yOff, randomFactor) {
+    buffer.vertex(
+      x + xOff + HSLColor.symmetricalNoise(x*4 + xOff*2) * randomFactor, 
+      y + yOff + HSLColor.symmetricalNoise(y*4 + yOff*2) * randomFactor
+    );
   }
 }
 
@@ -610,11 +611,14 @@ class Interaction {
     }
   };
 
+  static pressedKeys = new Set();
+
   // temporary edit mode.
   // if true, sliders and gizmos etc. will modify the last stroke
   // rather than the brush settings for the upcoming one
   static editingLastStroke = false;
   static hueRotationBeforeEditing = null;
+
   static UI_STATES = {
     nothing_open: 'default',
     eyedropper_open: 'eyedropper',
@@ -627,10 +631,10 @@ class Interaction {
 
   // store just the current interaction sequence
   // clear array if the type changes or pointers are added/removed
-  static currentType = null;
   static currentSequence = [];
   static lastInteractionEnd = null;
 
+  static currentType = null;
   // 'enum' of possible current interactions that gestures belong to
   static TYPES = {
     painting: {
@@ -649,7 +653,8 @@ class Interaction {
       tool0: '0',
       tool1: '1',
       tool2: '2',
-      help: 'helpButton'
+      help: 'helpButton',
+      fill: ' fillButton'
     },
     knob: {
       jitter: 'jitterKnob',
@@ -690,11 +695,17 @@ class Interaction {
     event.preventDefault();
     const new_interaction = Interaction.fromEvent(event);
 
+    // check if keys are held
+    const pressedKeysArr = Array.from(Interaction.pressedKeys);
+    if (pressedKeysArr.length === 1 && pressedKeysArr[0] === 'Shift') {
+      // rotate
+      Interaction.rotateAround(new_interaction.x, new_interaction.y, 0.001 * -event.deltaY);
+      return;
+    } 
+
+    // zoom
     const zoomFactor = Math.pow(1.002, -event.deltaY);
-
     Interaction.zoomTo(new_interaction.x, new_interaction.y, zoomFactor);
-
-    //Interaction.rotateAround(new_interaction.x, new_interaction.y, 0.0001 * -event.deltaY);
   }
 
   static resetViewTransform() {
@@ -736,10 +747,16 @@ class Interaction {
   }
 
   static keyStart(key) {
-    console.log("pressed " + key);
 
-    //Interaction.clearAction();
-    if (key === "r") {
+    // if a pointer is currently down, don't even register most keys and just do nothing.
+    const validWhileDown = ["Shift"];
+    if (!validWhileDown.includes(key) && Interaction.currentType !== Interaction.TYPES.painting.hover && Interaction.currentType !== null) return;
+
+    // otherwise, keep track of which key was pressed and react to the keypress.
+    Interaction.pressedKeys.add(key);
+    if (dev_mode) console.log('Keys held:', Array.from(Interaction.pressedKeys).join(', '));
+
+    if (key === "f") {
       Interaction.rotateHueAction();
       Interaction.currentUI = Interaction.UI_STATES.nothing_open;
       //console.log('rotate to: '+ openPainting.hueRotation, 'current hue: '+ openPainting.currentBrush.color.hue);
@@ -770,6 +787,14 @@ class Interaction {
     } else if (key === "4") {
       Interaction.addToBrushHistory();
       Interaction.currentUI = Interaction.UI_STATES.eyedropper_open;
+    } else if (key === "r") {
+      Interaction.resetViewTransform();
+      Interaction.currentUI = Interaction.UI_STATES.nothing_open;
+      Interaction.resetCurrentSequence();
+    } else if (key === "h") {
+      Interaction.toggleHelp();
+      Interaction.currentUI = Interaction.UI_STATES.nothing_open;
+      Interaction.resetCurrentSequence();
     }
   }
 
@@ -778,12 +803,17 @@ class Interaction {
     if (Interaction.currentSequence.length > 0) {
       Interaction.lastInteractionEnd = Interaction.currentSequence[Interaction.currentSequence.length-1];
     } else {
-      console.log("no current point, so nothing to keep")
+      if (dev_mode) console.log("last interaction was not overwritten")
     }
     Interaction.currentSequence = [];
   }
 
   static keyEnd(key) {
+
+    if (!Interaction.pressedKeys.has(key)) return; //key was never doing anything to begin with
+
+    Interaction.pressedKeys.delete(key);
+
     Interaction.currentUI = Interaction.UI_STATES.nothing_open;
 
     if (key === "4") {
@@ -819,10 +849,13 @@ class Interaction {
   }
 
   static clearAction() {
-    const prevCanvasColor = openPainting.canvasColor.copy();
-    openPainting.canvasColor = openPainting.currentBrush.color.copy();
-    openPainting.currentBrush.color = prevCanvasColor.copy();
+    Interaction.stopEditing();
+    openPainting.clearWithColor(openPainting.canvasColor);
+  }
 
+  static fillAction() {
+    Interaction.stopEditing();
+    openPainting.canvasColor = openPainting.currentBrush.color.copy();
     openPainting.clearWithColor(openPainting.canvasColor);
     document.body.style.backgroundColor = openPainting.canvasColor.behind().hex;
   }
@@ -865,6 +898,11 @@ class Interaction {
     openPainting.hueRotation %= 1;
     const rotatedHue = openPainting.brushSettingsToAdjust.color.hue + 0.5;
     openPainting.brushSettingsToAdjust.color.setHue(rotatedHue % 1);
+
+    if (Interaction.editingLastStroke) {
+      openPainting.redrawLatestStroke();
+      Interaction.stopEditing();
+    }
   }
 
   static processSlider(new_interaction) {
@@ -942,17 +980,26 @@ class Interaction {
       }
     }
 
-    if (x < 80 && Interaction.currentUI === Interaction.UI_STATES.clover_open) {
-      const toolsY = y - height/2 + (PRESET_TOOLS.length * UI.BUTTON_HEIGHT)/2;
+    if ((x < 100 || x > width-100) && Interaction.currentUI === Interaction.UI_STATES.clover_open) {
+      const toolsY = y - UI.BUTTON_WIDTH * 2; // how far down these buttons start
       const toolIndex = Math.floor(toolsY / UI.BUTTON_HEIGHT);
 
-      if (toolIndex === 0) {
-        return Interaction.TYPES.button.tool0;
-      } else if (toolIndex === 1) {
-        return Interaction.TYPES.button.tool1;
-      } else if (toolIndex === 2) {
-        return Interaction.TYPES.button.tool2;
+      if (x<100) {
+        // left side
+        if (toolIndex === 0) {
+          return Interaction.TYPES.button.tool0;
+        } else if (toolIndex === 1) {
+          return Interaction.TYPES.button.tool1;
+        } else if (toolIndex === 2) {
+          return Interaction.TYPES.button.tool2;
+        }
+      } else {
+        // right side
+        if (toolIndex === 0) {
+          return Interaction.TYPES.button.fill;
+        }
       }
+      
     }
 
     if (x > width - UI.BUTTON_WIDTH && y > height - UI.BUTTON_HEIGHT && width > UI.MOBILE_WIDTH_BREAKPOINT) {
@@ -1109,6 +1156,7 @@ class Interaction {
         console.log("left the button")
         Interaction.currentType = null;
         Interaction.currentSequence = [new_interaction];
+        Interaction.currentUI = Interaction.UI_STATES.nothing_open;
       }
 
     } else if (Object.values(Interaction.TYPES.knob).includes(Interaction.currentType)) {
@@ -1367,6 +1415,7 @@ class Interaction {
 
     if (Object.values(Interaction.TYPES.button).includes(Interaction.currentType)) {
 
+      Interaction.currentUI = Interaction.UI_STATES.nothing_open;
       // ended on button
       if (Interaction.currentType === Interaction.TYPES.button.undo) {
         Interaction.undoAction();
@@ -1378,12 +1427,14 @@ class Interaction {
         Interaction.saveAction();
       } else if (Interaction.currentType === Interaction.TYPES.button.help) {
         Interaction.toggleHelp();
-      }if (Interaction.currentType === Interaction.TYPES.button.tool0) {
+      } else if (Interaction.currentType === Interaction.TYPES.button.tool0) {
         Interaction.pickToolAction(0);
-      } if (Interaction.currentType === Interaction.TYPES.button.tool1) {
+      } else if (Interaction.currentType === Interaction.TYPES.button.tool1) {
         Interaction.pickToolAction(1);
-      } if (Interaction.currentType === Interaction.TYPES.button.tool2) {
+      } else if (Interaction.currentType === Interaction.TYPES.button.tool2) {
         Interaction.pickToolAction(2);
+      } else if (Interaction.currentType === Interaction.TYPES.button.fill) {
+        Interaction.fillAction();
       }
       Interaction.resetCurrentSequence();
     } 
@@ -1451,7 +1502,7 @@ class Interaction {
 
     } else {
       // was hover or none
-      console.log("just resetting since the pointerEnd had no specific interaction: it was of type " + Interaction.currentType);
+      if (dev_mode) console.log("pointerEnd with unknown type: " + Interaction.currentType);
       Interaction.resetCurrentSequence();
     }
   }
@@ -1723,7 +1774,8 @@ class UI {
     fg: undefined,
     fgDisabled: undefined,
     constrastBg: undefined,
-    onBrush: undefined
+    onBrush: undefined,
+    warning: undefined
   };
 
   static redrawInterface() {
@@ -1744,15 +1796,20 @@ class UI {
     UI.palette.onBrush = openPainting.currentBrush.color.copy()
       .setLightness(lerp(openPainting.currentBrush.color.lightness, (openPainting.currentBrush.color.lightness>0.5) ? 0:1, 0.7))
       .setSaturation(openPainting.currentBrush.color.saturation * 0.5);
+    UI.palette.warning = new HSLColor(0.1, 0.8, (UI.palette.fg.lightness > 0.5) ? 0.7 : 0.4);
     
     // MENUS
-    // brush menu
+    // when clover open
     if (Interaction.currentUI === Interaction.UI_STATES.clover_open) {
+      // tool buttons on left
       PRESET_TOOLS.forEach((preset, index) => {
         const x = 0;
-        const y = height/2 + UI.BUTTON_HEIGHT * (-PRESET_TOOLS.length*0.5 + index);
+        const y = UI.BUTTON_HEIGHT * index + 2 * UI.BUTTON_WIDTH; // lower by two button widths
         UI.displayTool(preset.tool, preset.texture, x, y, preset.menuName);
       });
+
+      // menu on right
+      UI.drawRightButton("fill all", UI.BUTTON_HEIGHT * 0 + 2*UI.BUTTON_WIDTH, UI.palette.warning);
     }
   
     // top menu buttons
@@ -1762,7 +1819,7 @@ class UI {
     const noEditableStrokes = (openPainting.editableStrokesCount === 0);
     UI.drawButton("undo" ,       UI.BUTTON_WIDTH*0, 0, noEditableStrokes ? UI.palette.fgDisabled : UI.palette.fg);
     UI.drawButton("edit" ,       UI.BUTTON_WIDTH*1, 0, Interaction.editingLastStroke || noEditableStrokes ? UI.palette.fgDisabled : UI.palette.fg);
-    UI.drawButton("clear", width-UI.BUTTON_WIDTH*2, 0, new HSLColor(0.1, 0.8, (UI.palette.fg.lightness > 0.5) ? 0.7 : 0.4));
+    UI.drawButton("clear", width-UI.BUTTON_WIDTH*2, 0, noEditableStrokes ? UI.palette.fgDisabled : UI.palette.warning);
     UI.drawButton("save" , width-UI.BUTTON_WIDTH*1, 0, UI.palette.fg);
 
     if (width > UI.MOBILE_WIDTH_BREAKPOINT) {
@@ -1882,9 +1939,32 @@ class UI {
     UI.buffer.textAlign(LEFT);
 
     if (UI.showingHelp) {
+      UI.buffer.fill(UI.palette.bg.hex);
+      UI.buffer.stroke(UI.palette.constrastBg.hex);
+      const helpShortcuts = {
+        "H ": "Toggle shortcuts help",
+        "1 ": "Lightness and Saturation",
+        "2 ": "Hue and Variation",
+        "3 ": "Brush size",
+        "4 ": "Eyedropper",
+        "U ": "Undo last",
+        "E ": "Edit last",
+        "S ": "Save image",
+        "R ": "Reset view",
+        "F ": "Flip hue",
+        "Click to toggle menu": "",
+        "Scroll to zoom": "",
+        "Shift + scroll to rotate": ""
+      }
+      const helpWindowWidth = 240;
+      const helpWindowHeight = 30 * Object.keys(helpShortcuts).length;
+      UI.buffer.rect(width - helpWindowWidth - UI.ELEMENT_MARGIN*3, height - UI.BUTTON_HEIGHT - helpWindowHeight - UI.ELEMENT_MARGIN*3, 
+        helpWindowWidth + UI.ELEMENT_MARGIN*2, helpWindowHeight + UI.ELEMENT_MARGIN*2, UI.ELEMENT_RADIUS);
       UI.buffer.fill(UI.palette.fg.hex);
-      const controlsInfo = "Keyboard: 1-[Value] 2-[Hue] 3-[Size] 4-[Eyedrop] U-[Undo] E-[Edit] S-[Save]";
-      UI.buffer.text(controlsInfo, 20, height - 20 - 12);
+      Object.keys(helpShortcuts).forEach((keyString, index) => {
+        UI.buffer.text(keyString, width - helpWindowWidth, 4 + height - UI.BUTTON_HEIGHT - helpWindowHeight + index * 30);
+        UI.buffer.text(helpShortcuts[keyString], width - helpWindowWidth + 20, 4 + height - UI.BUTTON_HEIGHT - helpWindowHeight + index * 30);
+      });
     }
   
     // draw rectangle around stroke being edited
@@ -1898,7 +1978,7 @@ class UI {
     }
     
     // DEV STUFF, WIP
-    if (false) {
+    if (dev_mode) {
       UI.buffer.strokeWeight(2);
       UI.buffer.fill(UI.palette.fg.hex)
       UI.buffer.textAlign(LEFT);
@@ -1966,18 +2046,18 @@ class UI {
     UI.buffer.translate(x, y);
 
     UI.buffer.fill(UI.palette.constrastBg.toHexWithSetAlpha(isSelected ? 0.2 : 1));
-    UI.buffer.rect(0, UI.ELEMENT_MARGIN/2, 100, UI.BUTTON_HEIGHT-UI.ELEMENT_MARGIN, 0, UI.ELEMENT_RADIUS, UI.ELEMENT_RADIUS, 0);
+    UI.buffer.rect(0, UI.ELEMENT_MARGIN, 100, UI.BUTTON_HEIGHT-UI.ELEMENT_MARGIN*2, 0, UI.ELEMENT_RADIUS, UI.ELEMENT_RADIUS, 0);
 
     // draw example
     // wip, not sure why the angle 86 even makes sense.
-    const start = new BrushPoint(0, 30, 86, undefined);
+    const start = new BrushPoint(-20, 30, 86, undefined);
     const end = new BrushPoint(80, 30, 86, undefined);
     
     new Brushstroke(UI.buffer, settings).drawPart(start, end);
 
     UI.buffer.noStroke();
     UI.buffer.fill(UI.palette.constrastBg.toHexWithSetAlpha(isSelected ? 0.8 : 0.3));
-    UI.buffer.rect(0, UI.ELEMENT_MARGIN/2, 100, UI.BUTTON_HEIGHT-UI.ELEMENT_MARGIN, 0, UI.ELEMENT_RADIUS, UI.ELEMENT_RADIUS, 0);
+    UI.buffer.rect(0, UI.ELEMENT_MARGIN, 100, UI.BUTTON_HEIGHT-UI.ELEMENT_MARGIN*2, 0, UI.ELEMENT_RADIUS, UI.ELEMENT_RADIUS, 0);
 
     UI.buffer.textAlign(CENTER);
     UI.buffer.fill(isSelected ? UI.palette.fgDisabled.hex : UI.palette.fg.hex);
@@ -1988,6 +2068,30 @@ class UI {
     UI.buffer.pop();
 
     UI.buffer.textAlign(LEFT);
+  }
+
+  static drawRightButton(text, y, textColor) {
+    UI.buffer.fill(UI.palette.constrastBg.toHexWithSetAlpha(0.5));
+    UI.buffer.rect(
+      width - 100, y+UI.ELEMENT_MARGIN, 
+      100, UI.BUTTON_HEIGHT-UI.ELEMENT_MARGIN*2, 
+      UI.ELEMENT_RADIUS, 0, 0, UI.ELEMENT_RADIUS
+    );
+    UI.buffer.fill(textColor.hex);
+    UI.buffer.textAlign(CENTER);
+    UI.buffer.text(text, width - 100, y, 100, UI.BUTTON_HEIGHT - 8);
+    UI.buffer.textAlign(LEFT);
+  }
+
+  static drawButton(text, x, y, textColor) {
+    UI.buffer.fill(UI.palette.constrastBg.toHexWithSetAlpha(0.5));
+    UI.buffer.rect(
+      x+UI.ELEMENT_MARGIN, y+UI.ELEMENT_MARGIN, 
+      UI.BUTTON_WIDTH-UI.ELEMENT_MARGIN*2, UI.BUTTON_HEIGHT-UI.ELEMENT_MARGIN*2, 
+      UI.ELEMENT_RADIUS,
+    );
+    UI.buffer.fill(textColor.hex);
+    UI.buffer.text(text, x, y, UI.BUTTON_WIDTH, UI.BUTTON_HEIGHT - 8);
   }
 
   static drawPalette(settingsArray, x, y, tileWidth, tileHeight) {
@@ -2009,17 +2113,6 @@ class UI {
     });
 
     UI.buffer.drawingContext.restore();
-  }
-
-  static drawButton(text, x, y, textColor) {
-    UI.buffer.fill(UI.palette.constrastBg.toHexWithSetAlpha(0.5));
-    UI.buffer.rect(
-      x+UI.ELEMENT_MARGIN, y+UI.ELEMENT_MARGIN, 
-      UI.BUTTON_WIDTH-UI.ELEMENT_MARGIN*2, UI.BUTTON_HEIGHT-UI.ELEMENT_MARGIN*2, 
-      UI.ELEMENT_RADIUS,
-    );
-    UI.buffer.fill(textColor.hex);
-    UI.buffer.text(text, x, y, UI.BUTTON_WIDTH, UI.BUTTON_HEIGHT - 8);
   }
 
   static drawVariedColorCircle(brush, size, x, y) {
