@@ -72,12 +72,26 @@ function draw() {
 
   translate(-Interaction.viewTransform.scale * openPainting.width/2, -Interaction.viewTransform.scale * openPainting.height/2);
 
+
   // draw the painting buffers
+
+  const scaledSize = {
+    x: Math.round(Interaction.viewTransform.scale * openPainting.width),
+    y: Math.round(Interaction.viewTransform.scale * openPainting.height)
+  };
+
+  // in rounded rectangle area
+  drawingContext.save();
+  fill(openPainting.canvasColor.hex);
+  rect(0, 0, scaledSize.x, scaledSize.y, UI.ELEMENT_RADIUS/2);
+  drawingContext.clip();
+
   drawScaledCanvas(openPainting.oldStrokesBuffer);
   openPainting.usedEditableStrokes.forEach((stroke) => {
     drawScaledCanvas(stroke.buffer);
   });
 
+  drawingContext.restore();
   pop();
 
   // draw the new UI to the buffer, then show on top of the screen
@@ -90,10 +104,6 @@ function draw() {
       image(buffer, 0, 0);
       return;
     }
-    const scaledSize = {
-      x: Math.round(Interaction.viewTransform.scale * openPainting.width),
-      y: Math.round(Interaction.viewTransform.scale * openPainting.height)
-    };
     image(buffer, 0, 0, scaledSize.x, scaledSize.y);
   }
 }
@@ -2282,13 +2292,14 @@ class UI {
 
       UI.buffer.fill(openPainting.currentBrush.color.hex);
       const position = Interaction.currentSequence[Interaction.currentSequence.length-1];
+      const size = UI.GIZMO_SIZE*0.3;
 
       // when actually eyedropping
       if (Interaction.currentType === Interaction.TYPES.painting.eyedropper) {
-        UI.drawVariedColorCircle(openPainting.currentBrush, openPainting.currentBrush.pxSize, position.x, position.y);
+        UI.drawVariedColorCircle(openPainting.currentBrush, size, position.x, position.y - size*1.2);
       }
       
-      UI.drawCrosshair(openPainting.currentBrush.pxSize, position.x, position.y);
+      UI.drawCrosshair(size * 0.5, position.x, position.y);
 
     }
 
@@ -2308,39 +2319,75 @@ class UI {
 
     if (Interaction.currentUI === Interaction.UI_STATES.clover_open) {
 
-      UI.buffer.textAlign(CENTER);
-      UI.buffer.textStyle(BOLD);
+      const outerSize = 140;
+
+      // draw background shape
+      //const gradient = UI.buffer.drawingContext.createRadialGradient(basePosition.x, basePosition.y, 0, basePosition.x, basePosition.y, outerSize/2);
+      //gradient.addColorStop(0.95, UI.palette.constrastBg.hex); //center
+      //gradient.addColorStop(1, 'transparent'); //edge
+
+      UI.buffer.drawingContext.save();
+      //UI.buffer.drawingContext.fillStyle = gradient;
+      UI.buffer.fill(UI.palette.constrastBg.hex);
+      UI.buffer.ellipse(basePosition.x, basePosition.y, outerSize, outerSize);
+      UI.buffer.drawingContext.clip();
+      UI.buffer.strokeWeight(1);
+      UI.buffer.stroke(UI.palette.fg.toHexWithSetAlpha(0.2));
+      UI.buffer.line(basePosition.x - outerSize/2, basePosition.y - outerSize/2, basePosition.x + outerSize/2, basePosition.y + outerSize/2);
+      UI.buffer.line(basePosition.x - outerSize/2, basePosition.y + outerSize/2, basePosition.x + outerSize/2, basePosition.y - outerSize/2);
       UI.buffer.noStroke();
+      UI.buffer.drawingContext.restore();
+
+      UI.buffer.drawingContext.save();
+      UI.buffer.drawingContext.beginPath();
+      UI.buffer.drawingContext.arc(basePosition.x, basePosition.y, 10, 0, 2 * Math.PI);
+      UI.buffer.drawingContext.clip();
+      UI.buffer.drawingContext.clearRect(0, 0, width, height);
+      UI.buffer.drawingContext.restore();
+
+
 
       function drawGadgetDirection(x, y, xDir, yDir, isActive, text) {
         const size = 54;
         const centerOffset = 40;
-        if (isActive) {
-          UI.buffer.fill(UI.palette.fg.hex);
-          UI.buffer.ellipse(x+centerOffset*xDir, y+centerOffset*yDir, size, size);
-          UI.buffer.fill(UI.palette.constrastBg.hex);
-        } else {
-          UI.buffer.fill(UI.palette.constrastBg.hex);
-          UI.buffer.ellipse(x+centerOffset*xDir, y+centerOffset*yDir, size, size);
-          UI.buffer.fill(UI.palette.fg.hex);
-        }
-        
+
+        // if (isActive) {
+        //   UI.buffer.fill(UI.palette.fg.hex);
+        //   UI.buffer.ellipse(x+centerOffset*xDir, y+centerOffset*yDir, size, size);
+        //   UI.buffer.fill(UI.palette.constrastBg.hex);
+        // } else {
+        //   UI.buffer.fill(UI.palette.constrastBg.hex);
+        //   UI.buffer.ellipse(x+centerOffset*xDir, y+centerOffset*yDir, size, size);
+        //   UI.buffer.fill(UI.palette.fg.hex);
+        // }
 
         const posX = x+centerOffset*xDir;
         const posY = y+centerOffset*yDir;
         // icons or text
         if (text === "H") {
+          UI.buffer.stroke(UI.palette.fg.toHexWithSetAlpha(0.2));
+          UI.buffer.strokeWeight(8);
+          UI.buffer.line(posX, posY - size/3, posX, posY + size/3);
           UI.drawColorAxis(6, posX, posY - size/3, posX, posY + size/3, brushToVisualize.color, brushToVisualize.color, size, 1.0, 0.0);
 
+          UI.buffer.stroke(UI.palette.fg.toHexWithSetAlpha(0.2));
+          UI.buffer.strokeWeight(8);
+          UI.buffer.line(posX - size/3, posY, posX + size/3, posY);
           const startColorHue = brushToVisualize.color.copy().setHue(brushToVisualize.color.hue - 0.5); 
           const endColorHue   = brushToVisualize.color.copy().setHue(brushToVisualize.color.hue + 0.5);
           UI.drawColorAxis(6, posX - size/3, posY, posX + size/3, posY, startColorHue, endColorHue, size);
 
         } else if (text === "LC") {
+          UI.buffer.stroke(UI.palette.fg.toHexWithSetAlpha(0.2));
+          UI.buffer.strokeWeight(8);
+          UI.buffer.line(posX, posY - size/3, posX, posY + size/3);
           const startColorSat = brushToVisualize.color.copy().setSaturation(0);
           const endColorSat   = brushToVisualize.color.copy().setSaturation(1);
           UI.drawColorAxis(6, posX - size/3, posY, posX + size/3, posY, startColorSat, endColorSat, size);
           
+          UI.buffer.stroke(UI.palette.fg.toHexWithSetAlpha(0.2));
+          UI.buffer.strokeWeight(8);
+          UI.buffer.line(posX - size/3, posY, posX + size/3, posY);
           const startColorLum = brushToVisualize.color.copy().setLightness(1);
           const endColorLum   = brushToVisualize.color.copy().setLightness(0);
           UI.drawColorAxis(6, posX, posY - size/3, posX, posY + size/3, startColorLum, endColorLum, size);
@@ -2365,7 +2412,7 @@ class UI {
 
         UI.buffer.noStroke();
         UI.buffer.fill(brushToVisualize.color.hex);
-        UI.buffer.ellipse(posX, posY, size/4, size/4);
+        UI.buffer.ellipse(posX, posY, size/5, size/5);
       }
 
       // WIP: the false means none of these will be highlighted.
