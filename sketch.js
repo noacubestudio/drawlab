@@ -675,10 +675,6 @@ class Interaction {
     }
   };
 
-  static get middleUIVisible() {
-    return (width > 980);
-  }
-
   static get isAlreadyDown() {
     return (Interaction.currentType !== null && Interaction.currentType !== Interaction.TYPES.painting.hover);
   }
@@ -686,6 +682,7 @@ class Interaction {
   static adjustCanvasSize(windowWidth, windowHeight) {
     resizeCanvas(windowWidth, windowHeight);
     UI.buffer.resizeCanvas(width, height);
+    UI.updateDimensionsForBreakpoint(width, height);
   }
 
   static lostFocus() {
@@ -912,7 +909,7 @@ class Interaction {
     const middle_width = UI.SLIDER_WIDTH * 3 + 120;
     const xInMiddleSection = new_interaction.x - width/2 + middle_width/2;
     const brushToAdjust = openPainting.brushSettingsToAdjust;
-    const percentOfSlider = (sliderNumber) => map(xInMiddleSection - 60 - UI.SLIDER_WIDTH * sliderNumber, UI.ELEMENT_MARGIN, UI.SLIDER_WIDTH-UI.ELEMENT_MARGIN, 0, 1);
+    const percentOfSlider = (sliderNumber) => map(xInMiddleSection - 60 - UI.SLIDER_WIDTH * sliderNumber, UI.SLIDER_RANGE_MARGIN, UI.SLIDER_WIDTH-UI.SLIDER_RANGE_MARGIN, 0, 1);
 
     if (Interaction.currentType === Interaction.TYPES.slider.lightness) {
       const newValue = constrain(percentOfSlider(0), 0, 1);
@@ -954,7 +951,7 @@ class Interaction {
         // second to last
         return Interaction.TYPES.button.clear;
 
-      } else if (Interaction.middleUIVisible) {
+      } else if (UI.showingSlidersAndKnobs) {
 
         const xInMiddleSection = x - width/2 + middle_width/2;
         if (xInMiddleSection > 0) {
@@ -1775,7 +1772,23 @@ class UI {
 
   static BUTTON_WIDTH = 80;
   static BUTTON_HEIGHT = 60;
-  static SLIDER_WIDTH = 200 + UI.ELEMENT_MARGIN * 2;
+
+  // sliders can be dragged over a 200 pixel range that corresponds to 0-1, but are a bit wider
+  // so that they include the start and end color with the width of one half of the slider height.
+  // this would make especially much sense for completely rounded sliders, but feels better to me in general.
+  // the button height already contains the UI.ELEMENT_MARGIN, which was previously added to the slider width instead.
+  
+  static SLIDER_RANGE_MARGIN = 20; // can't be too low, or the slider roundness intersects.
+  static SLIDER_WIDTH = 200 + UI.SLIDER_RANGE_MARGIN*2; 
+  
+  static updateDimensionsForBreakpoint(width, height) {
+    const maxSpaceForActualRange = (width - UI.BUTTON_HEIGHT*2 - UI.BUTTON_WIDTH*4) / 3 - UI.SLIDER_RANGE_MARGIN*2;
+    UI.SLIDER_WIDTH = (maxSpaceForActualRange > 200 ? 200 : 100) + UI.SLIDER_RANGE_MARGIN*2; 
+  }
+
+  static get showingSlidersAndKnobs() {
+    return (width > UI.BUTTON_HEIGHT*2 + UI.BUTTON_WIDTH*4 + UI.SLIDER_WIDTH*3);
+  }
 
   // state
   static showingHelp = false;
@@ -1842,7 +1855,7 @@ class UI {
   
     // draw the sliders and knobs at the top
     const sliderStart = width/2 - UI.SLIDER_WIDTH * 1.5;
-    if (Interaction.middleUIVisible) {
+    if (UI.showingSlidersAndKnobs) {
 
       // bg
       UI.buffer.fill(UI.palette.constrastBg.hex);
@@ -1889,17 +1902,18 @@ class UI {
       const relevantElements = [...Object.values(Interaction.TYPES.knob),...Object.values(Interaction.TYPES.slider)];
       // display the hover for whichever slider is currently interacted with. If none, show regular hover state.
       const currentElement = relevantElements.includes(Interaction.currentType) ? Interaction.currentType : Interaction.typeAtCurrentElement;
+      const tooltipXinSlider = (percent) => map(percent, 0, 1, UI.SLIDER_RANGE_MARGIN, UI.SLIDER_WIDTH-UI.SLIDER_RANGE_MARGIN);
 
       if (currentElement === Interaction.TYPES.slider.lightness) {
 
-        const x = sliderStart + baseColor.lightness * UI.SLIDER_WIDTH;
+        const x = sliderStart + tooltipXinSlider(baseColor.lightness);
         const text = "L " + Math.floor(baseColor.lightness * 100) + "%";
         UI.drawTooltipBelow(x, UI.BUTTON_HEIGHT, text);
 
       } else if (currentElement === Interaction.TYPES.slider.saturation) {
 
         const horizontalOfSlider = (openPainting.hueRotation === 0) ? (1 + baseColor.saturation)/2 : (1 - baseColor.saturation)/2;
-        const x = sliderStart + horizontalOfSlider * UI.SLIDER_WIDTH + UI.SLIDER_WIDTH;
+        const x = sliderStart + tooltipXinSlider(horizontalOfSlider) + UI.SLIDER_WIDTH;
         const text = "S " + ((openPainting.hueRotation === 0) ? "" : "-") +  Math.floor(baseColor.saturation * 100) + "%";
         UI.drawTooltipBelow(x, UI.BUTTON_HEIGHT, text);
 
@@ -1907,7 +1921,7 @@ class UI {
       } if (currentElement === Interaction.TYPES.slider.hue) {
 
         const horizontalOfSlider = (baseColor.hue+openPainting.hueRotation) % 1;
-        const x = sliderStart + horizontalOfSlider * UI.SLIDER_WIDTH + UI.SLIDER_WIDTH * 2;
+        const x = sliderStart + tooltipXinSlider(horizontalOfSlider) + UI.SLIDER_WIDTH * 2;
         const text = "H " + Math.floor(baseColor.hue * 360) + "°";
         UI.drawTooltipBelow(x, UI.BUTTON_HEIGHT, text);
 
@@ -2219,17 +2233,13 @@ class UI {
     UI.buffer.strokeCap(ROUND);
   }
 
-  static drawSliderChange(x, y, w, h, start, end, componentBefore, componentAfter, componentName, sliderType) {
-    //UI.drawGradientSlider(x, y, w, h/6, start, end, componentBefore, gradientType);
-    UI.drawTooltipBelow(x + componentAfter * w, h, componentName, sliderType);
-  }
-
   static drawGradientSlider(x, y, width, height, startColor, endColor, sliderPercent, sliderType) {
 
     width -= UI.ELEMENT_MARGIN * 2;
     height -= UI.ELEMENT_MARGIN * 2;
     x += UI.ELEMENT_MARGIN;
     y += UI.ELEMENT_MARGIN;
+    const outside_range_of_width = (UI.SLIDER_RANGE_MARGIN - UI.ELEMENT_MARGIN) / width;
 
     if (sliderPercent !== 1) sliderPercent = sliderPercent % 1;
 
@@ -2242,7 +2252,7 @@ class UI {
 
     if (sliderType === "double") {
       for (let i = 0; i < segments; i++) {
-        const colorLerpAmt = ((i + 0.5) / segments) * 2 - 1;
+        const colorLerpAmt = map((i + 0.5)/segments, outside_range_of_width, 1-outside_range_of_width, -1, 1, true);
         const lerpedColor = ((colorLerpAmt * (openPainting.hueRotation === 0 ? 1 : -1)) > 0) 
           ? HSLColor.lerpColorInHSL(startColor, endColor, Math.abs(colorLerpAmt))
           : HSLColor.lerpColorInHSL(startColor.copy().setHue((startColor.hue + 0.5) % 1), endColor.copy().setHue((endColor.hue + 0.5) % 1), Math.abs(colorLerpAmt));
@@ -2252,7 +2262,7 @@ class UI {
       }  
     } else {
       for (let i = 0; i < segments; i++) {
-        const colorLerpAmt = (i + 0.5) / segments;
+        const colorLerpAmt = map((i + 0.5)/segments, outside_range_of_width, 1-outside_range_of_width, 0, 1, sliderType !== "wrap");
         const lerpedColor = HSLColor.lerpColorInHSL(startColor, endColor, colorLerpAmt);
     
         UI.buffer.fill(lerpedColor.hex);
@@ -2260,24 +2270,29 @@ class UI {
       }  
     }
 
-    // circle
-    UI.buffer.noFill();
+    // slider handle
+    const handleWidth = UI.SLIDER_RANGE_MARGIN*2 - UI.ELEMENT_MARGIN*2 - 10;
+    const handleHeight = height -10;
+    const handleX = x - handleWidth/2 + width * map(sliderPercent, 0, 1, outside_range_of_width, 1-outside_range_of_width);
+    const handleY = y - handleHeight/2 + height / 2;
+    const handleRoundness = UI.ELEMENT_RADIUS - 5;
 
+    UI.buffer.noFill();
     UI.buffer.strokeWeight(4);
     UI.buffer.stroke(new HSLColor(0,0,0,0.8).hex);
-    UI.buffer.ellipse(x + width * sliderPercent, y + height / 2, 32, 32);
+    UI.buffer.rect(handleX, handleY, handleWidth, handleHeight, handleRoundness);
     UI.buffer.strokeWeight(2);
     UI.buffer.stroke(new HSLColor(0,0,1,0.8).hex);
-    UI.buffer.ellipse(x + width * sliderPercent, y + height / 2, 30, 30);
+    UI.buffer.rect(handleX+1, handleY+1, handleWidth-2, handleHeight-2, handleRoundness-1);
 
     if (sliderType === "wrap") {
-      const wrapPos = x + width * sliderPercent + (sliderPercent < 0.5 ? width : - width);
+      const wrapPos = handleX + (sliderPercent < 0.5 ? 1 : -1) * width * (1-outside_range_of_width*2);
       UI.buffer.strokeWeight(4);
       UI.buffer.stroke(new HSLColor(0,0,0,0.8).hex);
-      UI.buffer.ellipse(wrapPos, y + height / 2, 32, 32);
+      UI.buffer.rect(wrapPos, handleY, handleWidth, handleHeight, handleRoundness);
       UI.buffer.strokeWeight(2);
       UI.buffer.stroke(new HSLColor(0,0,1,0.8).hex);
-      UI.buffer.ellipse(wrapPos, y + height / 2, 30, 30);
+      UI.buffer.rect(wrapPos+1, handleY+1, handleWidth-2, handleHeight-2, handleRoundness-1);
     }
 
     UI.buffer.drawingContext.restore();
