@@ -83,6 +83,8 @@ function draw() {
   // in rounded rectangle area
   drawingContext.save();
   fill(openPainting.canvasColor.hex);
+  strokeWeight(2)
+  stroke(new HSLColor(0,0,0,0.5).hex);
   rect(0, 0, scaledSize.x, scaledSize.y, UI.ELEMENT_RADIUS/2);
   drawingContext.clip();
 
@@ -1871,19 +1873,10 @@ class UI {
       UI.buffer.rect(sliderStart - 60 + UI.ELEMENT_MARGIN, UI.ELEMENT_MARGIN, 60 - UI.ELEMENT_MARGIN*2, UI.BUTTON_HEIGHT - UI.ELEMENT_MARGIN*2, UI.ELEMENT_RADIUS);
       UI.buffer.noStroke();
 
-      // show average pressure
-      const indicatorSize = openPainting.brushSettingsToAdjust.finalPxSizeWithPressure(openPainting.averagePressure);
-
-      // circle overlay
-      UI.buffer.noFill();
-      UI.buffer.strokeWeight(4);
-      UI.buffer.stroke(UI.palette.constrastBg.toHexWithSetAlpha(0.2));
-      UI.buffer.ellipse(sliderStart - 30, UI.BUTTON_HEIGHT / 2, indicatorSize-2, indicatorSize-2);
-      UI.buffer.strokeWeight(2);
-      UI.buffer.stroke(UI.palette.fg.toHexWithSetAlpha(0.5));
-      UI.buffer.ellipse(sliderStart - 30, UI.BUTTON_HEIGHT / 2, indicatorSize, indicatorSize);
-      UI.buffer.noStroke();
-
+      // show average pressure with overlay
+      const indicatorSize = openPainting.brushSettingsToAdjust.finalPxSizeWithPressure(openPainting.averagePressure) * Interaction.viewTransform.scale;
+      UI.drawSizeOverlay(sliderStart - 30, UI.BUTTON_HEIGHT / 2, indicatorSize)
+      
       // sliders
       let baseColor = openPainting.brushSettingsToAdjust.color;
       const rotatedBaseHue = (baseColor.hue+openPainting.hueRotation) % 1;
@@ -1948,9 +1941,9 @@ class UI {
       UI.drawPalette(openPainting.previousBrushes, width/2, UI.BUTTON_HEIGHT + 10, 30, 10);
     }
   
-    // bottom left/ top middle text
     UI.buffer.textAlign(LEFT);
 
+    // help window
     if (UI.showingHelp) {
       UI.buffer.fill(UI.palette.bg.hex);
       UI.buffer.stroke(UI.palette.constrastBg.hex);
@@ -1990,7 +1983,7 @@ class UI {
       UI.drawCurrentGizmo();
     }
     
-    // DEV STUFF, WIP
+    // DEV STUFF, normally not visible
     if (dev_mode) {
       UI.buffer.strokeWeight(2);
       UI.buffer.fill(UI.palette.fg.hex)
@@ -2042,10 +2035,21 @@ class UI {
     const startInteraction = Interaction.currentSequence[Interaction.currentSequence.length-2];
     const endInteraction = Interaction.currentSequence[Interaction.currentSequence.length-1];
 
-    const start = new BrushPoint(startInteraction.x, startInteraction.y, startInteraction.angle);
-    const end = new BrushPoint(endInteraction.x, endInteraction.y, endInteraction.angle);
+    // translate to end, save difference
+    UI.buffer.push();
+    UI.buffer.translate(endInteraction.x, endInteraction.y);
+    UI.buffer.scale(Interaction.viewTransform.scale);
+
+    const deltaPosition = {
+      x: endInteraction.x - startInteraction.x,
+      y: endInteraction.y - startInteraction.y
+    }
+
+    const start = new BrushPoint(-deltaPosition.x, -deltaPosition.y, startInteraction.angle);
+    const end = new BrushPoint(0, 0, endInteraction.angle);
 
     new Brushstroke(UI.buffer, openPainting.currentBrush.copy()).drawPart(start, end);
+    UI.buffer.pop();
   }
 
   static displayTool(menuBrushTool, menuTexture, x, y, menuName) {
@@ -2162,15 +2166,28 @@ class UI {
   static drawSizeIndicator(x, y, pressure) {
     UI.buffer.push();
     UI.buffer.translate(x, y);
+    UI.buffer.scale(Interaction.viewTransform.scale);
     //UI.buffer.rotate(-Math.PI * 0.25);
 
     // draw example
     // not sure why the angle 86 even makes sense.
-    const start = new BrushPoint(-40, 0, 86, pressure);
-    const end = new BrushPoint(40, 0, 86, pressure);
-    new Brushstroke(UI.buffer, openPainting.brushSettingsToAdjust).drawPart(start, end);
+    const start = new BrushPoint(-40/Interaction.viewTransform.scale, 0, 86, pressure);
+    const end = new BrushPoint(40/Interaction.viewTransform.scale, 0, 86, pressure);
+    const settings = openPainting.brushSettingsToAdjust; //.copy();
+    new Brushstroke(UI.buffer, settings).drawPart(start, end);
     
     UI.buffer.pop();
+  }
+
+  static drawSizeOverlay(x, y, size) {
+    UI.buffer.noFill();
+    UI.buffer.strokeWeight(4);
+    UI.buffer.stroke(UI.palette.constrastBg.toHexWithSetAlpha(0.2));
+    UI.buffer.ellipse(x, y, size-2, size-2);
+    UI.buffer.strokeWeight(2);
+    UI.buffer.stroke(UI.palette.fg.toHexWithSetAlpha(0.5));
+    UI.buffer.ellipse(x, y, size, size);
+    UI.buffer.noStroke();
   }
 
   static drawColorAxis(thickness, xStart, yStart, xEnd, yEnd, startColor, endColor, radius, startVar = 0, endVar = 0) {
@@ -2299,7 +2316,7 @@ class UI {
         UI.drawVariedColorCircle(openPainting.currentBrush, size, position.x, position.y - size*1.2);
       }
       
-      UI.drawCrosshair(size * 0.5, position.x, position.y);
+      UI.drawCrosshair(position.x, position.y, size * 0.5);
 
     }
 
@@ -2495,16 +2512,14 @@ class UI {
       UI.buffer.line(posX, lineTranslateY - UI.GIZMO_SIZE,posX, lineTranslateY + UI.GIZMO_SIZE);
       UI.buffer.noStroke();
 
-      const indicatorSize = brushToVisualize.finalPxSizeWithPressure(openPainting.averagePressure);
+      const visualSize = brushToVisualize.finalPxSizeWithPressure(openPainting.averagePressure) * Interaction.viewTransform.scale;
 
-      UI.buffer.fill(brushToVisualize.color.toHexWithSetAlpha(0.5));
-      UI.buffer.ellipse(posX, ankerY, indicatorSize);
-      UI.buffer.fill(brushToVisualize.color.hex);
-      UI.drawCrosshair(indicatorSize, posX, ankerY);
+      UI.drawSizeOverlay(posX, ankerY, visualSize);
+      UI.drawCrosshair(posX, ankerY, visualSize);
     }
   }
 
-  static drawCrosshair(size, x, y) {
+  static drawCrosshair(x, y, size) {
     const expand_size = Math.min(25, size * 0.4);
 
     //shadow ver
