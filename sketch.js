@@ -45,6 +45,8 @@ function setup() {
   document.addEventListener("keyup", (event) => Interaction.keyEnd(event.key));
   window.addEventListener("resize", () => Interaction.adjustCanvasSize(windowWidth, windowHeight));
 
+  document.body.style.cursor = 'crosshair';
+
   // initialize new painting
   const INITIAL_CANVAS_COLOR = new HSLColor(0.6, 0.1, 0.15);
   const smaller_side = Math.min(width, height);
@@ -419,6 +421,7 @@ class Painting {
     this.hueRotation = 0;
     this.previousHueRotation = 0;
     this.averagePressure = undefined;
+    this.totalStrokesCount = 0;
 
     this.clearWithColor(backgroundColor); // WIP, this is currently missing anything for display density
   }
@@ -458,6 +461,7 @@ class Painting {
       stroke.reset();
     });
     this.editableStrokesInUse = 0;
+    this.totalStrokesCount = 0;
   }
 
   applyOldestStroke() {
@@ -481,7 +485,8 @@ class Painting {
   startStroke(brushSettings) {
     if (this.editableStrokesInUse > 0) this.averagePressure = this.latestStroke.averagePressureInLast(20);
     if (this.editableStrokesInUse > this.editableStrokes.length - 1) this.applyOldestStroke();
-    this.editableStrokesInUse += 1;
+    this.editableStrokesInUse++;
+    this.totalStrokesCount++;
     //console.log("started new stroke:", this.editableStrokesInUse);
     const currentStroke = this.editableStrokes[this.editableStrokesInUse-1];
     currentStroke.reset();
@@ -510,6 +515,7 @@ class Painting {
     }
     this.latestStroke.reset();
     this.editableStrokesInUse--;
+    this.totalStrokesCount--;
     console.log(this.editableStrokesInUse, "editable strokes still present.")
   }
 
@@ -666,6 +672,12 @@ class Interaction {
       hueAndVar: 'hueAndVarGizmo',
       satAndLum: 'satAndLumGizmo',
       size: 'sizeGizmo',
+    },
+    cloverButton: {
+      hueAndVar: 'hueAndVarButton',
+      satAndLum: 'satAndLumButton',
+      size: 'sizeButton',
+      eyedropper: 'eyeDropperButton'
     }
   };
 
@@ -1000,7 +1012,46 @@ class Interaction {
       return Interaction.TYPES.button.help;
     }
 
+    // clover buttons
+    if (Interaction.currentUI === Interaction.UI_STATES.clover_open) {
+      const deltaFromCenter = {
+        x: x - Interaction.lastInteractionEnd.x,
+        y: y - Interaction.lastInteractionEnd.y
+      };
+      if (Math.abs(deltaFromCenter.x) < 10 && Math.abs(deltaFromCenter.y) < 10) {
+        return null; // near center
+      }
+      if (Math.abs(deltaFromCenter.x) > Math.abs(deltaFromCenter.y)) {
+        // horizontal
+        if (deltaFromCenter.x < 0) {
+          return Interaction.TYPES.cloverButton.size;
+        } 
+        return Interaction.TYPES.cloverButton.hueAndVar;
+      } else {
+        // vertical
+        if (deltaFromCenter.y < 0) {
+          return Interaction.TYPES.cloverButton.eyedropper;
+        } 
+        return Interaction.TYPES.cloverButton.satAndLum;
+      }
+    }
+
     return null;
+  }
+
+  static isAboveDragThreshhold(sequence) {
+    if (sequence.length < 2) return false;
+
+    const totalDeltaTime = sequence[sequence.length-1].timeStamp - sequence[0].timeStamp;
+    const boxDistance = Interaction.distance2d(sequence[sequence.length-1], sequence[0]);
+    const totalDistance = sequence.reduce((sum, currentPoint, index, arr) => {
+      if (index < arr.length - 1) {
+        return sum + Interaction.distance2d(currentPoint, arr[index + 1]);
+      }
+      return sum;
+    }, 0);
+
+    return (totalDeltaTime > 200 || totalDistance > 10 || boxDistance > 4);
   }
 
   static pointerStart(event) {
@@ -1027,18 +1078,29 @@ class Interaction {
     if (Interaction.typeAtCurrentElement !== null && !Interaction.isAlreadyDown) {
 
       Interaction.currentType = Interaction.typeAtCurrentElement;
+
       if (Object.values(Interaction.TYPES.knob).includes(Interaction.currentType)) {
+
         // started on a knob
         Interaction.addToBrushHistory();
         Interaction.currentSequence = [new_interaction];
+
       } else if (Object.values(Interaction.TYPES.slider).includes(Interaction.currentType)) {
+
         // started on a slider
         Interaction.addToBrushHistory();
         Interaction.currentSequence = [new_interaction];
         Interaction.currentUI = Interaction.UI_STATES.nothing_open;
         Interaction.processSlider(new_interaction); // change the color
-      } else {
+        
+      } else if (Object.values(Interaction.TYPES.button).includes(Interaction.currentType)) {
+
         Interaction.currentSequence = [new_interaction];
+
+      } else if (Object.values(Interaction.TYPES.cloverButton).includes(Interaction.currentType)) {
+
+        Interaction.currentSequence = [new_interaction];
+
       }
       return;
     }
@@ -1221,84 +1283,71 @@ class Interaction {
         Interaction.currentSequence.push(new_interaction);
       }
 
+    } else if (Object.values(Interaction.TYPES.cloverButton).includes(Interaction.currentType)) {
+
+      // dragging over a clover button starts this mode.
+      // switch to gizmo if dragged far enough.
+      
+      Interaction.currentSequence.push(new_interaction);
+      if (Interaction.isAboveDragThreshhold(Interaction.currentSequence)) {
+        if (Interaction.currentType === Interaction.TYPES.cloverButton.size) {
+
+          // start size gizmo
+          Interaction.addToBrushHistory();
+          Interaction.currentUI = Interaction.UI_STATES.size_open;
+          Interaction.currentType = Interaction.TYPES.gizmo.size;
+          Interaction.currentSequence = [Interaction.currentSequence[0]]; //start with just the last point as reference
+
+        } else if (Interaction.currentType === Interaction.TYPES.cloverButton.hueAndVar) {
+
+          // start hue and var gizmo
+          Interaction.addToBrushHistory();
+          Interaction.currentUI = Interaction.UI_STATES.hueAndVar_open;
+          Interaction.currentType = Interaction.TYPES.gizmo.hueAndVar;
+          Interaction.currentSequence = [Interaction.currentSequence[0]]; //start with just the last point as reference
+
+        } else if (Interaction.currentType === Interaction.TYPES.cloverButton.eyedropper) {
+
+          // start eyedropper
+          Interaction.addToBrushHistory();
+          Interaction.currentType = Interaction.TYPES.painting.eyedropper;
+          Interaction.currentUI = Interaction.UI_STATES.eyedropper_open;
+          Interaction.currentSequence = [Interaction.currentSequence[0]]; //start with just the last point as reference
+
+        } else if (Interaction.currentType === Interaction.TYPES.cloverButton.satAndLum) {
+
+          // start sat and lum gizmo
+          Interaction.addToBrushHistory();
+          Interaction.currentUI = Interaction.UI_STATES.satAndLum_open;
+          Interaction.currentType = Interaction.TYPES.gizmo.satAndLum;
+          Interaction.currentSequence = [Interaction.currentSequence[0]]; //start with just the last point as reference
+        }
+
+        // otherwise, will count as a click and close the clover menu on pointerEnd.
+      }
 
     } else if (Interaction.currentType === Interaction.TYPES.painting.initStroke) { 
 
       // dragging over the canvas first starts this mode.
-      // switch to brushstroke/move/gizmo if moved far enough.
-      // otherwise, the interaction counts as a click: the clover gizmo will open/ close when the interaction ends.
+      // switch to drawing/moving if dragged far enough.
+      // otherwise, the interaction counts as a click: the clover gizmo will open when the interaction ends.
+      Interaction.currentSequence.push(new_interaction);
+      if (Interaction.isAboveDragThreshhold(Interaction.currentSequence)) {
 
-      const totalDeltaTime = new_interaction.timeStamp - Interaction.currentSequence[0].timeStamp;
-      const boxDistance = Interaction.distance2d(new_interaction, Interaction.currentSequence[0]);
-      const totalDistance = Interaction.currentSequence.reduce((sum, currentPoint, index, arr) => {
-        if (index < arr.length - 1) {
-          return sum + Interaction.distance2d(currentPoint, arr[index + 1]);
-        }
-        return sum;
-      }, 0);
-
-      // WIP, this needs tweaking
-      // and maybe putting elsewhere as a special constant
-      if (totalDeltaTime > 200 || totalDistance > 10 || boxDistance > 4) {
-        // was a drag, not a click
-
-        // dragging inside the clover menu starts a new interaction depending on the delta position
-        if (Interaction.currentUI === Interaction.UI_STATES.clover_open) {
-
-          // open specific gizmo
-          const deltaPos = {
-            x: new_interaction.x - Interaction.lastInteractionEnd.x,
-            y: new_interaction.y - Interaction.lastInteractionEnd.y
-          }
-          if (Math.abs(deltaPos.x) > 10 || Math.abs(deltaPos.y) > 10) {
-            if (Math.abs(deltaPos.x) > Math.abs(deltaPos.y)) {
-              // horizontal
-              if (deltaPos.x < 0) {
-                // start size gizmo
-                Interaction.addToBrushHistory();
-                Interaction.currentUI = Interaction.UI_STATES.size_open;
-                Interaction.currentType = Interaction.TYPES.gizmo.size;
-                Interaction.currentSequence = [Interaction.currentSequence[0]]; //start with just the last point as reference
-              } else {
-                // start hue and var
-                Interaction.addToBrushHistory();
-                Interaction.currentUI = Interaction.UI_STATES.hueAndVar_open;
-                Interaction.currentType = Interaction.TYPES.gizmo.hueAndVar;
-                Interaction.currentSequence = [Interaction.currentSequence[0]]; //start with just the last point as reference
-              }
-            } else {
-              // vertical
-              if (deltaPos.y < 0) {
-                // start eyedropper
-                Interaction.addToBrushHistory();
-                Interaction.currentType = Interaction.TYPES.painting.eyedropper;
-                Interaction.currentUI = Interaction.UI_STATES.eyedropper_open;
-                Interaction.currentSequence = [Interaction.currentSequence[0]]; //start with just the last point as reference
-              } else {
-                // start lum and sat
-                Interaction.addToBrushHistory();
-                Interaction.currentUI = Interaction.UI_STATES.satAndLum_open;
-                Interaction.currentType = Interaction.TYPES.gizmo.satAndLum;
-                Interaction.currentSequence = [Interaction.currentSequence[0]]; //start with just the last point as reference
-              }
-            }  
-          } 
-          // in pointerEnd, an initStroke while the clover menu is open can be processed.
-          // that would mean the cursor remained in the middle the whole time.
-
-        } else if (Interaction.editingLastStroke) {
+        if (Interaction.editingLastStroke) {
           // move brushstroke
           Interaction.currentType = Interaction.TYPES.painting.move;
           // WIP, should this already lead to movement in this first interaction?
 
         } else {
+
           // start brushstroke
           Interaction.currentType = Interaction.TYPES.painting.draw;
           openPainting.startStroke(openPainting.currentBrush.copy());
 
           // draw the existing segments that have not been drawn yet all at once
           // this code isn't pretty but seems to works
-          const segmentsToAddImmediately = [...Interaction.currentSequence, new_interaction];
+          const segmentsToAddImmediately = Interaction.currentSequence;
           let lastIndex = 0;
           segmentsToAddImmediately.forEach((step, index) => {
             if (index > 0) {
@@ -1317,9 +1366,6 @@ class Interaction {
           })
         }
       }
-
-      Interaction.currentSequence.push(new_interaction);
-
 
     } else if (Interaction.currentType === Interaction.TYPES.painting.draw) { 
 
@@ -1477,11 +1523,18 @@ class Interaction {
       if (Interaction.currentUI === Interaction.UI_STATES.nothing_open) {
         Interaction.currentUI = Interaction.UI_STATES.clover_open;
       } else {
-        // close clover
+        // close clover, never activated a button
         Interaction.currentUI = Interaction.UI_STATES.nothing_open;
         Interaction.stopEditing();
       }
 
+      Interaction.resetCurrentSequence();
+
+    } else if (Object.values(Interaction.TYPES.cloverButton).includes(Interaction.currentType)) {
+
+      // clicked clover instead of dragging
+      Interaction.currentUI = Interaction.UI_STATES.nothing_open;
+      Interaction.stopEditing();
       Interaction.resetCurrentSequence();
 
     } else if (Interaction.currentType === Interaction.TYPES.gizmo.size) {
@@ -1846,10 +1899,11 @@ class UI {
     UI.buffer.textFont(FONT_MEDIUM);
   
     const noEditableStrokes = (openPainting.editableStrokesCount === 0);
+    const noStrokes = (openPainting.totalStrokesCount === 0);
     UI.drawButton("undo" ,       UI.BUTTON_WIDTH*0, 0, Interaction.TYPES.button.undo , noEditableStrokes ? UI.palette.fgDisabled : UI.palette.fg);
     UI.drawButton("edit" ,       UI.BUTTON_WIDTH*1, 0, Interaction.TYPES.button.edit , Interaction.editingLastStroke || noEditableStrokes ? UI.palette.fgDisabled : UI.palette.fg);
-    UI.drawButton("clear", width-UI.BUTTON_WIDTH*2, 0, Interaction.TYPES.button.clear, noEditableStrokes ? UI.palette.fgDisabled : UI.palette.warning);
-    UI.drawButton("save" , width-UI.BUTTON_WIDTH*1, 0, Interaction.TYPES.button.save , UI.palette.fg);
+    UI.drawButton("clear", width-UI.BUTTON_WIDTH*2, 0, Interaction.TYPES.button.clear, noStrokes ? UI.palette.fgDisabled : UI.palette.warning);
+    UI.drawButton("save" , width-UI.BUTTON_WIDTH*1, 0, Interaction.TYPES.button.save , noStrokes ? UI.palette.fgDisabled : UI.palette.fg);
 
     if (width > UI.MOBILE_WIDTH_BREAKPOINT) {
       UI.drawButton("help" , width-UI.BUTTON_WIDTH, height-UI.BUTTON_HEIGHT, Interaction.TYPES.button.help, UI.showingHelp ? UI.palette.fgDisabled : UI.palette.fg);
@@ -2376,11 +2430,6 @@ class UI {
 
       const outerSize = 140;
 
-      // draw background shape
-      //const gradient = UI.buffer.drawingContext.createRadialGradient(basePosition.x, basePosition.y, 0, basePosition.x, basePosition.y, outerSize/2);
-      //gradient.addColorStop(0.95, UI.palette.constrastBg.hex); //center
-      //gradient.addColorStop(1, 'transparent'); //edge
-
       UI.buffer.drawingContext.save();
       //UI.buffer.drawingContext.fillStyle = gradient;
       UI.buffer.fill(UI.palette.constrastBg.hex);
@@ -2402,16 +2451,15 @@ class UI {
 
 
 
-      function drawGadgetDirection(x, y, xDir, yDir, isActive, text) {
-        const size = 54;
+      function drawGadgetDirection(x, y, xDir, yDir, type) {
+        const isHover = (type === Interaction.typeAtCurrentElement);
+        const size = (isHover) ? 60 : 54;
         const centerOffset = 40;
 
         const posX = x+centerOffset*xDir;
         const posY = y+centerOffset*yDir;
 
-        // instead of showing a letter, draw an icon here
-
-        if (text === "H") {
+        if (type === Interaction.TYPES.cloverButton.hueAndVar) {
 
           UI.buffer.stroke(UI.palette.fg.toHexWithSetAlpha(0.2));
           UI.buffer.strokeWeight(8);
@@ -2425,7 +2473,7 @@ class UI {
           const endColorHue   = brushToVisualize.color.copy().setHue(brushToVisualize.color.hue + 0.5);
           UI.drawColorAxis(6, posX - size/3, posY, posX + size/3, posY, startColorHue, endColorHue, size);
 
-        } else if (text === "LC") {
+        } else if (type === Interaction.TYPES.cloverButton.satAndLum) {
 
           UI.buffer.stroke(UI.palette.fg.toHexWithSetAlpha(0.2));
           UI.buffer.strokeWeight(8);
@@ -2441,14 +2489,14 @@ class UI {
           const endColorLum   = brushToVisualize.color.copy().setLightness(0);
           UI.drawColorAxis(6, posX, posY - size/3, posX, posY + size/3, startColorLum, endColorLum, size);
 
-        } else if (text === "S") {
+        } else if (type === Interaction.TYPES.cloverButton.size) {
 
           UI.buffer.noStroke();
           UI.buffer.fill(UI.palette.fg.toHexWithSetAlpha(0.7));
           UI.buffer.ellipse(posX, posY - (size/3) * 0.8, size/6, size/6);
           UI.buffer.ellipse(posX, posY + (size/3) * 0.8, size/9, size/9);
 
-        } else if (text === "I") {
+        } else if (type === Interaction.TYPES.cloverButton.eyedropper) {
           
           UI.buffer.strokeWeight(4);
           UI.buffer.stroke(UI.palette.fg.toHexWithSetAlpha(0.7));
@@ -2464,12 +2512,10 @@ class UI {
         UI.buffer.ellipse(posX, posY, size/5, size/5);
       }
 
-      // WIP: the false means none of these will be highlighted.
-      // hover state and default behavior could be re-added...
-      drawGadgetDirection(basePosition.x, basePosition.y, -1,  0, false, "S");
-      drawGadgetDirection(basePosition.x, basePosition.y,  1,  0, false, "H");
-      drawGadgetDirection(basePosition.x, basePosition.y,  0, -1, false, "I");
-      drawGadgetDirection(basePosition.x, basePosition.y,  0,  1, false, "LC");
+      drawGadgetDirection(basePosition.x, basePosition.y, -1,  0, Interaction.TYPES.cloverButton.size);
+      drawGadgetDirection(basePosition.x, basePosition.y,  1,  0, Interaction.TYPES.cloverButton.hueAndVar);
+      drawGadgetDirection(basePosition.x, basePosition.y,  0, -1, Interaction.TYPES.cloverButton.eyedropper);
+      drawGadgetDirection(basePosition.x, basePosition.y,  0,  1, Interaction.TYPES.cloverButton.satAndLum);
     
     } else if (Interaction.currentUI === Interaction.UI_STATES.hueAndVar_open) {
 
