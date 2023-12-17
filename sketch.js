@@ -45,8 +45,6 @@ function setup() {
   document.addEventListener("keyup", (event) => Interaction.keyEnd(event.key));
   window.addEventListener("resize", () => Interaction.adjustCanvasSize(windowWidth, windowHeight));
 
-  document.body.style.cursor = 'crosshair';
-
   // initialize new painting
   const INITIAL_CANVAS_COLOR = new HSLColor(0.6, 0.1, 0.15);
   const smaller_side = Math.min(width, height);
@@ -636,7 +634,7 @@ class Interaction {
   static lastInteractionEnd = null;
 
   static currentType = null; // actual type of the gesture
-  static typeAtCurrentElement = null; // starting/hover type if there is an element at the pointer
+  static elementTypeAtPointer = null; // starting/hover type if there is an element at the pointer
 
   // 'enum' of possible current interactions that gestures belong to
   static TYPES = {
@@ -693,8 +691,43 @@ class Interaction {
 
   static lostFocus() {
     Interaction.currentType = null;
+    Interaction.changeCursorTo('auto');
     Interaction.currentSequence = [];
     Interaction.currentUI = Interaction.UI_STATES.nothing_open;
+  }
+
+  static changeCursorTo(keyword) {
+    // console.log("changed cursor to ", keyword)
+    document.body.style.cursor = keyword;
+  }
+
+  static changeCursorToHover(element) {
+    // console.log("switched hover to element ", element)
+
+    if (element === undefined) {
+      // default hover
+      if (Interaction.currentUI === Interaction.UI_STATES.nothing_open) {
+        Interaction.changeCursorTo('crosshair');
+      } else {
+        // this could check all the gizmos, but they get a specific starting cursor anyway.
+        // this function is never used then.
+        // console.log("some menu is open, so use default cursor")
+        Interaction.changeCursorTo('auto');
+      }
+      return;
+    }
+
+    if (Object.values(Interaction.TYPES.knob).includes(element)) {
+      Interaction.changeCursorTo('ew-resize');
+    } else if (Object.values(Interaction.TYPES.slider).includes(element)) {
+      Interaction.changeCursorTo('auto');
+    } else if (Object.values(Interaction.TYPES.button).includes(element)) {
+      Interaction.changeCursorTo('pointer');
+    } else if (Object.values(Interaction.TYPES.cloverButton).includes(element)) {
+      Interaction.changeCursorTo('grab');
+    } else {
+      Interaction.changeCursorTo('auto');
+    }
   }
 
   static wheelScrolled(event) {
@@ -773,26 +806,32 @@ class Interaction {
     } else if (key === "s") {
       Interaction.saveAction();
       Interaction.currentUI = Interaction.UI_STATES.nothing_open;
+      Interaction.changeCursorToHover();
       Interaction.resetCurrentSequence();
     } else if (key === "u") {
       Interaction.undoAction();
       Interaction.currentUI = Interaction.UI_STATES.nothing_open;
+      Interaction.changeCursorToHover();
       Interaction.resetCurrentSequence();
     } else if (key === "e") {
       Interaction.editAction();
       Interaction.currentUI = Interaction.UI_STATES.nothing_open;
+      Interaction.changeCursorToHover();
       Interaction.resetCurrentSequence();
     } else if (key === "1") {
       Interaction.addToBrushHistory();
       Interaction.currentUI = Interaction.UI_STATES.satAndLum_open;
+      Interaction.changeCursorTo('grab');
       Interaction.resetCurrentSequence();
     } else if (key === "2") {
       Interaction.addToBrushHistory();
       Interaction.currentUI = Interaction.UI_STATES.hueAndVar_open;
+      Interaction.changeCursorTo('grab');
       Interaction.resetCurrentSequence();
     } else if (key === "3") {
       Interaction.addToBrushHistory();
       Interaction.currentUI = Interaction.UI_STATES.size_open;
+      Interaction.changeCursorTo('grab');
       Interaction.resetCurrentSequence();
     } else if (key === "4") {
       Interaction.addToBrushHistory();
@@ -800,10 +839,12 @@ class Interaction {
     } else if (key === "r") {
       Interaction.resetViewTransform();
       Interaction.currentUI = Interaction.UI_STATES.nothing_open;
+      Interaction.changeCursorToHover();
       Interaction.resetCurrentSequence();
     } else if (key === "h") {
       Interaction.toggleHelp();
       Interaction.currentUI = Interaction.UI_STATES.nothing_open;
+      Interaction.changeCursorToHover();
       Interaction.resetCurrentSequence();
     }
   }
@@ -813,7 +854,7 @@ class Interaction {
     if (Interaction.currentSequence.length > 0) {
       Interaction.lastInteractionEnd = Interaction.currentSequence[Interaction.currentSequence.length-1];
     } else {
-      if (dev_mode) console.log("last interaction was not overwritten")
+      if (dev_mode) console.log("last interaction was not overwritten");
     }
     Interaction.currentSequence = [];
   }
@@ -836,6 +877,7 @@ class Interaction {
     }
 
     Interaction.currentType = null;
+    Interaction.changeCursorTo('auto');
     Interaction.currentSequence = [];
   }
 
@@ -1072,12 +1114,12 @@ class Interaction {
     }
 
     // tapped on an element?
-    Interaction.typeAtCurrentElement = Interaction.typeFromCoords(new_interaction.x, new_interaction.y) ?? null;
+    Interaction.elementTypeAtPointer = Interaction.typeFromCoords(new_interaction.x, new_interaction.y) ?? null;
     
     // when no second pointer was already down
-    if (Interaction.typeAtCurrentElement !== null && !Interaction.isAlreadyDown) {
+    if (Interaction.elementTypeAtPointer !== null && !Interaction.isAlreadyDown) {
 
-      Interaction.currentType = Interaction.typeAtCurrentElement;
+      Interaction.currentType = Interaction.elementTypeAtPointer;
 
       if (Object.values(Interaction.TYPES.knob).includes(Interaction.currentType)) {
 
@@ -1106,29 +1148,33 @@ class Interaction {
     }
 
     if (!Interaction.isAlreadyDown) {
-      // new pointer down! no existing mode.
+      // new pointer down! no existing gesture.
 
       if (Interaction.currentUI === Interaction.UI_STATES.satAndLum_open) {
 
         Interaction.currentSequence = [new_interaction];
         Interaction.currentType = Interaction.TYPES.gizmo.satAndLum;
+        Interaction.changeCursorTo('grabbing');
 
       } else if (Interaction.currentUI === Interaction.UI_STATES.hueAndVar_open) {
 
         Interaction.currentSequence = [new_interaction];
         Interaction.currentType = Interaction.TYPES.gizmo.hueAndVar;
+        Interaction.changeCursorTo('grabbing');
         
       } else if (Interaction.currentUI === Interaction.UI_STATES.size_open) {
 
         Interaction.currentSequence = [new_interaction];
         Interaction.currentType = Interaction.TYPES.gizmo.size;
+        Interaction.changeCursorTo('grabbing');
         
       } else if (Interaction.currentUI === Interaction.UI_STATES.eyedropper_open) {
 
         Interaction.currentSequence = [new_interaction];
         Interaction.currentType = Interaction.TYPES.painting.eyedropper;
+        Interaction.changeCursorTo('none');
         
-      } else {
+      } else if (Interaction.currentUI === Interaction.UI_STATES.nothing_open) {
 
         // brushstroke
         Interaction.currentSequence = [new_interaction];
@@ -1175,7 +1221,7 @@ class Interaction {
       } else if (Interaction.currentSequence[1].id === event.pointerId) {
         movedPoint = 1;
       } else {
-        console.log("could not find a point that corredsponds to one of the zoom touches!")
+        console.log("could not find a point that corresponds to one of the zoom touches!")
         return;
       }
       Interaction.currentSequence[movedPoint] = new_interaction;
@@ -1207,15 +1253,17 @@ class Interaction {
 
     // single pointer
     // check if currently over an element, and return which.
-    Interaction.typeAtCurrentElement = Interaction.typeFromCoords(new_interaction.x, new_interaction.y);
+    const PREVIOUS_ELEMENT_TYPE_AT_POINTER = Interaction.elementTypeAtPointer;
+    Interaction.elementTypeAtPointer = Interaction.typeFromCoords(new_interaction.x, new_interaction.y);
 
     if (Object.values(Interaction.TYPES.button).includes(Interaction.currentType)) {
 
       // started on a button
-      if (Interaction.typeAtCurrentElement !== Interaction.currentType) {
+      if (Interaction.elementTypeAtPointer !== Interaction.currentType) {
         // if no longer on the button, reset 
         console.log("left the button")
         Interaction.currentType = null;
+        Interaction.changeCursorTo('auto');
         Interaction.currentSequence = [new_interaction];
         Interaction.currentUI = Interaction.UI_STATES.nothing_open;
       }
@@ -1250,21 +1298,27 @@ class Interaction {
       // default, because no pointer down or last interaction was cancelled.
       // if pointerMove happens in this state, it starts the hover interaction which leaves a trace behind
 
-      // only if not over an element
-      if (Interaction.typeAtCurrentElement !== null) {
-        return;
-      }
+      // not over an element and nothing open
+      if (Interaction.elementTypeAtPointer === null 
+        && Interaction.currentUI === Interaction.UI_STATES.nothing_open
+        && !Interaction.editingLastStroke) {
 
-      // start hover
-      Interaction.currentType = Interaction.TYPES.painting.hover;
-      if (Interaction.currentUI !== Interaction.UI_STATES.nothing_open) return; // no hover preview in menus anyway, so don't even record
-      Interaction.currentSequence.push(new_interaction);
+        // start hover
+        Interaction.currentType = Interaction.TYPES.painting.hover;
+        Interaction.changeCursorToHover();
+        Interaction.currentSequence.push(new_interaction);
+
+      } else if (PREVIOUS_ELEMENT_TYPE_AT_POINTER !== Interaction.elementTypeAtPointer) {
+        // react if the hover element has changed by adjusting the cursor.
+        Interaction.changeCursorToHover(Interaction.elementTypeAtPointer);
+      }
 
     } else if (Interaction.currentType === Interaction.TYPES.painting.hover) {
 
       // stop if hover goes over an element
-      if (Interaction.typeAtCurrentElement !== null) {
+      if (Interaction.elementTypeAtPointer !== null) {
         Interaction.currentType = null;
+        Interaction.changeCursorToHover(Interaction.elementTypeAtPointer);
         Interaction.currentSequence = [];
         return;
       }
@@ -1296,6 +1350,7 @@ class Interaction {
           Interaction.addToBrushHistory();
           Interaction.currentUI = Interaction.UI_STATES.size_open;
           Interaction.currentType = Interaction.TYPES.gizmo.size;
+          Interaction.changeCursorTo('grabbing');
           Interaction.currentSequence = [Interaction.currentSequence[0]]; //start with just the last point as reference
 
         } else if (Interaction.currentType === Interaction.TYPES.cloverButton.hueAndVar) {
@@ -1304,6 +1359,7 @@ class Interaction {
           Interaction.addToBrushHistory();
           Interaction.currentUI = Interaction.UI_STATES.hueAndVar_open;
           Interaction.currentType = Interaction.TYPES.gizmo.hueAndVar;
+          Interaction.changeCursorTo('grabbing');
           Interaction.currentSequence = [Interaction.currentSequence[0]]; //start with just the last point as reference
 
         } else if (Interaction.currentType === Interaction.TYPES.cloverButton.eyedropper) {
@@ -1311,6 +1367,7 @@ class Interaction {
           // start eyedropper
           Interaction.addToBrushHistory();
           Interaction.currentType = Interaction.TYPES.painting.eyedropper;
+          Interaction.changeCursorTo('none');
           Interaction.currentUI = Interaction.UI_STATES.eyedropper_open;
           Interaction.currentSequence = [Interaction.currentSequence[0]]; //start with just the last point as reference
 
@@ -1320,6 +1377,7 @@ class Interaction {
           Interaction.addToBrushHistory();
           Interaction.currentUI = Interaction.UI_STATES.satAndLum_open;
           Interaction.currentType = Interaction.TYPES.gizmo.satAndLum;
+          Interaction.changeCursorTo('grabbing');
           Interaction.currentSequence = [Interaction.currentSequence[0]]; //start with just the last point as reference
         }
 
@@ -1459,19 +1517,20 @@ class Interaction {
     event.preventDefault();
     if (Interaction.currentType === Interaction.TYPES.painting.zoom) {
       Interaction.currentType = null;
+      Interaction.changeCursorTo('auto');
       Interaction.currentSequence = [];
       // other pointer end will be ignored
     }
 
     if (!event.isPrimary && event.pointerType === "touch") return;
 
-    const new_interaction = Interaction.fromEvent(event);
-    Interaction.typeAtCurrentElement = null;
+    // const new_interaction = Interaction.fromEvent(event);
 
     if (Object.values(Interaction.TYPES.button).includes(Interaction.currentType)) {
 
-      Interaction.currentUI = Interaction.UI_STATES.nothing_open;
       // ended on button
+      Interaction.currentUI = Interaction.UI_STATES.nothing_open;
+      
       if (Interaction.currentType === Interaction.TYPES.button.undo) {
         Interaction.undoAction();
       } else if (Interaction.currentType === Interaction.TYPES.button.edit) {
@@ -1484,26 +1543,31 @@ class Interaction {
         Interaction.toggleHelp();
       } else if (Interaction.currentType === Interaction.TYPES.button.tool0) {
         Interaction.pickToolAction(0);
+        Interaction.elementTypeAtPointer = null;
       } else if (Interaction.currentType === Interaction.TYPES.button.tool1) {
         Interaction.pickToolAction(1);
+        Interaction.elementTypeAtPointer = null;
       } else if (Interaction.currentType === Interaction.TYPES.button.tool2) {
         Interaction.pickToolAction(2);
+        Interaction.elementTypeAtPointer = null;
       } else if (Interaction.currentType === Interaction.TYPES.button.fill) {
         Interaction.fillAction();
+        Interaction.elementTypeAtPointer = null;
       }
       Interaction.resetCurrentSequence();
-    } 
-    
-    if (Object.values(Interaction.TYPES.knob).includes(Interaction.currentType)) {
+
+    } else if (Object.values(Interaction.TYPES.knob).includes(Interaction.currentType)) {
 
       // started on a knob
       Interaction.resetCurrentSequence();
+      Interaction.changeCursorToHover();
       Interaction.stopEditing();
 
     } else if (Object.values(Interaction.TYPES.slider).includes(Interaction.currentType)) {
 
       // started on a slider
       Interaction.resetCurrentSequence();
+      Interaction.changeCursorToHover();
       Interaction.stopEditing();
 
     } else if (Interaction.currentType === Interaction.TYPES.painting.draw) {
@@ -1515,56 +1579,51 @@ class Interaction {
 
       // try moving here still,wip?
       Interaction.resetCurrentSequence();
+      Interaction.changeCursorToHover();
       Interaction.stopEditing();
 
     } else if (Interaction.currentType === Interaction.TYPES.painting.initStroke) {
 
       // open menu
-      if (Interaction.currentUI === Interaction.UI_STATES.nothing_open) {
-        Interaction.currentUI = Interaction.UI_STATES.clover_open;
-      } else {
-        // close clover, never activated a button
-        Interaction.currentUI = Interaction.UI_STATES.nothing_open;
-        Interaction.stopEditing();
-      }
-
+      Interaction.currentUI = Interaction.UI_STATES.clover_open;
+      Interaction.changeCursorToHover();
       Interaction.resetCurrentSequence();
 
     } else if (Object.values(Interaction.TYPES.cloverButton).includes(Interaction.currentType)) {
 
       // clicked clover instead of dragging
       Interaction.currentUI = Interaction.UI_STATES.nothing_open;
+      Interaction.elementTypeAtPointer = null;
+      Interaction.changeCursorToHover();
       Interaction.stopEditing();
       Interaction.resetCurrentSequence();
 
-    } else if (Interaction.currentType === Interaction.TYPES.gizmo.size) {
+    } else if (Object.values(Interaction.TYPES.gizmo).includes(Interaction.currentType)) {
 
       Interaction.resetCurrentSequence();
       Interaction.currentUI = Interaction.UI_STATES.nothing_open;
-      Interaction.stopEditing();
-
-    } else if (Interaction.currentType === Interaction.TYPES.gizmo.hueAndVar) {
-
-      Interaction.resetCurrentSequence();
-      Interaction.currentUI = Interaction.UI_STATES.nothing_open;
-      Interaction.stopEditing();
-
-    } else if (Interaction.currentType === Interaction.TYPES.gizmo.satAndLum) {
-
-      Interaction.resetCurrentSequence();
-      Interaction.currentUI = Interaction.UI_STATES.nothing_open;
+      Interaction.changeCursorToHover();
       Interaction.stopEditing();
 
     } else if (Interaction.currentType === Interaction.TYPES.painting.eyedropper) {
 
-      // actually pick the color again, wip?
       Interaction.resetCurrentSequence();
       Interaction.currentUI = Interaction.UI_STATES.nothing_open;
+      Interaction.changeCursorToHover();
       Interaction.stopEditing();
 
     } else {
-      // was hover or none
-      if (dev_mode) console.log("pointerEnd with unknown type: " + Interaction.currentType);
+
+      if (Interaction.currentUI === Interaction.UI_STATES.clover_open) {
+        // close clover
+        Interaction.currentUI = Interaction.UI_STATES.nothing_open;
+        Interaction.elementTypeAtPointer = null;
+        Interaction.stopEditing();
+        Interaction.changeCursorToHover();
+      } else {
+        if (dev_mode) console.log("pointerEnd with unknown type: " + Interaction.currentType);
+        Interaction.changeCursorTo('auto');
+      }
       Interaction.resetCurrentSequence();
     }
   }
@@ -1579,6 +1638,7 @@ class Interaction {
     }
 
     Interaction.currentType = null;
+    Interaction.changeCursorTo('auto');
     Interaction.currentSequence = [];
   }
 
@@ -1952,7 +2012,7 @@ class UI {
       // sliders
       const relevantElements = [...Object.values(Interaction.TYPES.knob),...Object.values(Interaction.TYPES.slider)];
       // for displaying the hover for whichever slider is currently interacted with. If none, show regular hover state.
-      const currentElement = relevantElements.includes(Interaction.currentType) ? Interaction.currentType : Interaction.typeAtCurrentElement;
+      const currentElement = relevantElements.includes(Interaction.currentType) ? Interaction.currentType : Interaction.elementTypeAtPointer;
       
       // draw the sliders themselves first
       let baseColor = openPainting.brushSettingsToAdjust.color;
@@ -2071,7 +2131,7 @@ class UI {
       UI.buffer.text('ui: '         + (Interaction.currentUI ?? 'none'),              20,  80);
       UI.buffer.text('gesture: '    + (Interaction.currentType ?? 'none'),            20, 100);
       UI.buffer.text('points: '     + (Interaction.currentSequence.length ?? 'none'), 20, 120);
-      UI.buffer.text('on ui: '      + (Interaction.typeAtCurrentElement ?? 'none'),   20, 140);
+      UI.buffer.text('on ui: '      + (Interaction.elementTypeAtPointer ?? 'none'),   20, 140);
       UI.buffer.text('zoom: '       + (Interaction.viewTransform.scale ?? 'none'),    20, 160);
       UI.buffer.text('rotation: '   + (Interaction.viewTransform.rotation ?? 'none'), 20, 180);
       //UI.buffer.text('fps: '        + Math.round(frameRate()) + ", " + frameCount,    20, 180);
@@ -2182,7 +2242,7 @@ class UI {
   }
 
   static drawButton(text, x, y, type, textColor) {
-    const isHover = (type === Interaction.typeAtCurrentElement);
+    const isHover = (type === Interaction.elementTypeAtPointer);
     const bgColor = UI.palette.constrastBg
     UI.buffer.fill(isHover ? bgColor.brighter().toHexWithSetAlpha(0.5) : bgColor.toHexWithSetAlpha(0.5));
     UI.buffer.rect(
@@ -2452,7 +2512,7 @@ class UI {
 
 
       function drawGadgetDirection(x, y, xDir, yDir, type) {
-        const isHover = (type === Interaction.typeAtCurrentElement);
+        const isHover = (type === Interaction.elementTypeAtPointer);
         const size = (isHover) ? 60 : 54;
         const centerOffset = 40;
 
