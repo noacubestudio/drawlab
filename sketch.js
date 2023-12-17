@@ -417,6 +417,7 @@ class Painting {
     this.previousBrushes = [];
     this.canvasColor = backgroundColor;
     this.hueRotation = 0;
+    this.previousHueRotation = 0;
     this.averagePressure = undefined;
 
     this.clearWithColor(backgroundColor); // WIP, this is currently missing anything for display density
@@ -598,13 +599,6 @@ class Interaction {
     panX: 0,
     panY: 0,
     centerPos: () => {
-      // rotated around center and scaled, where is the corner?
-      // const point = rotatePoint(
-      //   (-openPainting.width/2)*Interaction.viewTransform.scale, 
-      //   (-openPainting.height/2)*Interaction.viewTransform.scale, 
-      //   Interaction.viewTransform.rotation
-      // );
-      // actually translate to center and add panning
       return {
         x: Interaction.viewTransform.panX + width/2, 
         y: Interaction.viewTransform.panY + height/2
@@ -758,6 +752,10 @@ class Interaction {
 
     if (key === "f") {
       Interaction.rotateHueAction();
+      if (Interaction.editingLastStroke) {
+        openPainting.redrawLatestStroke();
+        Interaction.stopEditing();
+      }
       Interaction.currentUI = Interaction.UI_STATES.nothing_open;
       //console.log('rotate to: '+ openPainting.hueRotation, 'current hue: '+ openPainting.currentBrush.color.hue);
     } else if (key === "s") {
@@ -836,6 +834,7 @@ class Interaction {
     if (openPainting.previousBrushes.length > Interaction.MAX_BRUSH_HISTORY_LENGTH) {
       openPainting.previousBrushes.shift();
     }
+    openPainting.previousHueRotation = openPainting.hueRotation;
   }
 
   static saveAction() {
@@ -898,11 +897,6 @@ class Interaction {
     openPainting.hueRotation %= 1;
     const rotatedHue = openPainting.brushSettingsToAdjust.color.hue + 0.5;
     openPainting.brushSettingsToAdjust.color.setHue(rotatedHue % 1);
-
-    if (Interaction.editingLastStroke) {
-      openPainting.redrawLatestStroke();
-      Interaction.stopEditing();
-    }
   }
 
   static processSlider(new_interaction) {
@@ -1366,8 +1360,19 @@ class Interaction {
       const rangeX = UI.GIZMO_SIZE * 2;
       const rangeY = UI.GIZMO_SIZE * 2;
 
-      // Map to chroma and lightness
-      brushToAdjust.color.setSaturation(map( deltaX + rangeX * brushToReference.color.saturation, 0, rangeX, 0, 1, true));
+      // WIP: this can work if the previousBrush also comes with a hueRotation value
+
+      //Map to chroma and lightness
+      const preMultSat = 0.5 + brushToReference.color.saturation * (openPainting.previousHueRotation === 0 ? 0.5 : - 0.5);
+      const newSat = map( deltaX + rangeX * (preMultSat), 0, rangeX, -1, 1, true);
+      // this range thing does not work.
+
+      if (newSat < 0 && openPainting.hueRotation === 0) {
+        Interaction.rotateHueAction();
+      } else if (newSat >= 0 && openPainting.hueRotation !== 0) {
+        Interaction.rotateHueAction();
+      }
+      brushToAdjust.color.setSaturation(Math.abs(newSat));
       brushToAdjust.color.setLightness(map(-deltaY + rangeY * brushToReference.color.lightness, 0, rangeY, 0, 1, true));
       if (Interaction.editingLastStroke) openPainting.redrawLatestStroke();
 
@@ -1888,20 +1893,27 @@ class UI {
 
       // show average pressure with overlay
       const indicatorSize = openPainting.brushSettingsToAdjust.finalPxSizeWithPressure(openPainting.averagePressure) * Interaction.viewTransform.scale;
-      UI.drawSizeOverlay(sliderStart - 30, UI.BUTTON_HEIGHT / 2, indicatorSize)
-      
+      UI.drawSizeOverlay(sliderStart - 30, UI.BUTTON_HEIGHT / 2, indicatorSize);
+
       // sliders
+      const relevantElements = [...Object.values(Interaction.TYPES.knob),...Object.values(Interaction.TYPES.slider)];
+      // for displaying the hover for whichever slider is currently interacted with. If none, show regular hover state.
+      const currentElement = relevantElements.includes(Interaction.currentType) ? Interaction.currentType : Interaction.typeAtCurrentElement;
+      
+      // draw the sliders themselves first
       let baseColor = openPainting.brushSettingsToAdjust.color;
       const rotatedBaseHue = (baseColor.hue+openPainting.hueRotation) % 1;
       const correctlyFlippedSaturation = (openPainting.hueRotation === 0) ? (1 + baseColor.saturation)/2 : (1 - baseColor.saturation)/2;
-      UI.drawGradientSlider(sliderStart                  , 0, UI.SLIDER_WIDTH, UI.BUTTON_HEIGHT, baseColor.copy().setLightness(0), baseColor.copy().setLightness(1), baseColor.lightness);
-      UI.drawGradientSlider(sliderStart+UI.SLIDER_WIDTH  , 0, UI.SLIDER_WIDTH, UI.BUTTON_HEIGHT, baseColor.copy().setSaturation(0), baseColor.copy().setSaturation(1), correctlyFlippedSaturation, "double");
-      UI.drawGradientSlider(sliderStart+UI.SLIDER_WIDTH*2, 0, UI.SLIDER_WIDTH, UI.BUTTON_HEIGHT, baseColor.copy().setHue(0+openPainting.hueRotation), baseColor.copy().setHue(1+openPainting.hueRotation), rotatedBaseHue, "wrap");
+      const showVarOnSliders = (currentElement === Interaction.TYPES.knob.jitter);
+
+      UI.drawGradientSlider(sliderStart                  , 0, UI.SLIDER_WIDTH, UI.BUTTON_HEIGHT, 
+        baseColor.copy().setLightness(0), baseColor.copy().setLightness(1), baseColor.lightness, showVarOnSliders);
+      UI.drawGradientSlider(sliderStart+UI.SLIDER_WIDTH  , 0, UI.SLIDER_WIDTH, UI.BUTTON_HEIGHT, 
+        baseColor.copy().setSaturation(0), baseColor.copy().setSaturation(1), correctlyFlippedSaturation, showVarOnSliders, "double");
+      UI.drawGradientSlider(sliderStart+UI.SLIDER_WIDTH*2, 0, UI.SLIDER_WIDTH, UI.BUTTON_HEIGHT, 
+        baseColor.copy().setHue(0+openPainting.hueRotation), baseColor.copy().setHue(1+openPainting.hueRotation), rotatedBaseHue, showVarOnSliders, "wrap");
   
       // show tooltip
-      const relevantElements = [...Object.values(Interaction.TYPES.knob),...Object.values(Interaction.TYPES.slider)];
-      // display the hover for whichever slider is currently interacted with. If none, show regular hover state.
-      const currentElement = relevantElements.includes(Interaction.currentType) ? Interaction.currentType : Interaction.typeAtCurrentElement;
       const tooltipXinSlider = (percent) => map(percent, 0, 1, UI.SLIDER_RANGE_MARGIN, UI.SLIDER_WIDTH-UI.SLIDER_RANGE_MARGIN);
 
       if (currentElement === Interaction.TYPES.slider.lightness) {
@@ -2204,25 +2216,34 @@ class UI {
     UI.buffer.noStroke();
   }
 
-  static drawColorAxis(thickness, xStart, yStart, xEnd, yEnd, startColor, endColor, radius, startVar = 0, endVar = 0) {
+  static drawColorAxis(thickness, xStart, yStart, xEnd, yEnd, startColor, endColor, radius, specialType) {
     UI.buffer.strokeWeight(thickness);
+    const segments = Math.floor(radius);
+
+    const colorLerpAmt = specialType === "double" 
+      ? (i) => {return map((i + 0.5)/segments, 0, 1, -1, 1, true)}
+      : (i) => {return (i - 0.5) / segments};
+
+    let doubleLerpedColor = (colorLerpAmt) => { 
+      return ((colorLerpAmt * (openPainting.hueRotation === 0 ? 1 : -1)) > 0) 
+      ? HSLColor.lerpColorInHSL(startColor, endColor, Math.abs(colorLerpAmt))
+      : HSLColor.lerpColorInHSL(startColor.copy().setHue((startColor.hue + 0.5) % 1), endColor.copy().setHue((endColor.hue + 0.5) % 1), Math.abs(colorLerpAmt));
+    }
 
     // round end caps first
-    UI.buffer.stroke(startColor.hex);
+    UI.buffer.stroke((specialType === "double") ? doubleLerpedColor(-1).hex : startColor.hex);
     UI.buffer.line(xStart, yStart, (xStart+xEnd)/2, (yStart+yEnd)/2);
-    UI.buffer.stroke(endColor.hex);
+    UI.buffer.stroke((specialType === "double") ? doubleLerpedColor(1).hex : endColor.hex);
     UI.buffer.line((xStart+xEnd)/2, (yStart+yEnd)/2, xEnd, yEnd);
 
     UI.buffer.strokeCap(SQUARE);
-    const segments = Math.floor(radius);
     let lastX = xStart;
     let lastY = yStart;
     for (let i = 1; i < segments + 1; i++) {
       const toX = lerp(xStart, xEnd, i / segments);
       const toY = lerp(yStart, yEnd, i / segments);
-      const colorLerpAmt = (i - 0.5) / segments;
-      const lerpedVar = lerp(startVar, endVar, colorLerpAmt);
-      const lerpedColor = HSLColor.lerpColorInHSL(startColor, endColor, colorLerpAmt).varyComponents(i, lerpedVar);
+      let lerpedColor = (specialType === "double") ? doubleLerpedColor(colorLerpAmt(i)) : HSLColor.lerpColorInHSL(startColor, endColor, colorLerpAmt(i));
+      if (specialType === "variation") lerpedColor = lerpedColor.varyComponents(i, (i - 0.5) / segments);
       
       UI.buffer.stroke(lerpedColor.hex);
       UI.buffer.line(lastX, lastY, toX, toY);
@@ -2233,7 +2254,7 @@ class UI {
     UI.buffer.strokeCap(ROUND);
   }
 
-  static drawGradientSlider(x, y, width, height, startColor, endColor, sliderPercent, sliderType) {
+  static drawGradientSlider(x, y, width, height, startColor, endColor, sliderPercent, showVar, sliderType) {
 
     width -= UI.ELEMENT_MARGIN * 2;
     height -= UI.ELEMENT_MARGIN * 2;
@@ -2253,9 +2274,10 @@ class UI {
     if (sliderType === "double") {
       for (let i = 0; i < segments; i++) {
         const colorLerpAmt = map((i + 0.5)/segments, outside_range_of_width, 1-outside_range_of_width, -1, 1, true);
-        const lerpedColor = ((colorLerpAmt * (openPainting.hueRotation === 0 ? 1 : -1)) > 0) 
+        let lerpedColor = ((colorLerpAmt * (openPainting.hueRotation === 0 ? 1 : -1)) > 0) 
           ? HSLColor.lerpColorInHSL(startColor, endColor, Math.abs(colorLerpAmt))
           : HSLColor.lerpColorInHSL(startColor.copy().setHue((startColor.hue + 0.5) % 1), endColor.copy().setHue((endColor.hue + 0.5) % 1), Math.abs(colorLerpAmt));
+        if (showVar) lerpedColor = lerpedColor.varyComponents(i, openPainting.brushSettingsToAdjust.colorVar);
 
         UI.buffer.fill(lerpedColor.hex);
         UI.buffer.rect(x + (i/segments) * width, y, width/segments, height);
@@ -2263,7 +2285,8 @@ class UI {
     } else {
       for (let i = 0; i < segments; i++) {
         const colorLerpAmt = map((i + 0.5)/segments, outside_range_of_width, 1-outside_range_of_width, 0, 1, sliderType !== "wrap");
-        const lerpedColor = HSLColor.lerpColorInHSL(startColor, endColor, colorLerpAmt);
+        let lerpedColor = HSLColor.lerpColorInHSL(startColor, endColor, colorLerpAmt);
+        if (showVar) lerpedColor = lerpedColor.varyComponents(i, openPainting.brushSettingsToAdjust.colorVar);
     
         UI.buffer.fill(lerpedColor.hex);
         UI.buffer.rect(x + (i/segments) * width, y, width/segments, height);
@@ -2383,24 +2406,17 @@ class UI {
         const size = 54;
         const centerOffset = 40;
 
-        // if (isActive) {
-        //   UI.buffer.fill(UI.palette.fg.hex);
-        //   UI.buffer.ellipse(x+centerOffset*xDir, y+centerOffset*yDir, size, size);
-        //   UI.buffer.fill(UI.palette.constrastBg.hex);
-        // } else {
-        //   UI.buffer.fill(UI.palette.constrastBg.hex);
-        //   UI.buffer.ellipse(x+centerOffset*xDir, y+centerOffset*yDir, size, size);
-        //   UI.buffer.fill(UI.palette.fg.hex);
-        // }
-
         const posX = x+centerOffset*xDir;
         const posY = y+centerOffset*yDir;
-        // icons or text
+
+        // instead of showing a letter, draw an icon here
+
         if (text === "H") {
+
           UI.buffer.stroke(UI.palette.fg.toHexWithSetAlpha(0.2));
           UI.buffer.strokeWeight(8);
           UI.buffer.line(posX, posY - size/3, posX, posY + size/3);
-          UI.drawColorAxis(6, posX, posY - size/3, posX, posY + size/3, brushToVisualize.color, brushToVisualize.color, size, 1.0, 0.0);
+          UI.drawColorAxis(6, posX, posY + size/3, posX, posY - size/3, brushToVisualize.color, brushToVisualize.color, size, "variation");
 
           UI.buffer.stroke(UI.palette.fg.toHexWithSetAlpha(0.2));
           UI.buffer.strokeWeight(8);
@@ -2410,12 +2426,13 @@ class UI {
           UI.drawColorAxis(6, posX - size/3, posY, posX + size/3, posY, startColorHue, endColorHue, size);
 
         } else if (text === "LC") {
+
           UI.buffer.stroke(UI.palette.fg.toHexWithSetAlpha(0.2));
           UI.buffer.strokeWeight(8);
           UI.buffer.line(posX, posY - size/3, posX, posY + size/3);
           const startColorSat = brushToVisualize.color.copy().setSaturation(0);
           const endColorSat   = brushToVisualize.color.copy().setSaturation(1);
-          UI.drawColorAxis(6, posX - size/3, posY, posX + size/3, posY, startColorSat, endColorSat, size);
+          UI.drawColorAxis(6, posX - size/3, posY, posX + size/3, posY, startColorSat, endColorSat, size, "double");
           
           UI.buffer.stroke(UI.palette.fg.toHexWithSetAlpha(0.2));
           UI.buffer.strokeWeight(8);
@@ -2467,7 +2484,7 @@ class UI {
       UI.buffer.stroke("black");
       UI.buffer.strokeWeight(16);
       UI.buffer.line(0, radius*2 * (brushToVisualize.colorVar - 1), 0, radius*2 * brushToVisualize.colorVar);
-      UI.drawColorAxis(14, 0, radius*2 * (brushToVisualize.colorVar - 1), 0, radius*2 * brushToVisualize.colorVar, brushToVisualize.color, brushToVisualize.color, UI.GIZMO_SIZE, 1.0, 0.0);
+      UI.drawColorAxis(14, 0, radius*2 * (brushToVisualize.colorVar), 0, radius*2 * (brushToVisualize.colorVar - 1), brushToVisualize.color, brushToVisualize.color, UI.GIZMO_SIZE, "variation");
 
       // hue
       // stay centered since hue is a circle anyway
@@ -2503,10 +2520,11 @@ class UI {
 
       const startColorSat = brushToVisualize.color.copy().setSaturation(0);
       const endColorSat   = brushToVisualize.color.copy().setSaturation(1);
+      const currentSat = 0.5 + (brushToVisualize.color.saturation * (openPainting.hueRotation === 0 ? 0.5 : -0.5));
       UI.buffer.stroke("black");
       UI.buffer.strokeWeight(16);
-      UI.buffer.line(radius*2 * -brushToVisualize.color.saturation, 0, radius*2 * (1-brushToVisualize.color.saturation), 0);
-      UI.drawColorAxis(14, radius*2 * -brushToVisualize.color.saturation, 0, radius*2 * (1-brushToVisualize.color.saturation), 0, startColorSat, endColorSat, UI.GIZMO_SIZE);
+      UI.buffer.line(radius*2 * -currentSat, 0, radius*2 * (1-currentSat), 0);
+      UI.drawColorAxis(14, radius*2 * -currentSat, 0, radius*2 * (1-currentSat), 0, startColorSat, endColorSat, UI.GIZMO_SIZE, "double");
       
       UI.buffer.pop();
 
