@@ -1,7 +1,7 @@
 // init in setup()
 let openPainting = undefined;
 
-let dev_mode = false;
+let dev_mode = true;
 
 const PRESET_TOOLS = [
   {tool: "Brush Tool", texture: "Regular", menuName: "Default"},
@@ -776,11 +776,14 @@ class Interaction {
         Interaction.changeCursorTo('crosshair');
         return;
       } 
-     
-      // this could check all the gizmos, but they get a specific starting cursor anyway.
-      // this function is never used then.
-      // console.log("some menu is open, so use default cursor")
-      Interaction.changeCursorTo('auto');
+      
+      if (Interaction.currentUI === Interaction.UI_STATES.eyedropper_open) {
+        Interaction.changeCursorTo('crosshair');
+        return;
+      } 
+      
+      // default, for any other UI right now.
+      Interaction.changeCursorTo('grab');
       return;
     }
 
@@ -860,6 +863,10 @@ class Interaction {
     const validWhileDown = ["Shift"];
     if (!validWhileDown.includes(key) && Interaction.currentType !== Interaction.TYPES.painting.hover && Interaction.currentType !== null) return;
 
+    // also ignore ANY additional keypress on top of an existing one. this could later be changed
+    // to allow specific multi-key combos.
+    if (Interaction.pressedKeys.size > 0) return;
+
     // otherwise, keep track of which key was pressed and react to the keypress.
     Interaction.pressedKeys.add(key);
     if (dev_mode) console.log('Keys held:', Array.from(Interaction.pressedKeys).join(', '));
@@ -936,7 +943,6 @@ class Interaction {
   static keyEnd(key) {
 
     if (!Interaction.pressedKeys.has(key)) return; //key was never doing anything to begin with
-
     Interaction.pressedKeys.delete(key);
 
     Interaction.currentUI = Interaction.UI_STATES.nothing_open;
@@ -950,9 +956,8 @@ class Interaction {
       Interaction.stopEditing();
     }
 
-    Interaction.currentType = null;
+    Interaction.resetCurrentSequence();
     Interaction.changeCursorToHover();
-    Interaction.currentSequence = [];
   }
 
   static addToBrushHistory() {
@@ -1382,9 +1387,8 @@ class Interaction {
       // default, because no pointer down or last interaction was cancelled.
       // if pointerMove happens in this state, it starts the hover interaction which leaves a trace behind
 
-      // not over an element and nothing open
+      // not over an element, not in edit mode
       if (Interaction.elementTypeAtPointer === null 
-        && Interaction.currentUI === Interaction.UI_STATES.nothing_open
         && !Interaction.editingLastStroke) {
 
         // start hover
@@ -1685,16 +1689,25 @@ class Interaction {
 
     } else if (Object.values(Interaction.TYPES.gizmo).includes(Interaction.currentType)) {
 
+      Interaction.changeCursorToHover();
+      if (Interaction.pressedKeys.has("1") || Interaction.pressedKeys.has("2") || Interaction.pressedKeys.has("3")) { // keep open because key is still held
+        Interaction.currentType = null;
+        Interaction.addToBrushHistory();
+        return;
+      } 
       Interaction.resetCurrentSequence();
       Interaction.currentUI = Interaction.UI_STATES.nothing_open;
-      Interaction.changeCursorToHover();
       Interaction.stopEditing();
 
     } else if (Interaction.currentType === Interaction.TYPES.painting.eyedropper) {
 
+      Interaction.changeCursorToHover();
+      if (Interaction.pressedKeys.has("4")) { // keep open because key is still held
+        Interaction.currentType = null;
+        return;
+      } 
       Interaction.resetCurrentSequence();
       Interaction.currentUI = Interaction.UI_STATES.nothing_open;
-      Interaction.changeCursorToHover();
       Interaction.stopEditing();
 
     } else {
