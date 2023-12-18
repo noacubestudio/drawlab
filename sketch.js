@@ -1,7 +1,7 @@
 // init in setup()
 let openPainting = undefined;
 
-let dev_mode = true;
+let dev_mode = false;
 
 const PRESET_TOOLS = [
   {tool: "Brush Tool", texture: "Regular", menuName: "Default"},
@@ -1342,8 +1342,14 @@ class Interaction {
 
     // single pointer
     // check if currently over an element, and return which.
+    // only actually do this if there is no ongoing gesture, for example drawing - in which case no hover state should be shown.
     const PREVIOUS_ELEMENT_TYPE_AT_POINTER = Interaction.elementTypeAtPointer;
-    Interaction.elementTypeAtPointer = Interaction.typeFromCoords(new_interaction.x, new_interaction.y);
+
+    const detect_leaving_element = PREVIOUS_ELEMENT_TYPE_AT_POINTER !== null;
+    const detect_entering_without_gesture = (Interaction.currentType === null || Interaction.currentType === Interaction.TYPES.painting.hover);
+    if (detect_leaving_element || detect_entering_without_gesture) {
+      Interaction.elementTypeAtPointer = Interaction.typeFromCoords(new_interaction.x, new_interaction.y);
+    }
 
     if (Object.values(Interaction.TYPES.button).includes(Interaction.currentType)) {
 
