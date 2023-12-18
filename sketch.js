@@ -527,13 +527,6 @@ class Painting {
     this.editableStrokesInUse -= 1;
   }
 
-  flattenStrokes() {
-    console.log("cleared undo stack, added all strokes to painting.");
-    while(this.editableStrokesInUse > 0) {
-      this.flattenOldestStroke();
-    }
-  }
-
   startStroke(brushSettings) {
     if (this.editableStrokesInUse > 0) this.averagePressure = this.latestStroke.averagePressureInLast(20);
     if (this.editableStrokesInUse > this.editableStrokes.length - 1) this.flattenOldestStroke();
@@ -575,7 +568,7 @@ class Painting {
 
   download() {
     const timestamp = new Date().toLocaleString().replace(/[-:T.]/g, "-").replace(/, /g, "_");
-    saveCanvas(this.lowestBuffer, "drawlab-canvas_" + timestamp, "png");
+    saveCanvas(this.combinedBuffer, "drawlab-canvas_" + timestamp, "png");
   }
 
   moveLatestStroke(x, y) {
@@ -974,7 +967,7 @@ class Interaction {
 
   static saveAction() {
     // commit strokes to the painting
-    openPainting.applyAllStrokes();
+    openPainting.updateCombinedBuffer();
     openPainting.download();
   }
 
