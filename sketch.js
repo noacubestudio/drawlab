@@ -1956,7 +1956,7 @@ class UI {
       });
 
       // menu on right
-      UI.drawRightButton("fill all", UI.BUTTON_HEIGHT * 0 + 2*UI.BUTTON_WIDTH, UI.palette.warning);
+      UI.drawRightButton("fill all", UI.BUTTON_HEIGHT * 0 + 2*UI.BUTTON_WIDTH, Interaction.TYPES.button.fill, UI.palette.warning);
     }
   
     // top menu buttons
@@ -2233,8 +2233,10 @@ class UI {
     UI.buffer.textAlign(LEFT);
   }
 
-  static drawRightButton(text, y, textColor) {
-    UI.buffer.fill(UI.palette.constrastBg.toHexWithSetAlpha(0.5));
+  static drawRightButton(text, y, type, textColor) {
+    const isHover = (type === Interaction.elementTypeAtPointer);
+    const bgColor = UI.palette.constrastBg;
+    UI.buffer.fill(isHover ? bgColor.brighter().toHexWithSetAlpha(0.5) : bgColor.toHexWithSetAlpha(0.5));
     UI.buffer.rect(
       width - 100, y+UI.ELEMENT_MARGIN, 
       100, UI.BUTTON_HEIGHT-UI.ELEMENT_MARGIN*2, 
@@ -2248,7 +2250,7 @@ class UI {
 
   static drawButton(text, x, y, type, textColor) {
     const isHover = (type === Interaction.elementTypeAtPointer);
-    const bgColor = UI.palette.constrastBg
+    const bgColor = UI.palette.constrastBg;
     UI.buffer.fill(isHover ? bgColor.brighter().toHexWithSetAlpha(0.5) : bgColor.toHexWithSetAlpha(0.5));
     UI.buffer.rect(
       x+UI.ELEMENT_MARGIN, y+UI.ELEMENT_MARGIN, 
@@ -2496,7 +2498,6 @@ class UI {
       const outerSize = 140;
 
       UI.buffer.drawingContext.save();
-      //UI.buffer.drawingContext.fillStyle = gradient;
       UI.buffer.fill(UI.palette.constrastBg.hex);
       UI.buffer.ellipse(basePosition.x, basePosition.y, outerSize, outerSize);
       UI.buffer.drawingContext.clip();
@@ -2507,6 +2508,11 @@ class UI {
       UI.buffer.noStroke();
       UI.buffer.drawingContext.restore();
 
+      drawGadgetDirection(basePosition.x, basePosition.y, -1,  0, Interaction.TYPES.cloverButton.size);
+      drawGadgetDirection(basePosition.x, basePosition.y,  1,  0, Interaction.TYPES.cloverButton.hueAndVar);
+      drawGadgetDirection(basePosition.x, basePosition.y,  0, -1, Interaction.TYPES.cloverButton.eyedropper);
+      drawGadgetDirection(basePosition.x, basePosition.y,  0,  1, Interaction.TYPES.cloverButton.satAndLum);
+
       UI.buffer.drawingContext.save();
       UI.buffer.drawingContext.beginPath();
       UI.buffer.drawingContext.arc(basePosition.x, basePosition.y, 10, 0, 2 * Math.PI);
@@ -2514,15 +2520,19 @@ class UI {
       UI.buffer.drawingContext.clearRect(0, 0, width, height);
       UI.buffer.drawingContext.restore();
 
-
-
       function drawGadgetDirection(x, y, xDir, yDir, type) {
-        const isHover = (type === Interaction.elementTypeAtPointer);
-        const size = (isHover) ? 60 : 54;
-        const centerOffset = 40;
 
+        const size = 54;
+        const centerOffset = 40;
         const posX = x+centerOffset*xDir;
         const posY = y+centerOffset*yDir;
+
+        // hover/ active
+        if (type === Interaction.elementTypeAtPointer) {
+          UI.buffer.fill(UI.palette.constrastBg.brighter().hex);
+          const startAngle = 0.25 * Math.PI - (xDir * 0.5 * Math.PI) + (Math.min(0, yDir) * Math.PI);
+          UI.buffer.arc(basePosition.x, basePosition.y, outerSize, outerSize, startAngle, startAngle + 0.5 * Math.PI);
+        }
 
         if (type === Interaction.TYPES.cloverButton.hueAndVar) {
 
@@ -2576,11 +2586,6 @@ class UI {
         UI.buffer.fill(brushToVisualize.color.hex);
         UI.buffer.ellipse(posX, posY, size/5, size/5);
       }
-
-      drawGadgetDirection(basePosition.x, basePosition.y, -1,  0, Interaction.TYPES.cloverButton.size);
-      drawGadgetDirection(basePosition.x, basePosition.y,  1,  0, Interaction.TYPES.cloverButton.hueAndVar);
-      drawGadgetDirection(basePosition.x, basePosition.y,  0, -1, Interaction.TYPES.cloverButton.eyedropper);
-      drawGadgetDirection(basePosition.x, basePosition.y,  0,  1, Interaction.TYPES.cloverButton.satAndLum);
     
     } else if (Interaction.currentUI === Interaction.UI_STATES.hueAndVar_open) {
 
