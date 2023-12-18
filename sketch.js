@@ -46,6 +46,7 @@ function setup() {
   window.addEventListener("resize", () => Interaction.adjustCanvasSize(windowWidth, windowHeight));
 
   // initialize new painting
+  Interaction.resetViewTransform();
   const INITIAL_CANVAS_COLOR = new HSLColor(0.6, 0.1, 0.15);
   const smaller_side = Math.min(width, height);
   const INITIAL_CANVAS_DIMENSIONS = {
@@ -564,7 +565,7 @@ class Painting {
 
   getPointRGB(point) {
     // update eyedropper
-    openPainting.applyAllStrokes();
+    if (this.editableStrokesInUse > 0) openPainting.applyAllStrokes();
     const buffer = openPainting.oldStrokesBuffer;
 
     // go through a few pixels
@@ -698,6 +699,10 @@ class Interaction {
 
   static changeCursorTo(keyword) {
     // console.log("changed cursor to ", keyword)
+    if (keyword === 'crosshair') {
+      document.body.style.cursor = 'url(assets/crosshair.svg) 12 12, ' + keyword;
+      return;
+    }
     document.body.style.cursor = keyword;
   }
 
@@ -750,7 +755,7 @@ class Interaction {
   static resetViewTransform() {
     Interaction.viewTransform.scale = 1;
     Interaction.viewTransform.panX = 0;
-    Interaction.viewTransform.panY = 0;
+    Interaction.viewTransform.panY = 10; // start slightly lower than centered
     Interaction.viewTransform.rotation = 0;
   }
 
