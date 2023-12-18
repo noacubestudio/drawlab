@@ -89,10 +89,8 @@ function draw() {
   rect(0, 0, scaledSize.x, scaledSize.y, UI.ELEMENT_RADIUS/2);
   drawingContext.clip();
 
-  drawScaledCanvas(openPainting.oldStrokesBuffer);
-  openPainting.usedEditableStrokes.forEach((stroke) => {
-    drawScaledCanvas(stroke.buffer);
-  });
+  openPainting.updateCombinedBuffer();
+  drawScaledCanvas(openPainting.combinedBuffer);
 
   drawingContext.restore();
   pop();
@@ -191,6 +189,7 @@ class Brushstroke {
     this.points = [];
     this.settings = settings.copy();
     this.brushstrokeSeed = frameCount / 100000;
+    this.compositeOperation = "source-over";
   }
 
   get bounds() {
@@ -411,7 +410,9 @@ class Painting {
   constructor(width, height, backgroundColor, startingBrush) {
     this.width = width;
     this.height = height;
-    this.mainBuffer = createGraphics(width, height);
+    this.lowestBuffer = createGraphics(width, height); // all older bruststrokes that are no longer editable
+    this.combinedBuffer = createGraphics(width, height); // final image
+    this.temporaryCompositionBuffer = createGraphics(width, height); // for composition of specific editable buffers
     this.editableStrokesInUse = 0;
     this.editableStrokes = Array.from({ length: 16 }, () => new Brushstroke(createGraphics(width, height), startingBrush));
     this.currentBrush = startingBrush;
@@ -437,10 +438,6 @@ class Painting {
     return this.editableStrokes.slice(0, this.editableStrokesInUse);
   }
 
-  get oldStrokesBuffer() {
-    return this.mainBuffer;
-  }
-
   get latestStroke() {
     if (this.editableStrokesInUse === 0) {
       console.log("no stroke to get!");
@@ -449,13 +446,28 @@ class Painting {
     return this.editableStrokes[this.editableStrokesInUse-1];
   }
 
+  get latestParentStroke() {
+    if (this.editableStrokesInUse === 0) {
+      console.log("no stroke to get!");
+      return;
+    }
+    for (let i = this.editableStrokesInUse-1; i >= 0; i--) {
+      const stroke = this.editableStrokes[i];
+      if (stroke.compositeOperation === "source-over") return stroke;
+    }
+    console.log("no parent stroke found!");
+    return;
+  }
+
   get brushSettingsToAdjust() {
     if (Interaction.editingLastStroke) return this.latestStroke.settings;
     return openPainting.currentBrush;
   }
 
+  // WIP, color could be applied under the buffers instead
+  // so that this doesn't actually clear anything
   clearWithColor(color) {
-    this.mainBuffer.background(color.hex);
+    this.lowestBuffer.background(color.hex);
     this.editableStrokes.forEach((stroke) => {
       stroke.reset();
     });
@@ -463,32 +475,74 @@ class Painting {
     this.totalStrokesCount = 0;
   }
 
-  applyOldestStroke() {
-    // remove oldest, draw image
-    const oldestStroke = this.editableStrokes.shift();
-    this.mainBuffer.image(oldestStroke.buffer, 0, 0);
+  // WIP: this is currently called every frame, which isn't necessary.
+  // but seems fast enough for now.
+  updateCombinedBuffer() {
+    this.combinedBuffer.image(this.lowestBuffer, 0, 0);
+
+    let usingTempBuffer = false;
+    this.usedEditableStrokes.forEach((stroke, index) => {
+
+      const nextStroke = this.usedEditableStrokes.length > (index+1) ? this.usedEditableStrokes[index+1] : undefined;
+      const drawToTemporaryBuffer = (nextStroke && nextStroke.compositeOperation !== "source-over") || stroke.compositeOperation !== "source-over";
+      const drawToCombinedBuffer = (!nextStroke) || (nextStroke && nextStroke.compositeOperation === "source-over");
+
+      if (drawToTemporaryBuffer) {
+        if (!usingTempBuffer) {
+          // initialize first
+          // create temporary buffer and don't draw yet
+          this.temporaryCompositionBuffer.clear();
+          usingTempBuffer = true;
+        }
+        this.temporaryCompositionBuffer.drawingContext.globalCompositeOperation = stroke.compositeOperation;
+        this.temporaryCompositionBuffer.image(stroke.buffer, 0, 0);
+      } 
+      
+      if (drawToCombinedBuffer) {
+        if (usingTempBuffer) {
+          this.combinedBuffer.image(this.temporaryCompositionBuffer, 0, 0);
+          usingTempBuffer = false;
+        } else {
+          this.combinedBuffer.image(stroke.buffer, 0, 0);
+        }
+      } 
+    });
+  }
+
+  flattenOldestStroke() {
+    // remove stroke, get buffer
+    const oldestStrokeIsParent = this.editableStrokes.length>1 && this.editableStrokes[1].compositeOperation !== "source-over";
+    const flattenedStroke = oldestStrokeIsParent ? this.editableStrokes.splice(1, 1)[0] : this.editableStrokes.shift();
+    const destinationBuffer = oldestStrokeIsParent ? this.editableStrokes[0].buffer : this.lowestBuffer;
+
+    // draw to destination
+    destinationBuffer.drawingContext.globalCompositeOperation = flattenedStroke.compositeOperation;
+    destinationBuffer.image(flattenedStroke.buffer, 0, 0);
+    destinationBuffer.drawingContext.globalCompositeOperation = "source-over";
 
     // add again to the end after clearing
-    oldestStroke.reset();
-    this.editableStrokes.push(oldestStroke);
+    flattenedStroke.reset();
+    flattenedStroke.compositeOperation = "source-over";
+    this.editableStrokes.push(flattenedStroke);
     this.editableStrokesInUse -= 1;
   }
 
-  applyAllStrokes() {
+  flattenStrokes() {
     console.log("cleared undo stack, added all strokes to painting.");
     while(this.editableStrokesInUse > 0) {
-      this.applyOldestStroke();
+      this.flattenOldestStroke();
     }
   }
 
   startStroke(brushSettings) {
     if (this.editableStrokesInUse > 0) this.averagePressure = this.latestStroke.averagePressureInLast(20);
-    if (this.editableStrokesInUse > this.editableStrokes.length - 1) this.applyOldestStroke();
+    if (this.editableStrokesInUse > this.editableStrokes.length - 1) this.flattenOldestStroke();
     this.editableStrokesInUse++;
     this.totalStrokesCount++;
     //console.log("started new stroke:", this.editableStrokesInUse);
     const currentStroke = this.editableStrokes[this.editableStrokesInUse-1];
     currentStroke.reset();
+    currentStroke.compositeOperation = Interaction.currentCompositionMode;
     currentStroke.settings = brushSettings;
   }
 
@@ -513,6 +567,7 @@ class Painting {
       return;
     }
     this.latestStroke.reset();
+    this.latestStroke.compositeOperation = "source-over";
     this.editableStrokesInUse--;
     this.totalStrokesCount--;
     console.log(this.editableStrokesInUse, "editable strokes still present.")
@@ -520,7 +575,7 @@ class Painting {
 
   download() {
     const timestamp = new Date().toLocaleString().replace(/[-:T.]/g, "-").replace(/, /g, "_");
-    saveCanvas(this.mainBuffer, "drawlab-canvas_" + timestamp, "png");
+    saveCanvas(this.lowestBuffer, "drawlab-canvas_" + timestamp, "png");
   }
 
   moveLatestStroke(x, y) {
@@ -531,6 +586,15 @@ class Painting {
     this.latestStroke.buffer.clear();
     this.latestStroke.movePoints(x, y);
     this.latestStroke.drawWhole();
+  }
+
+  clipLatestStroke() {
+    if (this.editableStrokesInUse === 0) {
+      console.log("nothing to clip!");
+      return;
+    }
+
+    this.latestStroke.compositeOperation = "source-atop"//"destination-out";
   }
 
   redrawLatestStroke() {
@@ -564,9 +628,7 @@ class Painting {
   }
 
   getPointRGB(point) {
-    // update eyedropper
-    if (this.editableStrokesInUse > 0) openPainting.applyAllStrokes();
-    const buffer = openPainting.oldStrokesBuffer;
+    const buffer = openPainting.combinedBuffer;
 
     // go through a few pixels
     const addRadiusPx = 2;
@@ -618,6 +680,8 @@ class Interaction {
   // rather than the brush settings for the upcoming one
   static editingLastStroke = false;
   static hueRotationBeforeEditing = null;
+
+  static currentCompositionMode = "source-over";
 
   static UI_STATES = {
     nothing_open: 'default',
@@ -712,13 +776,18 @@ class Interaction {
     if (element === undefined) {
       // default hover
       if (Interaction.currentUI === Interaction.UI_STATES.nothing_open) {
+        if (Interaction.editingLastStroke) {
+          Interaction.changeCursorTo('move');
+          return;
+        }
         Interaction.changeCursorTo('crosshair');
-      } else {
-        // this could check all the gizmos, but they get a specific starting cursor anyway.
-        // this function is never used then.
-        // console.log("some menu is open, so use default cursor")
-        Interaction.changeCursorTo('auto');
-      }
+        return;
+      } 
+     
+      // this could check all the gizmos, but they get a specific starting cursor anyway.
+      // this function is never used then.
+      // console.log("some menu is open, so use default cursor")
+      Interaction.changeCursorTo('auto');
       return;
     }
 
@@ -730,8 +799,10 @@ class Interaction {
       Interaction.changeCursorTo('pointer');
     } else if (Object.values(Interaction.TYPES.cloverButton).includes(element)) {
       Interaction.changeCursorTo('grab');
-    } else {
-      Interaction.changeCursorTo('auto');
+    } else { 
+      // WIP, this is currently used for leaving buttons in edit mode for some reason.
+      // Should probably just be 'auto' and not occur.
+      Interaction.changeCursorToHover();
     }
   }
 
@@ -851,6 +922,11 @@ class Interaction {
       Interaction.currentUI = Interaction.UI_STATES.nothing_open;
       Interaction.changeCursorToHover();
       Interaction.resetCurrentSequence();
+    } else if (key === "c") {
+      Interaction.clipCompositionMode();
+      Interaction.currentUI = Interaction.UI_STATES.nothing_open;
+      Interaction.changeCursorToHover();
+      Interaction.resetCurrentSequence();
     }
   }
 
@@ -882,7 +958,7 @@ class Interaction {
     }
 
     Interaction.currentType = null;
-    Interaction.changeCursorTo('auto');
+    Interaction.changeCursorToHover();
     Interaction.currentSequence = [];
   }
 
@@ -921,6 +997,15 @@ class Interaction {
   static undoAction() {
     openPainting.popLatestStroke();
     Interaction.stopEditing();
+  }
+
+  static clipCompositionMode() {
+    if (openPainting.editableStrokesCount === 0) return;
+    if (Interaction.currentCompositionMode === "source-over") {
+      Interaction.currentCompositionMode = "source-atop";
+    } else {
+      Interaction.currentCompositionMode = "source-over";
+    }
   }
 
   static editAction() {
@@ -1176,6 +1261,7 @@ class Interaction {
       } else if (Interaction.currentUI === Interaction.UI_STATES.eyedropper_open) {
 
         Interaction.currentSequence = [new_interaction];
+        openPainting.updateCombinedBuffer();
         Interaction.currentType = Interaction.TYPES.painting.eyedropper;
         Interaction.changeCursorTo('none');
         
@@ -1371,6 +1457,7 @@ class Interaction {
 
           // start eyedropper
           Interaction.addToBrushHistory();
+          openPainting.updateCombinedBuffer();
           Interaction.currentType = Interaction.TYPES.painting.eyedropper;
           Interaction.changeCursorTo('none');
           Interaction.currentUI = Interaction.UI_STATES.eyedropper_open;
@@ -1584,8 +1671,8 @@ class Interaction {
 
       // try moving here still,wip?
       Interaction.resetCurrentSequence();
-      Interaction.changeCursorToHover();
       Interaction.stopEditing();
+      Interaction.changeCursorToHover();
 
     } else if (Interaction.currentType === Interaction.TYPES.painting.initStroke) {
 
@@ -1627,7 +1714,7 @@ class Interaction {
         Interaction.changeCursorToHover();
       } else {
         if (dev_mode) console.log("pointerEnd with unknown type: " + Interaction.currentType);
-        Interaction.changeCursorTo('auto');
+        Interaction.changeCursorToHover();
       }
       Interaction.resetCurrentSequence();
     }
@@ -1643,7 +1730,7 @@ class Interaction {
     }
 
     Interaction.currentType = null;
-    Interaction.changeCursorTo('auto');
+    Interaction.changeCursorToHover();
     Interaction.currentSequence = [];
   }
 
@@ -1966,7 +2053,7 @@ class UI {
     const noEditableStrokes = (openPainting.editableStrokesCount === 0);
     const noStrokes = (openPainting.totalStrokesCount === 0);
     UI.drawButton("undo" ,       UI.BUTTON_WIDTH*0, 0, Interaction.TYPES.button.undo , noEditableStrokes ? UI.palette.fgDisabled : UI.palette.fg);
-    UI.drawButton("edit" ,       UI.BUTTON_WIDTH*1, 0, Interaction.TYPES.button.edit , Interaction.editingLastStroke || noEditableStrokes ? UI.palette.fgDisabled : UI.palette.fg);
+    UI.drawButton("edit" ,       UI.BUTTON_WIDTH*1, 0, Interaction.TYPES.button.edit , noEditableStrokes ? UI.palette.fgDisabled : UI.palette.fg);
     UI.drawButton("clear", width-UI.BUTTON_WIDTH*2, 0, Interaction.TYPES.button.clear, noStrokes ? UI.palette.fgDisabled : UI.palette.warning);
     UI.drawButton("save" , width-UI.BUTTON_WIDTH*1, 0, Interaction.TYPES.button.save , noStrokes ? UI.palette.fgDisabled : UI.palette.fg);
 
@@ -2117,11 +2204,24 @@ class UI {
         UI.buffer.text(helpShortcuts[keyString], width - helpWindowWidth + 20, 4 + height - UI.BUTTON_HEIGHT - helpWindowHeight + index * 30);
       });
     }
+
+    const bubbleLabels = [];
   
     // draw rectangle around stroke being edited
     if (Interaction.editingLastStroke) {
       UI.drawBounds(openPainting.latestStroke.bounds);
+      bubbleLabels.push("Editing last")
     }
+
+    if (Interaction.currentCompositionMode !== "source-over") {
+      let label = Interaction.currentCompositionMode;
+      if (label === "source-atop") label = "Drawing inside stroke";
+      UI.drawBounds(openPainting.latestParentStroke.bounds);
+      bubbleLabels.push(label)
+    }
+
+    UI.buffer.noStroke();
+    UI.drawStateBubbles(bubbleLabels);
   
     // draw the right gadget
     if (Interaction.currentUI !== Interaction.UI_STATES.nothing_open) {
@@ -2140,6 +2240,13 @@ class UI {
       UI.buffer.text('zoom: '       + (Interaction.viewTransform.scale ?? 'none'),    20, 160);
       UI.buffer.text('rotation: '   + (Interaction.viewTransform.rotation ?? 'none'), 20, 180);
       //UI.buffer.text('fps: '        + Math.round(frameRate()) + ", " + frameCount,    20, 180);
+
+      UI.buffer.text(openPainting.usedEditableStrokes.length, 20, 220);
+      openPainting.editableStrokes.forEach((stroke, index) => {
+        if (index === openPainting.editableStrokesCount) UI.buffer.fill(UI.palette.fg.toHexWithSetAlpha(0.5))
+        UI.buffer.text(stroke.compositeOperation, 20, 240 + index * 20);
+      });
+      UI.buffer.fill(UI.palette.fg.hex)
 
       UI.buffer.text('scaleX: '+ Math.round(Interaction.viewTransform.scale * openPainting.width),  300, 80);
       UI.buffer.text('scaleY: '+ Math.round(Interaction.viewTransform.scale * openPainting.height), 300,100);
@@ -2460,6 +2567,19 @@ class UI {
     UI.buffer.text(text, textPos.x, textPos.y);
   }
 
+  static drawStateBubbles(labelsArray) {
+    UI.buffer.textAlign(CENTER);
+    labelsArray.forEach((label, index) => {
+      let bbox = FONT_MEDIUM.textBounds(label, width/2, height-(1+index) * 40);
+      bbox.w = bbox.w*1.4 + 20;
+      bbox.h += 20;
+      UI.buffer.fill(UI.palette.fg.hex);
+      UI.buffer.rect(bbox.x - bbox.w/2 -4, bbox.y - bbox.h/2 + 8, bbox.w+8, bbox.h+8, UI.ELEMENT_RADIUS);
+      UI.buffer.fill(UI.palette.constrastBg.hex);
+      UI.buffer.text(label, width/2, height-(1+index) * 40);
+    });
+  }
+
   static drawCurrentGizmo() {
   
     if (Interaction.currentUI === Interaction.UI_STATES.eyedropper_open) {
@@ -2709,6 +2829,7 @@ class UI {
 
     UI.buffer.push();
     UI.screenToViewTransform();
+    //if (label) UI.drawTooltipBelow((topLeft.x+botRight.x)/2, botRight.y, label);
     UI.buffer.stroke(UI.palette.constrastBg.hex);
     UI.buffer.strokeWeight(3);
     UI.buffer.line(topLeft.x, topLeft.y, botRight.x, topLeft.y);
