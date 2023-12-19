@@ -845,6 +845,14 @@ class Interaction {
     Interaction.viewTransform.panY = rotatedPoint.y + screenYfromCenter;
   }
 
+  static eyedrop(new_interaction) {
+    Interaction.currentSequence = [new_interaction];
+    const brushToAdjust = openPainting.brushSettingsToAdjust;
+    const combinedRGB = openPainting.getPointRGB(new_interaction.addPaintingTransform());
+    brushToAdjust.color = HSLColor.fromRGBwithFallback(combinedRGB[0], combinedRGB[1], combinedRGB[2], brushToAdjust.color);
+    if (Interaction.editingLastStroke) openPainting.redrawLatestStroke();
+  }
+
   static keyStart(key) {
 
     // if a pointer is currently down, don't even register most keys and just do nothing.
@@ -1264,6 +1272,7 @@ class Interaction {
         openPainting.updateCombinedBuffer();
         Interaction.currentType = Interaction.TYPES.painting.eyedropper;
         Interaction.changeCursorTo('none');
+        Interaction.eyedrop(new_interaction); // eyedrop right away
         
       } else if (Interaction.currentUI === Interaction.UI_STATES.nothing_open) {
 
@@ -1544,11 +1553,7 @@ class Interaction {
 
     } else if (Interaction.currentType === Interaction.TYPES.painting.eyedropper) {
 
-      Interaction.currentSequence = [new_interaction];
-      const brushToAdjust = openPainting.brushSettingsToAdjust;
-      const combinedRGB = openPainting.getPointRGB(new_interaction.addPaintingTransform());
-      brushToAdjust.color = HSLColor.fromRGBwithFallback(combinedRGB[0], combinedRGB[1], combinedRGB[2], brushToAdjust.color);
-      if (Interaction.editingLastStroke) openPainting.redrawLatestStroke();
+      Interaction.eyedrop(new_interaction);
 
     } else if (Interaction.currentType === Interaction.TYPES.gizmo.satAndLum) { 
 
@@ -1712,6 +1717,7 @@ class Interaction {
       Interaction.changeCursorToHover();
       if (Interaction.pressedKeys.has("4")) { // keep open because key is still held
         Interaction.currentType = null;
+        Interaction.addToBrushHistory();
         return;
       } 
       Interaction.resetCurrentSequence();
@@ -2183,8 +2189,21 @@ class UI {
       UI.buffer.noStroke();
     }
 
-    if (Interaction.currentUI === Interaction.UI_STATES.clover_open) {
-      UI.drawPalette(openPainting.previousBrushes, width/2, UI.BUTTON_HEIGHT + 10, 30, 10);
+    if (![Interaction.UI_STATES.nothing_open, Interaction.UI_STATES.size_open].includes(Interaction.currentUI)) {
+
+      const uniqueColors = [];
+      const seenColors = new Set();
+
+      for (const item of [...openPainting.previousBrushes, openPainting.currentBrush]) {
+        const key = `${item.color.hue}-${item.color.saturation}-${item.color.lightness}`;
+    
+        if (!seenColors.has(key)) {
+          seenColors.add(key);
+          uniqueColors.push(item);
+        }
+      }
+
+      UI.drawPalette(uniqueColors, width/2, UI.BUTTON_HEIGHT + 10, 30, 10);
     }
   
     UI.buffer.textAlign(LEFT);
@@ -2305,6 +2324,7 @@ class UI {
     }
   }
 
+
   static drawHoverDisplay() {
     const startInteraction = Interaction.currentSequence[Interaction.currentSequence.length-2];
     const endInteraction = Interaction.currentSequence[Interaction.currentSequence.length-1];
@@ -2400,6 +2420,7 @@ class UI {
     }
 
     UI.buffer.drawingContext.save();
+    UI.buffer.fill(openPainting.currentBrush.color.hex);
     UI.buffer.rect(topLeft.x, topLeft.y, totalWidth, tileHeight, UI.ELEMENT_RADIUS);
     UI.buffer.drawingContext.clip();
 
