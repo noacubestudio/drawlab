@@ -54,7 +54,7 @@ function setup() {
     y: Math.round(smaller_side*0.9)
   }
   const INITIAL_BRUSH_SETTINGS = new BrushSettings(
-    new HSLColor(0.6, 0.6, 0.7), 
+    new HSLColor(Math.random(), 0.6, 0.7), 
     0.35, 0.5, 
     PRESET_TOOLS[0].tool, PRESET_TOOLS[0].texture
   );
@@ -90,7 +90,13 @@ function draw() {
   drawingContext.clip();
 
   openPainting.updateCombinedBuffer();
-  drawScaledCanvas(openPainting.combinedBuffer);
+  if (Interaction.viewTransform.scale === 1) {
+    // original scale
+    image(openPainting.combinedBuffer, 0, 0);
+  } else {
+    // scaled
+    image(openPainting.combinedBuffer, 0, 0, scaledSize.x, scaledSize.y);
+  }
 
   drawingContext.restore();
   pop();
@@ -98,15 +104,6 @@ function draw() {
   // draw the new UI to the buffer, then show on top of the screen
   UI.redrawInterface(); 
   image(UI.buffer, 0, 0);
-
-
-  function drawScaledCanvas(buffer) {
-    if (Interaction.viewTransform.scale === 1) {
-      image(buffer, 0, 0);
-      return;
-    }
-    image(buffer, 0, 0, scaledSize.x, scaledSize.y);
-  }
 }
 
 
@@ -581,15 +578,6 @@ class Painting {
     this.latestStroke.drawWhole();
   }
 
-  clipLatestStroke() {
-    if (this.editableStrokesInUse === 0) {
-      console.log("nothing to clip!");
-      return;
-    }
-
-    this.latestStroke.compositeOperation = "source-atop"//"destination-out";
-  }
-
   redrawLatestStroke() {
     if (this.editableStrokesInUse === 0) {
       console.log("nothing to redraw!");
@@ -927,6 +915,11 @@ class Interaction {
       Interaction.currentUI = Interaction.UI_STATES.nothing_open;
       Interaction.changeCursorToHover();
       Interaction.resetCurrentSequence();
+    } else if (key === "x") {
+      Interaction.eraseCompositionMode();
+      Interaction.currentUI = Interaction.UI_STATES.nothing_open;
+      Interaction.changeCursorToHover();
+      Interaction.resetCurrentSequence();
     }
   }
 
@@ -999,10 +992,19 @@ class Interaction {
 
   static clipCompositionMode() {
     if (openPainting.editableStrokesCount === 0) return;
-    if (Interaction.currentCompositionMode === "source-over") {
-      Interaction.currentCompositionMode = "source-atop";
-    } else {
+    if (Interaction.currentCompositionMode === "source-atop") {
       Interaction.currentCompositionMode = "source-over";
+    } else {
+      Interaction.currentCompositionMode = "source-atop";
+    }
+  }
+
+  static eraseCompositionMode() {
+    if (openPainting.editableStrokesCount === 0) return;
+    if (Interaction.currentCompositionMode === "destination-out") {
+      Interaction.currentCompositionMode = "source-over";
+    } else {
+      Interaction.currentCompositionMode = "destination-out";
     }
   }
 
@@ -2197,8 +2199,10 @@ class UI {
         "2 ": "Hue and Variation",
         "3 ": "Brush size",
         "4 ": "Eyedropper",
-        "U ": "Undo last",
-        "E ": "Edit last",
+        "U ": "Undo last stroke",
+        "E ": "Edit last stroke",
+        "X ": "Erase in last stroke",
+        "C ": "Draw in last stroke",
         "S ": "Save image",
         "R ": "Reset view",
         "F ": "Flip hue",
@@ -2222,14 +2226,20 @@ class UI {
     // draw rectangle around stroke being edited
     if (Interaction.editingLastStroke) {
       UI.drawBounds(openPainting.latestStroke.bounds);
-      bubbleLabels.push("Editing last")
+      bubbleLabels.push({text: "Editing last", color: UI.palette.fg});
     }
 
     if (Interaction.currentCompositionMode !== "source-over") {
       let label = Interaction.currentCompositionMode;
-      if (label === "source-atop") label = "Drawing inside stroke";
+      let color = UI.palette.fg;
+      if (label === "source-atop") {
+        label = "Drawing inside stroke";
+      } else if (label === "destination-out") {
+        label = "Erasing inside stroke";
+        color = UI.palette.warning;
+      }
       UI.drawBounds(openPainting.latestParentStroke.bounds);
-      bubbleLabels.push(label)
+      bubbleLabels.push({text: label, color})
     }
 
     UI.buffer.noStroke();
@@ -2581,14 +2591,14 @@ class UI {
 
   static drawStateBubbles(labelsArray) {
     UI.buffer.textAlign(CENTER);
-    labelsArray.forEach((label, index) => {
-      let bbox = FONT_MEDIUM.textBounds(label, width/2, height-(1+index) * 40);
+    labelsArray.forEach((labelObj, index) => {
+      let bbox = FONT_MEDIUM.textBounds(labelObj.text, width/2, height-(1+index) * 40);
       bbox.w = bbox.w*1.4 + 20;
       bbox.h += 20;
-      UI.buffer.fill(UI.palette.fg.hex);
+      UI.buffer.fill(labelObj.color.hex);
       UI.buffer.rect(bbox.x - bbox.w/2 -4, bbox.y - bbox.h/2 + 8, bbox.w+8, bbox.h+8, UI.ELEMENT_RADIUS);
       UI.buffer.fill(UI.palette.constrastBg.hex);
-      UI.buffer.text(label, width/2, height-(1+index) * 40);
+      UI.buffer.text(labelObj.text, width/2, height-(1+index) * 40);
     });
   }
 
