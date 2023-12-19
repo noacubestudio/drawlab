@@ -496,12 +496,19 @@ class Painting {
       } 
       
       if (drawToCombinedBuffer) {
+        if (nextStroke === undefined && Interaction.currentCompositionMode !== "source-over") {
+          // softly blinking shadow on stroke that is being erased/ drawn in
+          const contrastingLightness = (stroke.settings.color.lightness > 0.5 ? 0.5 : 2) * stroke.settings.color.lightness;
+          this.combinedBuffer.drawingContext.shadowColor = stroke.settings.color.copy().setLightness(contrastingLightness).hex;
+          this.combinedBuffer.drawingContext.shadowBlur = 10 + (sin(millis()/100)/2 + 0.5) * 20;
+        }
         if (usingTempBuffer) {
           this.combinedBuffer.image(this.temporaryCompositionBuffer, 0, 0);
           usingTempBuffer = false;
         } else {
           this.combinedBuffer.image(stroke.buffer, 0, 0);
         }
+        this.combinedBuffer.drawingContext.shadowBlur = 0; // reset
       } 
     });
   }
@@ -2257,7 +2264,7 @@ class UI {
         label = "Erasing inside stroke";
         color = UI.palette.warning;
       }
-      UI.drawBounds(openPainting.latestParentStroke.bounds);
+      //UI.drawBounds(openPainting.latestParentStroke.bounds);
       bubbleLabels.push({text: label, color})
     }
 
