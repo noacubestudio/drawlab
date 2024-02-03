@@ -48,10 +48,10 @@ function setup() {
   // initialize new painting
   Interaction.resetViewTransform();
   const INITIAL_CANVAS_COLOR = new HSLColor(0.6, 0.1, 0.15);
-  const smaller_side = Math.min(width, height);
-  const INITIAL_CANVAS_DIMENSIONS = {
-    x: Math.round(smaller_side*0.9), //*(2/3) for vertical, WIP add formats.
-    y: Math.round(smaller_side*0.9)
+  const smaller_window_side = Math.min(width, height);
+  const INITIAL_CANVAS_DIMENSIONS = { // start with square canvas for now
+    x: Math.round(smaller_window_side*0.9),
+    y: Math.round(smaller_window_side*0.9)
   }
   const INITIAL_BRUSH_SETTINGS = new BrushSettings(
     new HSLColor(Math.random(), 0.6, 0.7), 
@@ -66,16 +66,15 @@ function draw() {
   // behind everything
   background(openPainting.canvasColor.behind().hex);
 
+  // correctly center and rotate
   push();
- 
   translate(Interaction.viewTransform.centerPos().x, Interaction.viewTransform.centerPos().y);
   rotate(Interaction.viewTransform.rotation);
-
+  // WIP: should also take into account current cropping amount here and make the interactions offset to match.
   translate(-Interaction.viewTransform.scale * openPainting.width/2, -Interaction.viewTransform.scale * openPainting.height/2);
 
 
   // draw the painting buffers
-
   const scaledSize = {
     x: Math.round(Interaction.viewTransform.scale * openPainting.width),
     y: Math.round(Interaction.viewTransform.scale * openPainting.height)
@@ -86,7 +85,7 @@ function draw() {
   fill(openPainting.canvasColor.hex);
   strokeWeight(2)
   stroke(new HSLColor(0,0,0,0.5).hex);
-  rect(0, 0, scaledSize.x, scaledSize.y, UI.ELEMENT_RADIUS/2);
+  rect(0, 0, scaledSize.x * openPainting.cropWidthMultiplier, scaledSize.y * openPainting.cropHeightMultiplier, UI.ELEMENT_RADIUS/2);
   drawingContext.clip();
 
   openPainting.updateCombinedBuffer();
@@ -407,6 +406,8 @@ class Painting {
   constructor(width, height, backgroundColor, startingBrush) {
     this.width = width;
     this.height = height;
+    this.cropWidthMultiplier = 1;
+    this.cropHeightMultiplier = height/width;
     this.lowestBuffer = createGraphics(width, height); // all older bruststrokes that are no longer editable
     this.combinedBuffer = createGraphics(width, height); // final image
     this.temporaryCompositionBuffer = createGraphics(width, height); // for composition of specific editable buffers
@@ -572,7 +573,13 @@ class Painting {
 
   download() {
     const timestamp = new Date().toLocaleString().replace(/[-:T.]/g, "-").replace(/, /g, "_");
-    saveCanvas(this.combinedBuffer, "drawlab-canvas_" + timestamp, "png");
+    const exportCrop = {
+      x: Math.floor(this.width * this.cropWidthMultiplier),
+      y: Math.floor(this.height * this.cropHeightMultiplier)
+    }
+    const exportBuffer = createGraphics(exportCrop.x, exportCrop.y);
+    exportBuffer.image(this.combinedBuffer, 0, 0);
+    saveCanvas(exportBuffer, "drawlab-canvas_" + timestamp, "png");
   }
 
   moveLatestStroke(x, y) {
@@ -708,7 +715,8 @@ class Interaction {
       tool1: '1',
       tool2: '2',
       help: 'helpButton',
-      fill: ' fillButton'
+      fill: 'fillButton',
+      format: 'formatButton'
     },
     knob: {
       jitter: 'jitterKnob',
@@ -1000,6 +1008,24 @@ class Interaction {
     document.body.style.backgroundColor = openPainting.canvasColor.behind().hex;
   }
 
+  static nextCanvasFormat() {
+    Interaction.stopEditing();
+    Interaction.resetViewTransform();
+    if (openPainting.cropWidthMultiplier === openPainting.cropHeightMultiplier) {
+      // was square
+      openPainting.cropWidthMultiplier  = 3/4;
+      openPainting.cropHeightMultiplier = 1;
+    } else if (openPainting.cropWidthMultiplier < openPainting.cropHeightMultiplier) {
+      // was portrait
+      openPainting.cropWidthMultiplier  = 1;
+      openPainting.cropHeightMultiplier = 3/4;
+    } else {
+      // was landscape
+      openPainting.cropWidthMultiplier  = 1;
+      openPainting.cropHeightMultiplier = 1;
+    }
+  }
+
   static undoAction() {
     openPainting.popLatestStroke();
     Interaction.stopEditing();
@@ -1134,23 +1160,25 @@ class Interaction {
     }
 
     if ((x < 100 || x > width-100) && Interaction.currentUI === Interaction.UI_STATES.clover_open) {
-      const toolsY = y - UI.BUTTON_WIDTH * 2; // how far down these buttons start
-      const toolIndex = Math.floor(toolsY / UI.BUTTON_HEIGHT);
+      const buttonY = y - UI.BUTTON_WIDTH * 2; // how far down these buttons start
+      const buttonIndex = Math.floor(buttonY / UI.BUTTON_HEIGHT);
 
       if (x<100) {
         // left side
-        if (toolIndex === 0) {
+        if (buttonIndex === 0) {
           return Interaction.TYPES.button.tool0;
-        } else if (toolIndex === 1) {
+        } else if (buttonIndex === 1) {
           return Interaction.TYPES.button.tool1;
-        } else if (toolIndex === 2) {
+        } else if (buttonIndex === 2) {
           return Interaction.TYPES.button.tool2;
         }
       } else {
         // right side
-        if (toolIndex === 0) {
+        if (buttonIndex === 0) {
           return Interaction.TYPES.button.fill;
-        }
+        } else if (buttonIndex === 1) {
+          return Interaction.TYPES.button.format;
+        } 
       }
       
     }
@@ -1662,6 +1690,9 @@ class Interaction {
       } else if (Interaction.currentType === Interaction.TYPES.button.fill) {
         Interaction.fillAction();
         Interaction.elementTypeAtPointer = null;
+      } else if (Interaction.currentType === Interaction.TYPES.button.format) {
+        Interaction.nextCanvasFormat();
+        Interaction.elementTypeAtPointer = null;
       }
       Interaction.resetCurrentSequence();
 
@@ -1952,9 +1983,6 @@ class HSLColor {
     const highCurve = (x) => 1 - Math.pow(1 - x, 3);
     const customColorEasing = (value, chaos) => lerp(lowCurve(value), highCurve(value), chaos * chaos);
 
-    // OLD
-    //const easedRandomNoise = (value, chaos) => ((1-chaos)*value**3) / 8 + lerp(value**3, value, 0.5)*chaos;
-
     // get [-1, 1] value from seed for each color parameter
     const lNoiseValue = HSLColor.symmetricalNoise(seed);
     const hNoiseValue = HSLColor.symmetricalNoise(seed*1.1);
@@ -1966,7 +1994,12 @@ class HSLColor {
     this.s += 0.4 * customColorEasing(sNoiseValue, chaos*0.5);
     // make sure the components are still in range
     this.l = Math.max(0, Math.min(1, this.l));
-    this.s = Math.max(0, Math.min(1, this.s));
+    this.s = Math.max(-1, Math.min(1, this.s));
+    if (this.s < 0) {
+      //flip hue and saturation
+      this.s = - this.s;
+      this.h += 0.5;
+    }
 
     return this;
   }
@@ -2071,6 +2104,7 @@ class UI {
 
       // menu on right
       UI.drawRightButton("fill all", UI.BUTTON_HEIGHT * 0 + 2*UI.BUTTON_WIDTH, Interaction.TYPES.button.fill, UI.palette.warning);
+      UI.drawRightButton("change crop", UI.BUTTON_HEIGHT * 1 + 2*UI.BUTTON_WIDTH, Interaction.TYPES.button.fill, UI.palette.fg);
     }
   
     // top menu buttons
