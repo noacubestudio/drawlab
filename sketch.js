@@ -139,6 +139,8 @@ class BrushSettings {
     const size = this.pxSize * (this.texture === "Round" ? 0.7 : 1);
     if (pressure === undefined) return size;
     return size * map(pressure, 0, 1, 0.1, 2.0, true);
+    // TODO: consider logarithmic pressure scaling
+    // return Math.log(pressure + 1) * size * 10;
   }
 
   getColorWithVar(seed) {
@@ -212,8 +214,25 @@ class Brushstroke {
     return totalPressure / count;
   }
 
+  
+
   addPoint(point) {
-    this.points.push(new BrushPoint(point.x,  point.y,  point.azimuth, point.pressure, point.timeStamp));
+    const lastPoint = this.points[this.points.length - 1];
+
+    // don't add if too close to last point
+    if (lastPoint === undefined || Interaction.distance2d(lastPoint, point) > 1) {
+      
+      // pressure should be smoothed out
+      if (point.pressure !== undefined) {
+        if (lastPoint !== undefined && lastPoint.pressure !== undefined) {
+          point.pressure = lerp(lastPoint.pressure, point.pressure, 0.2);
+        } else {
+          point.pressure *= 0.5; // start lower
+        }
+      }
+
+      this.points.push(new BrushPoint(point.x,  point.y,  point.azimuth, point.pressure, point.timeStamp));
+    }
   }
 
   movePoints(xDelta, yDelta) {
@@ -234,10 +253,11 @@ class Brushstroke {
       return;
     }
     // wip, ignores tool for now
-    this.points.forEach((point, index) => {
-      const lastPoint = this.points[index - 1];
-      if (lastPoint !== undefined) { 
-        this.drawPart(lastPoint, point);
+    this.points.forEach((endPoint, index) => {
+      const startPoint = this.points[index - 1];
+      const beforePoint = (index > 1) ? this.points[index - 2] : undefined;
+      if (startPoint !== undefined && endPoint !== undefined) {
+        this.drawPart(startPoint, endPoint, beforePoint);
       }
     });
   }
@@ -247,20 +267,72 @@ class Brushstroke {
    * Render two points of the stroke.
    * @param {BrushPoint} start The first point of the stroke segment.
    * @param {BrushPoint} end The second point of the stroke segment.
+   * @param {BrushPoint} beforePoint Data from the previous stroke segment.
    * @returns 
    */
-  drawPart(start, end) {
+  drawPart(start, end, beforePoint) {
 
-    if (start === undefined || end === undefined) {
-      console.log("can't draw this stroke part, point(s) missing!");
-      return;
-    } 
-    if (start.x === end.x && start.y === end.y) return;
+    
 
-    start.azimuth ??= end.azimuth;
-    start.azimuth ??= p5.Vector.angleBetween(createVector(0, -1), createVector(end.x-start.x, end.y-start.y));
-      end.azimuth ??= p5.Vector.angleBetween(createVector(0, -1), createVector(end.x-start.x, end.y-start.y));
-    const averageDirection = averageAngle(start.azimuth, end.azimuth);
+    // this.buffer.stroke(this.settings.getColorWithVar(this.brushstrokeSeed).hex);
+    // this.buffer.push();
+
+    // this.buffer.line(start.x, start.y, end.x, end.y);
+
+    // this.buffer.translate(start.x, start.y);
+    // this.buffer.rotate(start.azimuth ?? 0);
+    
+    // if (start.pressure === 0) {
+    //   this.buffer.line(-25, 0, +25, 0);
+    //   this.buffer.stroke(new HSLColor(0, 1, 0.5, 0).hex);
+    //   this.buffer.pop();
+    // } else {
+    //   let p = Math.log(start.pressure + 1) * 100
+    //   let s = 5 * (start.pressure * 50 ?? 1);
+    //   this.buffer.line(-s, 0, +s, 0);
+    //   this.buffer.pop();
+    // }
+    
+    // return;
+
+
+
+
+    const brushSize = this.settings.pxSize * (this.settings.texture === "Round" ? 0.7 : 1);
+
+    // if (beforePoint === undefined) {
+    //   //draw a circle at start point
+
+    //   this.buffer.push();
+    //   this.buffer.translate(start.x, start.y);
+
+    //   this.buffer.noStroke();
+    //   this.buffer.fill(this.settings.color.hex);
+    //   const startSize = this.settings.finalPxSizeWithPressure(start.pressure) ?? brushSize;
+    //   this.buffer.ellipse(0, 0, startSize);
+
+    //   const varSegments = 48;
+    //   for (let i = 0; i < varSegments; i++) {
+    //     const start = (TWO_PI / varSegments) * i;
+    //     const stop = start + TWO_PI / varSegments; 
+    //     this.buffer.fill(this.settings.getColorWithVar(i).hex);
+    //     this.buffer.arc(0, 0, startSize, startSize, start, stop);
+    //   }
+
+    //   this.buffer.pop();
+    // }
+
+
+
+    // for now, ignore .azimuth besides for slightly changing the width of strokes.
+    // barrel rotation should have an effect instead, which is not yet supported and I couldn't use myself...
+    const endAngle = p5.Vector.angleBetween(createVector(0, -1), createVector(end.x-start.x, end.y-start.y));
+    const startAngle = (beforePoint !== undefined) 
+      ? p5.Vector.angleBetween(createVector(0, -1), createVector(start.x-beforePoint.x, start.y-beforePoint.y))
+      : endAngle;
+    const averageAngle = getAverageAngle(startAngle, endAngle);
+
+    const averageAzimuth = (start.azimuthAngle !== undefined) ? getAverageAngle(start.azimuthAngle, end.azimuthAngle) : undefined;
 
       //if (start.pressure === 0.5) start.pressure = 0
       end.pressure ??= start.pressure;
@@ -268,11 +340,17 @@ class Brushstroke {
     start.pressure ??= (openPainting.averagePressure ?? 0.5);
     const avgPressure = (start.pressure + end.pressure) / 2;
 
+    const avgBrushSize = this.settings.finalPxSizeWithPressure(openPainting.averagePressure) ?? brushSize;
+
+    function widthAtPoint(pressure, strokeAngle, azimuthAngle) {
+      const alignedness = (azimuthAngle !== undefined) ? map(Math.abs(azimuthAngle - strokeAngle), 0, Math.PI * 2, 1, 0) : 1; // currently useless??
+      return brushSize * map(pressure, 0, 1, 0.1, 2.0, true) * alignedness;
+    }
+    
     this.buffer.noStroke();
 
     const rf = 2 * this.settings.colorVar * this.settings.colorVar; // randomness matches increasing variation
-    const brushSize = this.settings.pxSize * (this.settings.texture === "Round" ? 0.7 : 1);
-    const avgBrushSize = this.settings.finalPxSizeWithPressure(openPainting.averagePressure) ?? brushSize;
+    
     const strips = Math.floor(map(avgBrushSize, 10, 300, 10, 200) * (this.settings.texture === "Round" ? 0.7 : 1));
 
     // draw background shape
@@ -282,12 +360,12 @@ class Brushstroke {
       const lowSideMiddlePos = {x: lerp(start.x, end.x, lowSideLerpPart), y: lerp(start.y, end.y, lowSideLerpPart)};
       const highSideMiddlePos = {x: lerp(start.x, end.x, highSideLerpPart), y: lerp(start.y, end.y, highSideLerpPart)};
   
-      const startEdgeVectorLower  = p5.Vector.fromAngle(start.azimuth, -0.5*brushSize*map(start.pressure, 0, 1, 0.1, 2.0, true));
-      const startEdgeVectorHigher = p5.Vector.fromAngle(start.azimuth, 0.5*brushSize*map(start.pressure, 0, 1, 0.1, 2.0, true));
-      const endEdgeVectorLower    = p5.Vector.fromAngle(end.azimuth, -0.5*brushSize*map(end.pressure, 0, 1, 0.1, 2.0, true));
-      const endEdgeVectorHigher   = p5.Vector.fromAngle(end.azimuth, 0.5*brushSize*map(end.pressure, 0, 1, 0.1, 2.0, true));
-      const midEdgeVectorLower    = p5.Vector.fromAngle(averageDirection, -0.5*brushSize*map(avgPressure, 0, 1, 0.1, 2.0, true));
-      const midEdgeVectorHigher   = p5.Vector.fromAngle(averageDirection, 0.5*brushSize*map(avgPressure, 0, 1, 0.1, 2.0, true));
+      const startEdgeVectorLower  = p5.Vector.fromAngle(  startAngle, -0.5*widthAtPoint(start.pressure,   startAngle, start.azimuthAngle));
+      const startEdgeVectorHigher = p5.Vector.fromAngle(  startAngle,  0.5*widthAtPoint(start.pressure,   startAngle, start.azimuthAngle));
+      const endEdgeVectorLower    = p5.Vector.fromAngle(    endAngle, -0.5*widthAtPoint(  end.pressure,     endAngle,   end.azimuthAngle));
+      const endEdgeVectorHigher   = p5.Vector.fromAngle(    endAngle,  0.5*widthAtPoint(  end.pressure,     endAngle,   end.azimuthAngle));
+      const midEdgeVectorLower    = p5.Vector.fromAngle(averageAngle, -0.5*widthAtPoint(   avgPressure, averageAngle,     averageAzimuth));
+      const midEdgeVectorHigher   = p5.Vector.fromAngle(averageAngle,  0.5*widthAtPoint(   avgPressure, averageAngle,     averageAzimuth));
   
       this.buffer.fill(this.settings.color.hex);
       this.buffer.strokeWeight(1);
@@ -321,14 +399,12 @@ class Brushstroke {
         const middleX = lerp(start.x, end.x, lerpPart);
         const middleY = lerp(start.y, end.y, lerpPart);
 
-        const startEdgeVectorLower  = p5.Vector.fromAngle(start.azimuth, lowerSide*brushSize*map(start.pressure, 0, 1, 0.1, 2.0, true));
-        const startEdgeVectorHigher = p5.Vector.fromAngle(start.azimuth, higherSide*brushSize*map(start.pressure, 0, 1, 0.1, 2.0, true));
-
-        const endEdgeVectorLower    = p5.Vector.fromAngle(end.azimuth, lowerSide*brushSize*map(end.pressure, 0, 1, 0.1, 2.0, true));
-        const endEdgeVectorHigher   = p5.Vector.fromAngle(end.azimuth, higherSide*brushSize*map(end.pressure, 0, 1, 0.1, 2.0, true));
-
-        const midEdgeVectorLower    = p5.Vector.fromAngle(averageDirection, lowerSide*brushSize*map(avgPressure, 0, 1, 0.1, 2.0, true));
-        const midEdgeVectorHigher   = p5.Vector.fromAngle(averageDirection, higherSide*brushSize*map(avgPressure, 0, 1, 0.1, 2.0, true));
+        const startEdgeVectorLower  = p5.Vector.fromAngle(  startAngle,  lowerSide*widthAtPoint(start.pressure,   startAngle, start.azimuthAngle));
+        const startEdgeVectorHigher = p5.Vector.fromAngle(  startAngle, higherSide*widthAtPoint(start.pressure,   startAngle, start.azimuthAngle));
+        const endEdgeVectorLower    = p5.Vector.fromAngle(    endAngle,  lowerSide*widthAtPoint(  end.pressure,     endAngle,   end.azimuthAngle));
+        const endEdgeVectorHigher   = p5.Vector.fromAngle(    endAngle, higherSide*widthAtPoint(  end.pressure,     endAngle,   end.azimuthAngle));
+        const midEdgeVectorLower    = p5.Vector.fromAngle(averageAngle,  lowerSide*widthAtPoint(   avgPressure, averageAngle,     averageAzimuth));
+        const midEdgeVectorHigher   = p5.Vector.fromAngle(averageAngle, higherSide*widthAtPoint(   avgPressure, averageAngle,     averageAzimuth));
 
         // if (HSLColor.symmetricalNoise(start.seed + i) < start.pressure * 4) {
           const brushCol = this.settings.getColorWithVar(i + start.seed).varyComponents(i + this.brushstrokeSeed, 0.1 + this.settings.colorVar * 0.3);
@@ -618,8 +694,9 @@ class Painting {
 
     const lastPoint = this.latestStroke.points[this.latestStroke.points.length-2];
     const newPoint  = this.latestStroke.points[this.latestStroke.points.length-1];
+    const beforePoint = (this.latestStroke.points.length > 2) ? this.latestStroke.points[this.latestStroke.points.length-3] : undefined;
 
-    this.latestStroke.drawPart(lastPoint, newPoint);
+    this.latestStroke.drawPart(lastPoint, newPoint, beforePoint);
   }
 
   getPointRGB(point) {
@@ -1886,7 +1963,7 @@ class Interaction {
 class HSLColor {
 
   static symmetricalNoise(seed) {
-    return (noise(seed * 10000)) * 2 - 1
+    return (noise(seed * 10000)) * 2 - 1;
   }
 
   static lerpColorInHSL(color1, color2, lerpAmount) {
@@ -2050,6 +2127,7 @@ class UI {
   
   static SLIDER_RANGE_MARGIN = 20; // can't be too low, or the slider roundness intersects.
   static SLIDER_WIDTH = 200 + UI.SLIDER_RANGE_MARGIN*2; 
+  static HANDLE_MARGIN = 4;
   
   static updateDimensionsForBreakpoint(width, height) {
     const maxSpaceForActualRange = (width - UI.BUTTON_HEIGHT*2 - UI.BUTTON_WIDTH*4) / 3 - UI.SLIDER_RANGE_MARGIN*2;
@@ -2346,12 +2424,17 @@ class UI {
       
       UI.buffer.strokeWeight(2);
       Interaction.currentSequence.forEach((point) => {
-        
         UI.buffer.stroke(new HSLColor(0.1, 1, 1.0).hex);
-        UI.buffer.rect(point.x, point.y, 2, 2)
+        UI.buffer.push();
+        UI.buffer.translate(point.x, point.y);
+        UI.buffer.rotate(point.azimuth ?? 0);
+        const s = 5 * (point.pressure * 50 ?? 1);
+        UI.buffer.line(-s, 0, +s, 0);
+        UI.buffer.rect(0, 0, 2, 2)
         UI.buffer.fill(new HSLColor(0.1, 1, 0.4).hex);
         UI.buffer.noStroke()
-        UI.buffer.rect(point.x, point.y, 2, 2)
+        UI.buffer.rect(0, 0, 2, 2);
+        UI.buffer.pop();
       })
     }
   
@@ -2606,11 +2689,12 @@ class UI {
     }
 
     // slider handle
-    const handleWidth = UI.SLIDER_RANGE_MARGIN*2 - UI.ELEMENT_MARGIN*2 - 10;
-    const handleHeight = height -10;
+    const handleMargin = 4 + UI.HANDLE_MARGIN;
+    const handleWidth = UI.SLIDER_RANGE_MARGIN*2 - UI.ELEMENT_MARGIN*2 - handleMargin;
+    const handleHeight = height - handleMargin;
     const handleX = x - handleWidth/2 + width * map(sliderPercent, 0, 1, outside_range_of_width, 1-outside_range_of_width);
     const handleY = y - handleHeight/2 + height / 2;
-    const handleRoundness = UI.ELEMENT_RADIUS - 5;
+    const handleRoundness = UI.ELEMENT_RADIUS - handleMargin/2;
 
     UI.buffer.noFill();
     UI.buffer.strokeWeight(4);
@@ -2936,7 +3020,7 @@ class UI {
 
 // math utils
 const pointsToAngle = (x1, y1, x2, y2) => Math.atan2(y2 - y1, x2 - x1);
-const averageAngle = (first, second) => Math.atan2(Math.sin(first)+Math.sin(second), Math.cos(first)+Math.cos(second));
+const getAverageAngle = (first, second) => Math.atan2(Math.sin(first)+Math.sin(second), Math.cos(first)+Math.cos(second));
 const rotatePoint = (x, y, angle) => ({
   x: x * Math.cos(angle) - y * Math.sin(angle),
   y: x * Math.sin(angle) + y * Math.cos(angle)
