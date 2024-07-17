@@ -163,6 +163,7 @@ class BrushPoint {
     this.y = y;
     this.azimuth = azimuth;
     this.pressure = pressure;
+    this.timeStamp = timeStamp;
     this.seed = (timeStamp ? timeStamp/1000000 + (x^y)/1000000 : x * 2 + y * 3);
   }
 
@@ -220,7 +221,7 @@ class Brushstroke {
     const lastPoint = this.points[this.points.length - 1];
 
     // don't add if too close to last point
-    if (lastPoint === undefined || Interaction.distance2d(lastPoint, point) > 1) {
+    if (lastPoint === undefined || (Interaction.distance2d(lastPoint, point) > 3)) { // && (point.timeStamp - lastPoint.timeStamp) > 5)) {
       
       // pressure should be smoothed out
       if (point.pressure !== undefined) {
@@ -349,7 +350,8 @@ class Brushstroke {
     
     this.buffer.noStroke();
 
-    const rf = 2 * this.settings.colorVar * this.settings.colorVar; // randomness matches increasing variation
+    // randomness matches increasing variation
+    const rf = 3 * this.settings.colorVar * this.settings.colorVar; 
     
     const strips = Math.floor(map(avgBrushSize, 10, 300, 10, 200) * (this.settings.texture === "Round" ? 0.7 : 1));
 
@@ -424,8 +426,8 @@ class Brushstroke {
             this.buffer.fill(brushCol.hex);
             //this.buffer.stroke(brushCol.hex);
             this.buffer.beginShape();
-            this.randomizedVertex(this.buffer, sX, startEdgeVectorLower.x ,    sY, startEdgeVectorLower.y ,    rf);
-            this.randomizedVertex(this.buffer, sX, startEdgeVectorHigher.x,    sY, startEdgeVectorHigher.y,    rf);
+            this.randomizedVertex(this.buffer, sX, startEdgeVectorLower.x ,    sY, startEdgeVectorLower.y ,    0);
+            this.randomizedVertex(this.buffer, sX, startEdgeVectorHigher.x,    sY, startEdgeVectorHigher.y,    0);
             this.randomizedVertex(this.buffer, middleX, midEdgeVectorHigher.x, middleY, midEdgeVectorHigher.y, rf);
             this.randomizedVertex(this.buffer, middleX, midEdgeVectorLower.x,  middleY, midEdgeVectorLower.y,  rf);
             this.buffer.endShape();
@@ -452,8 +454,8 @@ class Brushstroke {
             this.buffer.beginShape();
             this.randomizedVertex(this.buffer, middleX, midEdgeVectorLower.x , middleY, midEdgeVectorLower.y , rf);
             this.randomizedVertex(this.buffer, middleX, midEdgeVectorHigher.x, middleY, midEdgeVectorHigher.y, rf);
-            this.randomizedVertex(this.buffer, eX  , endEdgeVectorHigher.x, eY  , endEdgeVectorHigher.y, rf);
-            this.randomizedVertex(this.buffer, eX  , endEdgeVectorLower.x , eY  , endEdgeVectorLower.y , rf);
+            this.randomizedVertex(this.buffer, eX  , endEdgeVectorHigher.x, eY  , endEdgeVectorHigher.y, 0);
+            this.randomizedVertex(this.buffer, eX  , endEdgeVectorLower.x , eY  , endEdgeVectorLower.y , 0);
             this.buffer.endShape();
           }
         // }
@@ -466,6 +468,10 @@ class Brushstroke {
       x + xOff + HSLColor.symmetricalNoise(x*4 + xOff*2) * randomFactor, 
       y + yOff + HSLColor.symmetricalNoise(y*4 + yOff*2) * randomFactor
     );
+    // buffer.vertex(
+    //   x + xOff + HSLColor.symmetricalNoise(x*4 + xOff*2) * randomFactor, 
+    //   y + yOff + HSLColor.symmetricalNoise(y*4 + yOff*2) * randomFactor
+    // );
   }
 }
 
@@ -1162,10 +1168,10 @@ class Interaction {
   }
 
   static processSlider(new_interaction) {
-    const middle_width = UI.SLIDER_WIDTH * 3 + 120;
+    const middle_width = UI.SLIDER_WIDTH + 120;
     const xInMiddleSection = new_interaction.x - width/2 + middle_width/2;
     const brushToAdjust = openPainting.brushSettingsToAdjust;
-    const percentOfSlider = (sliderNumber) => map(xInMiddleSection - 60 - UI.SLIDER_WIDTH * sliderNumber, UI.SLIDER_RANGE_MARGIN, UI.SLIDER_WIDTH-UI.SLIDER_RANGE_MARGIN, 0, 1);
+    const percentOfSlider = (sliderNumber) => map(xInMiddleSection - UI.KNOB_SIZE, UI.SLIDER_RANGE_MARGIN, UI.SLIDER_WIDTH-UI.SLIDER_RANGE_MARGIN, 0, 1);
 
     if (Interaction.currentType === Interaction.TYPES.slider.lightness) {
       const newValue = constrain(percentOfSlider(0), 0, 1);
@@ -1188,51 +1194,46 @@ class Interaction {
   }
 
   static typeFromCoords(x, y) {
-    if (y < UI.BUTTON_HEIGHT) {
-      const middle_width = UI.SLIDER_WIDTH * 3 + 120;
 
-      if (x < UI.BUTTON_WIDTH) {
-        // first button
-        return Interaction.TYPES.button.undo;
+    if (x < UI.BUTTON_WIDTH && y < UI.BUTTON_HEIGHT) {
+      // first button
+      return Interaction.TYPES.button.undo;
 
-      } else if (x < UI.BUTTON_WIDTH * 2) {
-        // second button
-        return Interaction.TYPES.button.edit;
+    } else if (x < UI.BUTTON_WIDTH * 2 && y < UI.BUTTON_HEIGHT) {
+      // second button
+      return Interaction.TYPES.button.edit;
 
-      } else if (x > width - UI.BUTTON_WIDTH) {
-        // rightmost button
-        return Interaction.TYPES.button.save;
+    } else if (x > width - UI.BUTTON_WIDTH && y < UI.BUTTON_HEIGHT) {
+      // rightmost button
+      return Interaction.TYPES.button.save;
 
-      } else if (x > width - UI.BUTTON_WIDTH*2) {
-        // second to last
-        return Interaction.TYPES.button.clear;
+    } else if (x > width - UI.BUTTON_WIDTH*2 && y < UI.BUTTON_HEIGHT) {
+      // second to last
+      return Interaction.TYPES.button.clear;
 
-      } else if (UI.showingSlidersAndKnobs) {
+    } else {
 
-        const xInMiddleSection = x - width/2 + middle_width/2;
-        if (xInMiddleSection > 0) {
-          if (xInMiddleSection < 60) {
-            //var
-            return Interaction.TYPES.knob.size;
+      const middle_width = UI.SLIDER_WIDTH + 120;
+      const xInMiddleSection = x - width/2 + middle_width/2;
+      const sliderSectionStart = (UI.topAlignSliderSection ? 0 : UI.BUTTON_HEIGHT);
 
-          } else if (xInMiddleSection < 60 + UI.SLIDER_WIDTH) {
-            // lightness
+      if (xInMiddleSection > 0 && xInMiddleSection < UI.KNOB_SIZE && 
+        y > sliderSectionStart && y < UI.KNOB_SIZE + sliderSectionStart) {
+        return Interaction.TYPES.knob.size;
+      } 
+      if (xInMiddleSection > 60 && xInMiddleSection < (60 + UI.SLIDER_WIDTH) && 
+        y > sliderSectionStart && y < UI.SLIDER_HEIGHT * 3 + sliderSectionStart) {
+          if ( y < UI.SLIDER_HEIGHT + sliderSectionStart) {
             return Interaction.TYPES.slider.lightness;
-
-          } else if (xInMiddleSection < 60 + UI.SLIDER_WIDTH * 2) {
-            // lightness
+          } else if (y < UI.SLIDER_HEIGHT * 2 + sliderSectionStart) {
             return Interaction.TYPES.slider.saturation;
-
-          } else if (xInMiddleSection < 60 + UI.SLIDER_WIDTH * 3) {
-            // hue
+          } else if (y < UI.SLIDER_HEIGHT * 3 + sliderSectionStart) {
             return Interaction.TYPES.slider.hue;
-
-          } else if (xInMiddleSection < 120 + UI.SLIDER_WIDTH * 3) {
-            // size
-            return Interaction.TYPES.knob.jitter;
-
           }
-        }
+        } 
+      if (xInMiddleSection > (UI.KNOB_SIZE + UI.SLIDER_WIDTH) && xInMiddleSection < (UI.KNOB_SIZE*2 + UI.SLIDER_WIDTH) && 
+        y > sliderSectionStart && y < UI.KNOB_SIZE + sliderSectionStart) {
+          return Interaction.TYPES.knob.jitter;
       }
     }
 
@@ -1786,6 +1787,10 @@ class Interaction {
       Interaction.resetCurrentSequence();
       Interaction.changeCursorToHover();
       Interaction.stopEditing();
+      
+      // TODO: reset hover info only if the pointer does not actually support hover.
+      // The same goes for the knob and button types.
+      //Interaction.elementTypeAtPointer = null;
 
     } else if (Interaction.currentType === Interaction.TYPES.painting.draw) {
 
@@ -2125,17 +2130,20 @@ class UI {
   // this would make especially much sense for completely rounded sliders, but feels better to me in general.
   // the button height already contains the UI.ELEMENT_MARGIN, which was previously added to the slider width instead.
   
+  static KNOB_SIZE = 70;
   static SLIDER_RANGE_MARGIN = 20; // can't be too low, or the slider roundness intersects.
-  static SLIDER_WIDTH = 200 + UI.SLIDER_RANGE_MARGIN*2; 
+  static SLIDER_WIDTH = 200 + UI.SLIDER_RANGE_MARGIN*2; // default
+  static SLIDER_HEIGHT = 40;
   static HANDLE_MARGIN = 4;
   
   static updateDimensionsForBreakpoint(width, height) {
-    const maxSpaceForActualRange = (width - UI.BUTTON_HEIGHT*2 - UI.BUTTON_WIDTH*4) / 3 - UI.SLIDER_RANGE_MARGIN*2;
-    UI.SLIDER_WIDTH = (maxSpaceForActualRange > 200 ? 200 : 100) + UI.SLIDER_RANGE_MARGIN*2; 
+    const freeSpace = UI.SLIDER_RANGE_MARGIN;
+    UI.SLIDER_WIDTH = width - UI.KNOB_SIZE*2 - UI.BUTTON_WIDTH*4 - freeSpace*2;
+    UI.SLIDER_WIDTH = constrain(UI.SLIDER_WIDTH, 160, 600);
   }
 
-  static get showingSlidersAndKnobs() {
-    return (width > UI.BUTTON_HEIGHT*2 + UI.BUTTON_WIDTH*4 + UI.SLIDER_WIDTH*3);
+  static get topAlignSliderSection() {
+    return (width > UI.KNOB_SIZE*2 + UI.BUTTON_WIDTH*4 + UI.SLIDER_WIDTH);
   }
 
   // state
@@ -2204,110 +2212,13 @@ class UI {
     UI.buffer.textFont(FONT_MEDIUM);
   
     // draw the sliders and knobs at the top
-    const sliderStart = width/2 - UI.SLIDER_WIDTH * 1.5;
-    if (UI.showingSlidersAndKnobs) {
+    const sliderStart = width/2 - UI.SLIDER_WIDTH * 0.5;
 
-      // bg
-      UI.buffer.fill(UI.palette.constrastBg.hex);
-      UI.buffer.rect(sliderStart-60, 0,  UI.SLIDER_WIDTH * 3 + 120, UI.BUTTON_HEIGHT, UI.ELEMENT_RADIUS + UI.ELEMENT_MARGIN);
+    // MIDDLE SECTION
+    UI.buffer.push();
+    if (!UI.topAlignSliderSection) UI.buffer.translate(0, UI.BUTTON_HEIGHT);
 
-      // show current pressure
-      let pressureForSizeIndicator = undefined;
-      if (Interaction.currentSequence.length > 0 && Interaction.isAlreadyDown) {
-        const last_interaction = Interaction.currentSequence[Interaction.currentSequence.length-1];
-        if (last_interaction.pressure !== undefined) {
-          pressureForSizeIndicator = last_interaction.pressure;
-        }
-      } else if (openPainting.averagePressure !== undefined) {
-        pressureForSizeIndicator = openPainting.averagePressure;
-      }
-
-      // draw the size knob
-      UI.buffer.drawingContext.save();
-      UI.buffer.fill(UI.palette.fg.toHexWithSetAlpha(0.2));
-      UI.buffer.rect(sliderStart - 60 + UI.ELEMENT_MARGIN, UI.ELEMENT_MARGIN, 60 - UI.ELEMENT_MARGIN*2, UI.BUTTON_HEIGHT - UI.ELEMENT_MARGIN*2, UI.ELEMENT_RADIUS);
-      UI.buffer.drawingContext.clip();
-      UI.drawSizeIndicator(sliderStart - 30, UI.BUTTON_HEIGHT / 2, pressureForSizeIndicator);
-      UI.buffer.drawingContext.restore();
-      // outline
-      UI.buffer.noFill();
-      UI.buffer.strokeWeight(1);
-      UI.buffer.stroke(UI.palette.fg.toHexWithSetAlpha(0.2));
-      UI.buffer.rect(sliderStart - 60 + UI.ELEMENT_MARGIN, UI.ELEMENT_MARGIN, 60 - UI.ELEMENT_MARGIN*2, UI.BUTTON_HEIGHT - UI.ELEMENT_MARGIN*2, UI.ELEMENT_RADIUS);
-      UI.buffer.noStroke();
-
-      // show average pressure with overlay
-      const indicatorSize = openPainting.brushSettingsToAdjust.finalPxSizeWithPressure(openPainting.averagePressure) * Interaction.viewTransform.scale;
-      UI.drawSizeOverlay(sliderStart - 30, UI.BUTTON_HEIGHT / 2, indicatorSize);
-
-      // sliders
-      const relevantElements = [...Object.values(Interaction.TYPES.knob),...Object.values(Interaction.TYPES.slider)];
-      // for displaying the hover for whichever slider is currently interacted with. If none, show regular hover state.
-      const currentElement = relevantElements.includes(Interaction.currentType) ? Interaction.currentType : Interaction.elementTypeAtPointer;
-      
-      // draw the sliders themselves first
-      let baseColor = openPainting.brushSettingsToAdjust.color;
-      const rotatedBaseHue = (baseColor.hue+openPainting.hueRotation) % 1;
-      const correctlyFlippedSaturation = (openPainting.hueRotation === 0) ? (1 + baseColor.saturation)/2 : (1 - baseColor.saturation)/2;
-      const showVarOnSliders = (currentElement === Interaction.TYPES.knob.jitter);
-
-      UI.drawGradientSlider(sliderStart                  , 0, UI.SLIDER_WIDTH, UI.BUTTON_HEIGHT, 
-        baseColor.copy().setLightness(0), baseColor.copy().setLightness(1), baseColor.lightness, showVarOnSliders);
-      UI.drawGradientSlider(sliderStart+UI.SLIDER_WIDTH  , 0, UI.SLIDER_WIDTH, UI.BUTTON_HEIGHT, 
-        baseColor.copy().setSaturation(0), baseColor.copy().setSaturation(1), correctlyFlippedSaturation, showVarOnSliders, "double");
-      UI.drawGradientSlider(sliderStart+UI.SLIDER_WIDTH*2, 0, UI.SLIDER_WIDTH, UI.BUTTON_HEIGHT, 
-        baseColor.copy().setHue(0+openPainting.hueRotation), baseColor.copy().setHue(1+openPainting.hueRotation), rotatedBaseHue, showVarOnSliders, "wrap");
-  
-      // show tooltip
-      const tooltipXinSlider = (percent) => map(percent, 0, 1, UI.SLIDER_RANGE_MARGIN, UI.SLIDER_WIDTH-UI.SLIDER_RANGE_MARGIN);
-
-      if (currentElement === Interaction.TYPES.slider.lightness) {
-
-        const x = sliderStart + tooltipXinSlider(baseColor.lightness);
-        const text = "L " + Math.floor(baseColor.lightness * 100) + "%";
-        UI.drawTooltipBelow(x, UI.BUTTON_HEIGHT, text);
-
-      } else if (currentElement === Interaction.TYPES.slider.saturation) {
-
-        const horizontalOfSlider = (openPainting.hueRotation === 0) ? (1 + baseColor.saturation)/2 : (1 - baseColor.saturation)/2;
-        const x = sliderStart + tooltipXinSlider(horizontalOfSlider) + UI.SLIDER_WIDTH;
-        const text = "S " + ((openPainting.hueRotation === 0) ? "" : "-") +  Math.floor(baseColor.saturation * 100) + "%";
-        UI.drawTooltipBelow(x, UI.BUTTON_HEIGHT, text);
-
-
-      } if (currentElement === Interaction.TYPES.slider.hue) {
-
-        const horizontalOfSlider = (baseColor.hue+openPainting.hueRotation) % 1;
-        const x = sliderStart + tooltipXinSlider(horizontalOfSlider) + UI.SLIDER_WIDTH * 2;
-        const text = "H " + Math.floor(baseColor.hue * 360) + "°";
-        UI.drawTooltipBelow(x, UI.BUTTON_HEIGHT, text);
-
-      } else if (currentElement === Interaction.TYPES.knob.jitter) {
-
-        UI.drawTooltipBelow(sliderStart + UI.SLIDER_WIDTH*3+30, UI.BUTTON_HEIGHT, Math.round(openPainting.brushSettingsToAdjust.colorVar * 100) + "%");
-
-      } else if (currentElement === Interaction.TYPES.knob.size) {
-
-        UI.drawTooltipBelow(sliderStart - 30, UI.BUTTON_HEIGHT, Math.round(openPainting.brushSettingsToAdjust.pxSize) + "px");
-
-      }
-      
-
-      // draw the variation knob
-      UI.buffer.drawingContext.save();
-      UI.buffer.fill(UI.palette.constrastBg.toHexWithSetAlpha(0.5));
-      UI.buffer.rect(sliderStart + UI.SLIDER_WIDTH*3 + UI.ELEMENT_MARGIN, UI.ELEMENT_MARGIN, 60 - UI.ELEMENT_MARGIN*2, UI.BUTTON_HEIGHT - UI.ELEMENT_MARGIN*2, UI.ELEMENT_RADIUS);
-      UI.buffer.drawingContext.clip();
-      UI.drawVariedColorCircle(openPainting.brushSettingsToAdjust, 80, sliderStart + UI.SLIDER_WIDTH*3 + 30, UI.BUTTON_HEIGHT / 2);
-      UI.buffer.drawingContext.restore();
-      // outline
-      UI.buffer.noFill();
-      UI.buffer.strokeWeight(1);
-      UI.buffer.stroke(UI.palette.fg.toHexWithSetAlpha(0.2));
-      UI.buffer.rect(sliderStart + UI.SLIDER_WIDTH*3 + UI.ELEMENT_MARGIN, UI.ELEMENT_MARGIN, 60 - UI.ELEMENT_MARGIN*2, UI.BUTTON_HEIGHT - UI.ELEMENT_MARGIN*2, UI.ELEMENT_RADIUS);
-      UI.buffer.noStroke();
-    }
-
+    // palette
     if (![Interaction.UI_STATES.nothing_open, Interaction.UI_STATES.size_open].includes(Interaction.currentUI)) {
 
       const uniqueColors = [];
@@ -2322,8 +2233,117 @@ class UI {
         }
       }
 
-      UI.drawPalette(uniqueColors, width/2, UI.BUTTON_HEIGHT + 10, 30, 10);
+      UI.drawPalette(uniqueColors, width/2, UI.SLIDER_HEIGHT * 3 + 10, 30, 10);
     }
+
+
+    // bg
+    //UI.buffer.fill(UI.palette.constrastBg.hex);
+    //UI.buffer.rect(sliderStart-60, 0,  UI.SLIDER_WIDTH + 120, UI.BUTTON_HEIGHT, UI.ELEMENT_RADIUS + UI.ELEMENT_MARGIN);
+
+    // show current pressure
+    let pressureForSizeIndicator = undefined;
+    if (Interaction.currentSequence.length > 0 && Interaction.isAlreadyDown) {
+      const last_interaction = Interaction.currentSequence[Interaction.currentSequence.length-1];
+      if (last_interaction.pressure !== undefined) {
+        pressureForSizeIndicator = last_interaction.pressure;
+      }
+    } else if (openPainting.averagePressure !== undefined) {
+      pressureForSizeIndicator = openPainting.averagePressure;
+    }
+
+    // draw the size knob
+    UI.buffer.drawingContext.save();
+    // sliders
+    const prevColorCompareIf = [...Object.values(Interaction.TYPES.painting.eyedropper),...Object.values(Interaction.TYPES.slider)];
+    if (openPainting.previousBrushes.length > 0 && (prevColorCompareIf.includes(Interaction.currentType))) {
+      UI.buffer.fill(openPainting.previousBrush.color.hex);
+    } else {
+      UI.buffer.fill(UI.palette.fg.toHexWithSetAlpha(0.2));
+    }
+    UI.buffer.rect(sliderStart - UI.KNOB_SIZE + UI.ELEMENT_MARGIN, UI.ELEMENT_MARGIN, UI.KNOB_SIZE - UI.ELEMENT_MARGIN*2, UI.KNOB_SIZE - UI.ELEMENT_MARGIN*2, UI.ELEMENT_RADIUS);
+    UI.buffer.drawingContext.clip();
+    UI.drawSizeIndicator(sliderStart - UI.KNOB_SIZE / 2, UI.KNOB_SIZE / 2, pressureForSizeIndicator);
+    UI.buffer.drawingContext.restore();
+    // outline
+    UI.buffer.noFill();
+    UI.buffer.strokeWeight(1);
+    UI.buffer.stroke(UI.palette.fg.toHexWithSetAlpha(0.2));
+    UI.buffer.rect(sliderStart - UI.KNOB_SIZE + UI.ELEMENT_MARGIN, UI.ELEMENT_MARGIN, UI.KNOB_SIZE - UI.ELEMENT_MARGIN*2, UI.KNOB_SIZE - UI.ELEMENT_MARGIN*2, UI.ELEMENT_RADIUS);
+    UI.buffer.noStroke();
+
+    // show average pressure with overlay
+    const indicatorSize = openPainting.brushSettingsToAdjust.finalPxSizeWithPressure(openPainting.averagePressure) * Interaction.viewTransform.scale;
+    UI.drawSizeOverlay(sliderStart - UI.KNOB_SIZE / 2, UI.KNOB_SIZE / 2, indicatorSize);
+
+    // sliders
+    const relevantElements = [...Object.values(Interaction.TYPES.knob),...Object.values(Interaction.TYPES.slider)];
+    // for displaying the hover for whichever slider is currently interacted with. If none, show regular hover state.
+    const currentElement = relevantElements.includes(Interaction.currentType) ? Interaction.currentType : Interaction.elementTypeAtPointer;
+    
+    // draw the sliders themselves first
+    let baseColor = openPainting.brushSettingsToAdjust.color;
+    const rotatedBaseHue = (baseColor.hue+openPainting.hueRotation) % 1;
+    const correctlyFlippedSaturation = (openPainting.hueRotation === 0) ? (1 + baseColor.saturation)/2 : (1 - baseColor.saturation)/2;
+    const showVarOnSliders = (currentElement === Interaction.TYPES.knob.jitter);
+
+    UI.drawGradientSlider(sliderStart, 0                       , UI.SLIDER_WIDTH, UI.SLIDER_HEIGHT, 
+      baseColor.copy().setLightness(0), baseColor.copy().setLightness(1), baseColor.lightness, showVarOnSliders);
+    UI.drawGradientSlider(sliderStart, 0 + UI.SLIDER_HEIGHT    , UI.SLIDER_WIDTH, UI.SLIDER_HEIGHT, 
+      baseColor.copy().setSaturation(0), baseColor.copy().setSaturation(1), correctlyFlippedSaturation, showVarOnSliders, "double");
+    UI.drawGradientSlider(sliderStart, 0 + UI.SLIDER_HEIGHT * 2, UI.SLIDER_WIDTH, UI.SLIDER_HEIGHT, 
+      baseColor.copy().setHue(0+openPainting.hueRotation), baseColor.copy().setHue(1+openPainting.hueRotation), rotatedBaseHue, showVarOnSliders, "wrap");
+
+    // show tooltip
+    const tooltipXinSlider = (percent) => map(percent, 0, 1, UI.SLIDER_RANGE_MARGIN, UI.SLIDER_WIDTH-UI.SLIDER_RANGE_MARGIN);
+
+    if (currentElement === Interaction.TYPES.slider.lightness) {
+
+      const x = sliderStart + tooltipXinSlider(baseColor.lightness);
+      const text = "L " + Math.floor(baseColor.lightness * 100) + "%";
+      UI.drawTooltipBelow(x, UI.SLIDER_HEIGHT, text);
+
+    } else if (currentElement === Interaction.TYPES.slider.saturation) {
+
+      const horizontalOfSlider = (openPainting.hueRotation === 0) ? (1 + baseColor.saturation)/2 : (1 - baseColor.saturation)/2;
+      const x = sliderStart + tooltipXinSlider(horizontalOfSlider);
+      const text = "S " + ((openPainting.hueRotation === 0) ? "" : "-") +  Math.floor(baseColor.saturation * 100) + "%";
+      UI.drawTooltipBelow(x, UI.SLIDER_HEIGHT * 2, text);
+
+
+    } if (currentElement === Interaction.TYPES.slider.hue) {
+
+      const horizontalOfSlider = (baseColor.hue+openPainting.hueRotation) % 1;
+      const x = sliderStart + tooltipXinSlider(horizontalOfSlider);
+      const text = "H " + Math.floor(baseColor.hue * 360) + "°";
+      UI.drawTooltipBelow(x, UI.SLIDER_HEIGHT * 3, text);
+
+    } else if (currentElement === Interaction.TYPES.knob.jitter) {
+
+      UI.drawTooltipBelow(sliderStart + UI.SLIDER_WIDTH + UI.KNOB_SIZE/2, UI.KNOB_SIZE, Math.round(openPainting.brushSettingsToAdjust.colorVar * 100) + "%");
+
+    } else if (currentElement === Interaction.TYPES.knob.size) {
+
+      UI.drawTooltipBelow(sliderStart - UI.KNOB_SIZE/2, UI.KNOB_SIZE, Math.round(openPainting.brushSettingsToAdjust.pxSize) + "px");
+
+    }
+    
+    // draw the variation knob
+    UI.buffer.drawingContext.save();
+    UI.buffer.fill(UI.palette.constrastBg.toHexWithSetAlpha(0.5));
+    UI.buffer.rect(sliderStart + UI.SLIDER_WIDTH*1 + UI.ELEMENT_MARGIN, UI.ELEMENT_MARGIN, UI.KNOB_SIZE - UI.ELEMENT_MARGIN*2, UI.KNOB_SIZE - UI.ELEMENT_MARGIN*2, UI.ELEMENT_RADIUS);
+    UI.buffer.drawingContext.clip();
+    UI.drawVariedColorCircle(openPainting.brushSettingsToAdjust, UI.KNOB_SIZE + 20, sliderStart + UI.SLIDER_WIDTH*1 + UI.KNOB_SIZE / 2, UI.KNOB_SIZE / 2);
+    UI.buffer.drawingContext.restore();
+    // outline
+    UI.buffer.noFill();
+    UI.buffer.strokeWeight(1);
+    UI.buffer.stroke(UI.palette.fg.toHexWithSetAlpha(0.2));
+    UI.buffer.rect(sliderStart + UI.SLIDER_WIDTH*1 + UI.ELEMENT_MARGIN, UI.ELEMENT_MARGIN, UI.KNOB_SIZE - UI.ELEMENT_MARGIN*2, UI.KNOB_SIZE - UI.ELEMENT_MARGIN*2, UI.ELEMENT_RADIUS);
+    UI.buffer.noStroke();
+
+    // center section DONE
+    UI.buffer.pop();
   
     UI.buffer.textAlign(LEFT);
 
@@ -2726,7 +2746,7 @@ class UI {
     UI.buffer.textAlign(CENTER);
     const textPos = {
       x: x,
-      y: y + 14
+      y: y + 8
     }
     let bbox = FONT_MEDIUM.textBounds(text, textPos.x, textPos.y);
     UI.buffer.fill(UI.palette.constrastBg.toHexWithSetAlpha(0.5));
