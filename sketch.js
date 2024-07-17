@@ -200,6 +200,11 @@ class Brushstroke {
     return {x: xmin, y:ymin, width: xmax-xmin, height: ymax-ymin};
   }
 
+  get center() {
+    const bounds = this.bounds;
+    return {x: bounds.x + bounds.width/2, y: bounds.y + bounds.height/2};
+  }
+
   averagePressureInLast(n) {
     if (this.points.length === 0) return;
     if (this.points[0].pressure === undefined) return;
@@ -493,6 +498,7 @@ class Painting {
     this.lowestBuffer = createGraphics(width, height); // all older bruststrokes that are no longer editable
     this.combinedBuffer = createGraphics(width, height); // final image
     this.temporaryCompositionBuffer = createGraphics(width, height); // for composition of specific editable buffers
+    this.snapshotBuffer = createGraphics(UI.KNOB_SIZE, UI.KNOB_SIZE);
     this.editableStrokesInUse = 0;
     this.editableStrokes = Array.from({ length: 16 }, () => new Brushstroke(createGraphics(width, height), startingBrush));
     this.currentBrush = startingBrush;
@@ -503,6 +509,7 @@ class Painting {
     this.averagePressure = undefined;
     this.totalStrokesCount = 0;
 
+    // initial fill
     this.clearWithColor(backgroundColor); // WIP, this is currently missing anything for display density
   }
 
@@ -553,6 +560,10 @@ class Painting {
     });
     this.editableStrokesInUse = 0;
     this.totalStrokesCount = 0;
+
+    // reset snapshot
+    this.updateCombinedBuffer();
+    this.updateSnapshotBuffer({x: width/2, y: height/2});
   }
 
   // WIP: this is currently called every frame, which isn't necessary.
@@ -594,6 +605,20 @@ class Painting {
         this.combinedBuffer.drawingContext.shadowBlur = 0; // reset
       } 
     });
+  }
+
+  updateSnapshotBuffer(point) {
+    this.snapshotBuffer.clear();
+
+    //constrain point to canvas
+    point.x = constrain(point.x, UI.KNOB_SIZE/2, this.width - UI.KNOB_SIZE/2);
+    point.y = constrain(point.y, UI.KNOB_SIZE/2, this.height - UI.KNOB_SIZE/2);
+
+    //get crop around the point with width and height of UI.KNOB_SIZE
+    this.snapshotBuffer.image(this.combinedBuffer, 
+      0, 0, UI.KNOB_SIZE, UI.KNOB_SIZE, //destination
+      point.x - UI.KNOB_SIZE/2, point.y - UI.KNOB_SIZE/2, UI.KNOB_SIZE, UI.KNOB_SIZE //source
+    );
   }
 
   flattenOldestStroke() {
@@ -949,6 +974,19 @@ class Interaction {
     const combinedRGB = openPainting.getPointRGB(new_interaction.addPaintingTransform());
     brushToAdjust.color = HSLColor.fromRGBwithFallback(combinedRGB[0], combinedRGB[1], combinedRGB[2], brushToAdjust.color);
     if (Interaction.editingLastStroke) openPainting.redrawLatestStroke();
+  }
+
+  static updateSnapshotAt(interaction) {
+    let focusPoint = interaction.addPaintingTransform();
+
+    // TODO: neat but makes little sense with eyedropper.
+    // if (openPainting.editableStrokesCount > 0) {
+    //   const center = openPainting.latestStroke.center;
+    //   focusPoint.x = lerp(center.x, focusPoint.x, 0.5);
+    //   focusPoint.y = lerp(center.y, focusPoint.y, 0.5);
+    // }
+
+    openPainting.updateSnapshotBuffer(focusPoint);
   }
 
   static keyStart(key) {
@@ -1797,6 +1835,10 @@ class Interaction {
       // try drawing here still,wip?
       Interaction.resetCurrentSequence();
 
+      // update snapshot around end of brushstroke
+      openPainting.updateCombinedBuffer(); // TODO: is this overkill on every stroke? maybe keep track to avoid doing twice in some frames
+      Interaction.updateSnapshotAt(Interaction.lastInteractionEnd);
+
     } else if (Interaction.currentType === Interaction.TYPES.painting.move) {
 
       // try moving here still,wip?
@@ -1841,6 +1883,7 @@ class Interaction {
         return;
       } 
       Interaction.resetCurrentSequence();
+      Interaction.updateSnapshotAt(Interaction.lastInteractionEnd);
       Interaction.currentUI = Interaction.UI_STATES.nothing_open;
       Interaction.stopEditing();
 
@@ -2252,29 +2295,8 @@ class UI {
       pressureForSizeIndicator = openPainting.averagePressure;
     }
 
-    // draw the size knob
-    UI.buffer.drawingContext.save();
-    // sliders
-    const prevColorCompareIf = [...Object.values(Interaction.TYPES.painting.eyedropper),...Object.values(Interaction.TYPES.slider)];
-    if (openPainting.previousBrushes.length > 0 && (prevColorCompareIf.includes(Interaction.currentType))) {
-      UI.buffer.fill(openPainting.previousBrush.color.hex);
-    } else {
-      UI.buffer.fill(UI.palette.fg.toHexWithSetAlpha(0.2));
-    }
-    UI.buffer.rect(sliderStart - UI.KNOB_SIZE + UI.ELEMENT_MARGIN, UI.ELEMENT_MARGIN, UI.KNOB_SIZE - UI.ELEMENT_MARGIN*2, UI.KNOB_SIZE - UI.ELEMENT_MARGIN*2, UI.ELEMENT_RADIUS);
-    UI.buffer.drawingContext.clip();
-    UI.drawSizeIndicator(sliderStart - UI.KNOB_SIZE / 2, UI.KNOB_SIZE / 2, pressureForSizeIndicator);
-    UI.buffer.drawingContext.restore();
-    // outline
-    UI.buffer.noFill();
-    UI.buffer.strokeWeight(1);
-    UI.buffer.stroke(UI.palette.fg.toHexWithSetAlpha(0.2));
-    UI.buffer.rect(sliderStart - UI.KNOB_SIZE + UI.ELEMENT_MARGIN, UI.ELEMENT_MARGIN, UI.KNOB_SIZE - UI.ELEMENT_MARGIN*2, UI.KNOB_SIZE - UI.ELEMENT_MARGIN*2, UI.ELEMENT_RADIUS);
-    UI.buffer.noStroke();
-
-    // show average pressure with overlay
-    const indicatorSize = openPainting.brushSettingsToAdjust.finalPxSizeWithPressure(openPainting.averagePressure) * Interaction.viewTransform.scale;
-    UI.drawSizeOverlay(sliderStart - UI.KNOB_SIZE / 2, UI.KNOB_SIZE / 2, indicatorSize);
+    //size knob
+    UI.drawSizeKnob(sliderStart - UI.KNOB_SIZE, 0, pressureForSizeIndicator);
 
     // sliders
     const relevantElements = [...Object.values(Interaction.TYPES.knob),...Object.values(Interaction.TYPES.slider)];
@@ -2604,6 +2626,47 @@ class UI {
     UI.buffer.pop();
   }
 
+  static drawSizeKnob(x, y, pressure) {
+
+    UI.buffer.drawingContext.save();
+
+    UI.buffer.fill(UI.palette.bg.toHexWithSetAlpha(0.5));
+    UI.buffer.rect(x + UI.ELEMENT_MARGIN, y + UI.ELEMENT_MARGIN, UI.KNOB_SIZE - UI.ELEMENT_MARGIN*2, UI.KNOB_SIZE - UI.ELEMENT_MARGIN*2, UI.ELEMENT_RADIUS);
+    
+    UI.buffer.drawingContext.clip();
+
+    // draw snapshot for easier reference
+      // darken unless currently needed to compare color/ jitter
+      const prevColorCompareIf = [
+        Interaction.TYPES.painting.eyedropper,
+        Interaction.TYPES.knob.jitter,
+        ...Object.values(Interaction.TYPES.slider),
+        Interaction.TYPES.gizmo.hueAndVar,
+        Interaction.TYPES.gizmo.satAndLum
+      ];
+      if (openPainting.previousBrushes.length === 0 || !(prevColorCompareIf.includes(Interaction.currentType))) {
+        UI.buffer.tint(255, 100);
+      } 
+    UI.buffer.image(openPainting.snapshotBuffer, x, y, UI.KNOB_SIZE, UI.KNOB_SIZE);
+    UI.buffer.tint(255, 255);
+
+    // draw brushstroke
+    UI.drawSizeIndicator(x + UI.KNOB_SIZE / 2, y + UI.KNOB_SIZE / 2, pressure);
+
+    UI.buffer.drawingContext.restore();
+
+    // outline
+    UI.buffer.noFill();
+    UI.buffer.strokeWeight(1);
+    UI.buffer.stroke(UI.palette.fg.toHexWithSetAlpha(0.2));
+    UI.buffer.rect(x + UI.ELEMENT_MARGIN, y + UI.ELEMENT_MARGIN, UI.KNOB_SIZE - UI.ELEMENT_MARGIN*2, UI.KNOB_SIZE - UI.ELEMENT_MARGIN*2, UI.ELEMENT_RADIUS);
+    UI.buffer.noStroke();
+
+    // show average pressure with overlay
+    const indicatorSize = openPainting.brushSettingsToAdjust.finalPxSizeWithPressure(openPainting.averagePressure) * Interaction.viewTransform.scale;
+    UI.drawSizeOverlay(x + UI.KNOB_SIZE / 2, y + UI.KNOB_SIZE / 2, indicatorSize);
+  }
+
   static drawSizeIndicator(x, y, pressure) {
     UI.buffer.push();
     UI.buffer.translate(x, y);
@@ -2671,6 +2734,9 @@ class UI {
 
   static drawGradientSlider(x, y, width, height, startColor, endColor, sliderPercent, showVar, sliderType) {
 
+    // TODO: sliders do not show the color variation even when the jitter knob is used (showVar) for now
+    // as the effect looked odd and was not very useful. It might be nice to show it differently?
+
     width -= UI.ELEMENT_MARGIN * 2;
     height -= UI.ELEMENT_MARGIN * 2;
     x += UI.ELEMENT_MARGIN;
@@ -2692,7 +2758,7 @@ class UI {
         let lerpedColor = ((colorLerpAmt * (openPainting.hueRotation === 0 ? 1 : -1)) > 0) 
           ? HSLColor.lerpColorInHSL(startColor, endColor, Math.abs(colorLerpAmt))
           : HSLColor.lerpColorInHSL(startColor.copy().setHue((startColor.hue + 0.5) % 1), endColor.copy().setHue((endColor.hue + 0.5) % 1), Math.abs(colorLerpAmt));
-        if (showVar) lerpedColor = lerpedColor.varyComponents(i, openPainting.brushSettingsToAdjust.colorVar);
+        // if (showVar) lerpedColor = lerpedColor.varyComponents(i, openPainting.brushSettingsToAdjust.colorVar);
 
         UI.buffer.fill(lerpedColor.hex);
         UI.buffer.rect(x + (i/segments) * width, y, width/segments, height);
@@ -2701,7 +2767,7 @@ class UI {
       for (let i = 0; i < segments; i++) {
         const colorLerpAmt = map((i + 0.5)/segments, outside_range_of_width, 1-outside_range_of_width, 0, 1, sliderType !== "wrap");
         let lerpedColor = HSLColor.lerpColorInHSL(startColor, endColor, colorLerpAmt);
-        if (showVar) lerpedColor = lerpedColor.varyComponents(i, openPainting.brushSettingsToAdjust.colorVar);
+        // if (showVar) lerpedColor = lerpedColor.varyComponents(i, openPainting.brushSettingsToAdjust.colorVar);
     
         UI.buffer.fill(lerpedColor.hex);
         UI.buffer.rect(x + (i/segments) * width, y, width/segments, height);
