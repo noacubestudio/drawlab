@@ -508,7 +508,7 @@ class Painting {
     this.lowestBuffer = createGraphics(width, height); // all older bruststrokes that are no longer editable
     this.combinedBuffer = createGraphics(width, height); // final image
     this.temporaryCompositionBuffer = createGraphics(width, height); // for composition of specific editable buffers
-    this.snapshotBuffer = createGraphics(UI.KNOB_SIZE, UI.KNOB_SIZE);
+    this.snapshotBuffer = createGraphics(UI.KNOB_SIZE * 2, UI.KNOB_SIZE * 2);
     this.editableStrokesInUse = 0;
     this.editableStrokes = Array.from({ length: 16 }, () => new Brushstroke(createGraphics(width, height), startingBrush));
     this.currentBrush = startingBrush;
@@ -621,13 +621,14 @@ class Painting {
     this.snapshotBuffer.clear();
 
     //constrain point to canvas
-    point.x = constrain(point.x, UI.KNOB_SIZE/2, this.width - UI.KNOB_SIZE/2);
-    point.y = constrain(point.y, UI.KNOB_SIZE/2, this.height - UI.KNOB_SIZE/2);
+    const snapshotSize = UI.KNOB_SIZE * 2;
+    point.x = constrain(point.x, snapshotSize/2, this.width - snapshotSize/2);
+    point.y = constrain(point.y, snapshotSize/2, this.height - snapshotSize/2);
 
-    //get crop around the point with width and height of UI.KNOB_SIZE
+    //get crop around the point with width and height of snapshotSize
     this.snapshotBuffer.image(this.combinedBuffer, 
-      0, 0, UI.KNOB_SIZE, UI.KNOB_SIZE, //destination
-      point.x - UI.KNOB_SIZE/2, point.y - UI.KNOB_SIZE/2, UI.KNOB_SIZE, UI.KNOB_SIZE //source
+      0, 0, snapshotSize, snapshotSize, //destination
+      point.x - snapshotSize/2, point.y - snapshotSize/2, snapshotSize, snapshotSize //source
     );
   }
 
@@ -2383,6 +2384,7 @@ class UI {
     if (UI.showingHelp) {
       UI.buffer.fill(UI.palette.bg.hex);
       UI.buffer.stroke(UI.palette.constrastBg.hex);
+      UI.buffer.strokeWeight(1);
       const helpShortcuts = {
         "H ": "Toggle shortcuts help",
         "1 ": "Lightness and Saturation",
@@ -2402,9 +2404,15 @@ class UI {
       }
       const helpWindowWidth = 240;
       const helpWindowHeight = 30 * Object.keys(helpShortcuts).length;
-      UI.buffer.rect(width - helpWindowWidth - UI.ELEMENT_MARGIN*3, height - UI.BUTTON_HEIGHT - helpWindowHeight - UI.ELEMENT_MARGIN*3, 
-        helpWindowWidth + UI.ELEMENT_MARGIN*2, helpWindowHeight + UI.ELEMENT_MARGIN*2, UI.ELEMENT_RADIUS);
+      UI.buffer.rect(
+        width - helpWindowWidth - 12, 
+        height - UI.BUTTON_HEIGHT - helpWindowHeight - 12, 
+        helpWindowWidth + 8, 
+        helpWindowHeight + 8, 
+        UI.ELEMENT_RADIUS
+      );
       UI.buffer.fill(UI.palette.fg.hex);
+      UI.buffer.noStroke();
       Object.keys(helpShortcuts).forEach((keyString, index) => {
         UI.buffer.text(keyString, width - helpWindowWidth, 4 + height - UI.BUTTON_HEIGHT - helpWindowHeight + index * 30);
         UI.buffer.text(helpShortcuts[keyString], width - helpWindowWidth + 20, 4 + height - UI.BUTTON_HEIGHT - helpWindowHeight + index * 30);
@@ -2654,7 +2662,10 @@ class UI {
       if (changingSize.includes(Interaction.currentType) || (Interaction.currentType === null && Interaction.elementTypeAtPointer === Interaction.TYPES.knob.size)) {
         UI.buffer.tint(255, 100);
       } 
-    UI.buffer.image(openPainting.snapshotBuffer, x, y, UI.KNOB_SIZE, UI.KNOB_SIZE);
+    // draw snapshot at correct scale, twice as large as knob.
+    const snapshotSize = UI.KNOB_SIZE * Interaction.viewTransform.scale * 2;
+    const centerOffset = (snapshotSize - UI.KNOB_SIZE) / 2;
+    UI.buffer.image(openPainting.snapshotBuffer, x - centerOffset, y - centerOffset, snapshotSize, snapshotSize);
     UI.buffer.tint(255, 255);
 
     // draw brushstroke
