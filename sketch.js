@@ -398,11 +398,17 @@ class Brushstroke {
 
       const drawThisStrip = (this.settings.texture !== "Rake" || i % 3 == 0 || i == strips-1)
 
+      // draw in specific direction so that changing the number of strips looks centered
+      const idTowardsCenter = (i < strips/2) ? i * 2 : (strips - i) * 2 - 1;
+      // transform 012345... to 024531
+      // transfrom 01234... to 02431
+      // transform 0123... to 0231
+
       if (drawThisStrip) {
         const lowerSide = i/strips - 0.5; 
         const higherSide = (i+1)/strips - 0.5;
 
-        const lerpPart = HSLColor.symmetricalNoise(i + end.seed) * 0.5 + 0.5;
+        const lerpPart = HSLColor.symmetricalNoise(idTowardsCenter + end.seed) * 0.5 + 0.5;
         const middleX = lerp(start.x, end.x, lerpPart);
         const middleY = lerp(start.y, end.y, lerpPart);
 
@@ -413,59 +419,63 @@ class Brushstroke {
         const midEdgeVectorLower    = p5.Vector.fromAngle(averageAngle,  lowerSide*widthAtPoint(   avgPressure, averageAngle,     averageAzimuth));
         const midEdgeVectorHigher   = p5.Vector.fromAngle(averageAngle, higherSide*widthAtPoint(   avgPressure, averageAngle,     averageAzimuth));
 
-        // if (HSLColor.symmetricalNoise(start.seed + i) < start.pressure * 4) {
-          const brushCol = this.settings.getColorWithVar(i + start.seed).varyComponents(i + this.brushstrokeSeed, 0.1 + this.settings.colorVar * 0.3);
 
-          if (this.settings.texture === "Round") {
-            this.buffer.stroke(brushCol.hex);
-            this.buffer.strokeWeight(2 * brushSize / strips);
-            this.buffer.line(
-              start.x + startEdgeVectorLower.x, start.y + startEdgeVectorLower.y, 
-              middleX + midEdgeVectorLower.x, middleY + midEdgeVectorLower.y
-            );
-            this.buffer.line(
-              start.x + startEdgeVectorHigher.x, start.y + startEdgeVectorHigher.y, 
-              middleX + midEdgeVectorHigher.x, middleY + midEdgeVectorHigher.y
-            );
-          } else {
-            this.buffer.fill(brushCol.hex);
-            //this.buffer.stroke(brushCol.hex);
-            this.buffer.beginShape();
-            this.randomizedVertex(this.buffer, sX, startEdgeVectorLower.x ,    sY, startEdgeVectorLower.y ,    0);
-            this.randomizedVertex(this.buffer, sX, startEdgeVectorHigher.x,    sY, startEdgeVectorHigher.y,    0);
-            this.randomizedVertex(this.buffer, middleX, midEdgeVectorHigher.x, middleY, midEdgeVectorHigher.y, rf);
-            this.randomizedVertex(this.buffer, middleX, midEdgeVectorLower.x,  middleY, midEdgeVectorLower.y,  rf);
-            this.buffer.endShape();
-          }
-        // }
+        const brushCol = this.settings.getColorWithVar(idTowardsCenter + start.seed)
+          .varyComponents(idTowardsCenter + this.brushstrokeSeed, 
+          0.1 + this.settings.colorVar * 0.3);
 
-        // if (HSLColor.symmetricalNoise(end.seed + i) < end.pressure * 4) {
-          const brushCol2 = this.settings.getColorWithVar(i + end.seed).varyComponents(i + this.brushstrokeSeed, 0.1 + this.settings.colorVar * 0.3);
+        if (this.settings.texture === "Round") {
+          this.buffer.stroke(brushCol.hex);
+          this.buffer.strokeWeight(2 * brushSize / strips);
+          this.buffer.line(
+            start.x + startEdgeVectorLower.x, start.y + startEdgeVectorLower.y, 
+            middleX + midEdgeVectorLower.x, middleY + midEdgeVectorLower.y
+          );
+          this.buffer.line(
+            start.x + startEdgeVectorHigher.x, start.y + startEdgeVectorHigher.y, 
+            middleX + midEdgeVectorHigher.x, middleY + midEdgeVectorHigher.y
+          );
+        } else {
+          this.buffer.fill(brushCol.hex);
+          //this.buffer.stroke(brushCol.hex);
+          this.buffer.beginShape();
+          this.randomizedVertex(this.buffer, sX, startEdgeVectorLower.x ,    sY, startEdgeVectorLower.y ,    0);
+          this.randomizedVertex(this.buffer, sX, startEdgeVectorHigher.x,    sY, startEdgeVectorHigher.y,    0);
+          this.randomizedVertex(this.buffer, middleX, midEdgeVectorHigher.x, middleY, midEdgeVectorHigher.y, rf);
+          this.randomizedVertex(this.buffer, middleX, midEdgeVectorLower.x,  middleY, midEdgeVectorLower.y,  rf);
+          this.buffer.endShape();
+        }
+        const brushCol2 = this.settings.getColorWithVar(idTowardsCenter + end.seed)
+          .varyComponents(idTowardsCenter + this.brushstrokeSeed, 
+          0.1 + this.settings.colorVar * 0.3);
 
-          if (this.settings.texture === "Round") {
-            this.buffer.stroke(brushCol2.hex);
-            this.buffer.strokeWeight(2 * brushSize / strips);
-            this.buffer.line(
-              middleX + midEdgeVectorLower.x, middleY + midEdgeVectorLower.y, 
-              end.x + endEdgeVectorLower.x, end.y + endEdgeVectorLower.y
-            );
-            this.buffer.line(
-              middleX + midEdgeVectorHigher.x, middleY + midEdgeVectorHigher.y, 
-              end.x + endEdgeVectorHigher.x, end.y + endEdgeVectorHigher.y
-            );
-          } else {
-            this.buffer.fill(brushCol2.hex);
-            //this.buffer.stroke(brushCol2.hex);
-            this.buffer.beginShape();
-            this.randomizedVertex(this.buffer, middleX, midEdgeVectorLower.x , middleY, midEdgeVectorLower.y , rf);
-            this.randomizedVertex(this.buffer, middleX, midEdgeVectorHigher.x, middleY, midEdgeVectorHigher.y, rf);
-            this.randomizedVertex(this.buffer, eX  , endEdgeVectorHigher.x, eY  , endEdgeVectorHigher.y, 0);
-            this.randomizedVertex(this.buffer, eX  , endEdgeVectorLower.x , eY  , endEdgeVectorLower.y , 0);
-            this.buffer.endShape();
-          }
-        // }
+        if (this.settings.texture === "Round") {
+          this.buffer.stroke(brushCol2.hex);
+          this.buffer.strokeWeight(2 * brushSize / strips);
+          this.buffer.line(
+            middleX + midEdgeVectorLower.x, middleY + midEdgeVectorLower.y, 
+            end.x + endEdgeVectorLower.x, end.y + endEdgeVectorLower.y
+          );
+          this.buffer.line(
+            middleX + midEdgeVectorHigher.x, middleY + midEdgeVectorHigher.y, 
+            end.x + endEdgeVectorHigher.x, end.y + endEdgeVectorHigher.y
+          );
+        } else {
+          this.buffer.fill(brushCol2.hex);
+          //this.buffer.stroke(brushCol2.hex);
+          this.buffer.beginShape();
+          this.randomizedVertex(this.buffer, middleX, midEdgeVectorLower.x , middleY, midEdgeVectorLower.y , rf);
+          this.randomizedVertex(this.buffer, middleX, midEdgeVectorHigher.x, middleY, midEdgeVectorHigher.y, rf);
+          this.randomizedVertex(this.buffer, eX  , endEdgeVectorHigher.x, eY  , endEdgeVectorHigher.y, 0);
+          this.randomizedVertex(this.buffer, eX  , endEdgeVectorLower.x , eY  , endEdgeVectorLower.y , 0);
+          this.buffer.endShape();
+        }
       }
     }
+  }
+
+  drawStrip(start, end, beforePoint, i, strips) {
+    
   }
 
   randomizedVertex(buffer, x, xOff, y, yOff, randomFactor) {
@@ -2162,11 +2172,11 @@ class UI {
   static GIZMO_SIZE = 120; 
   static MOBILE_WIDTH_BREAKPOINT = 576;
 
-  static ELEMENT_MARGIN = 4;
+  static ELEMENT_MARGIN = 2;
   static ELEMENT_RADIUS = 16;
 
-  static BUTTON_WIDTH = 80;
-  static BUTTON_HEIGHT = 60;
+  static BUTTON_WIDTH = 70;
+  static BUTTON_HEIGHT = 50;
 
   // sliders can be dragged over a 200 pixel range that corresponds to 0-1, but are a bit wider
   // so that they include the start and end color with the width of one half of the slider height.
@@ -2174,9 +2184,9 @@ class UI {
   // the button height already contains the UI.ELEMENT_MARGIN, which was previously added to the slider width instead.
   
   static KNOB_SIZE = 70;
-  static SLIDER_RANGE_MARGIN = 20; // can't be too low, or the slider roundness intersects.
+  static SLIDER_RANGE_MARGIN = 18; // can't be too low, or the slider roundness intersects.
   static SLIDER_WIDTH = 200 + UI.SLIDER_RANGE_MARGIN*2; // default
-  static SLIDER_HEIGHT = 40;
+  static SLIDER_HEIGHT = 36;
   static HANDLE_MARGIN = 4;
   
   static updateDimensionsForBreakpoint(width, height) {
@@ -2262,22 +2272,22 @@ class UI {
     if (!UI.topAlignSliderSection) UI.buffer.translate(0, UI.BUTTON_HEIGHT);
 
     // palette
-    if (![Interaction.UI_STATES.nothing_open, Interaction.UI_STATES.size_open].includes(Interaction.currentUI)) {
+    // if (![Interaction.UI_STATES.nothing_open, Interaction.UI_STATES.size_open].includes(Interaction.currentUI)) {
 
-      const uniqueColors = [];
-      const seenColors = new Set();
+    //   const uniqueColors = [];
+    //   const seenColors = new Set();
 
-      for (const item of [...openPainting.previousBrushes, openPainting.currentBrush]) {
-        const key = `${item.color.hue}-${item.color.saturation}-${item.color.lightness}`;
+    //   for (const item of [...openPainting.previousBrushes, openPainting.currentBrush]) {
+    //     const key = `${item.color.hue}-${item.color.saturation}-${item.color.lightness}`;
     
-        if (!seenColors.has(key)) {
-          seenColors.add(key);
-          uniqueColors.push(item);
-        }
-      }
+    //     if (!seenColors.has(key)) {
+    //       seenColors.add(key);
+    //       uniqueColors.push(item);
+    //     }
+    //   }
 
-      UI.drawPalette(uniqueColors, width/2, UI.SLIDER_HEIGHT * 3 + 10, 30, 10);
-    }
+    //   UI.drawPalette(uniqueColors, width/2, UI.SLIDER_HEIGHT * 3 + 10, 30, 10);
+    // }
 
 
     // bg
@@ -2635,16 +2645,13 @@ class UI {
     
     UI.buffer.drawingContext.clip();
 
-    // draw snapshot for easier reference
-      // darken unless currently needed to compare color/ jitter
-      const prevColorCompareIf = [
-        Interaction.TYPES.painting.eyedropper,
-        Interaction.TYPES.knob.jitter,
-        ...Object.values(Interaction.TYPES.slider),
-        Interaction.TYPES.gizmo.hueAndVar,
-        Interaction.TYPES.gizmo.satAndLum
+    // draw snapshot for easier reference of color
+      // darken when changing size
+      const changingSize = [
+        Interaction.TYPES.knob.size,
+        Interaction.TYPES.gizmo.size
       ];
-      if (openPainting.previousBrushes.length === 0 || !(prevColorCompareIf.includes(Interaction.currentType))) {
+      if (changingSize.includes(Interaction.currentType) || (Interaction.currentType === null && Interaction.elementTypeAtPointer === Interaction.TYPES.knob.size)) {
         UI.buffer.tint(255, 100);
       } 
     UI.buffer.image(openPainting.snapshotBuffer, x, y, UI.KNOB_SIZE, UI.KNOB_SIZE);
@@ -2671,12 +2678,12 @@ class UI {
     UI.buffer.push();
     UI.buffer.translate(x, y);
     UI.buffer.scale(Interaction.viewTransform.scale);
-    //UI.buffer.rotate(-Math.PI * 0.25);
+    UI.buffer.rotate(Math.PI * 0.25);
 
     // draw example
     // not sure why the angle 86 even makes sense.
-    const start = new BrushPoint(-40/Interaction.viewTransform.scale, 0, 86, pressure);
-    const end = new BrushPoint(40/Interaction.viewTransform.scale, 0, 86, pressure);
+    const start = new BrushPoint(-(UI.KNOB_SIZE*0.125)/Interaction.viewTransform.scale, 0, 86, pressure);
+    const end = new BrushPoint((UI.KNOB_SIZE*0.6)/Interaction.viewTransform.scale, 0, 86, pressure);
     const settings = openPainting.brushSettingsToAdjust; //.copy();
     new Brushstroke(UI.buffer, settings).drawPart(start, end);
     
@@ -2684,14 +2691,30 @@ class UI {
   }
 
   static drawSizeOverlay(x, y, size) {
+    UI.buffer.push();
+    UI.buffer.translate(x, y);
+    UI.buffer.rotate(Math.PI * 0.25);
+    const fromCenterOffset = -UI.KNOB_SIZE * 0.125;
     UI.buffer.noFill();
-    UI.buffer.strokeWeight(4);
-    UI.buffer.stroke(UI.palette.constrastBg.toHexWithSetAlpha(0.2));
-    UI.buffer.ellipse(x, y, size-2, size-2);
+    UI.buffer.strokeWeight(6);
+    UI.buffer.stroke(new HSLColor(0,0,0,0.4).hex);
+    UI.buffer.line(fromCenterOffset, -size*0.5, fromCenterOffset, size*0.5);
     UI.buffer.strokeWeight(2);
-    UI.buffer.stroke(UI.palette.fg.toHexWithSetAlpha(0.5));
-    UI.buffer.ellipse(x, y, size, size);
+    UI.buffer.stroke(new HSLColor(0,0,1,0.4).hex);
+    UI.buffer.line(fromCenterOffset, -size*0.5, fromCenterOffset, size*0.5);
+    UI.buffer.stroke(new HSLColor(0,0,1,0.8).hex);
+    UI.buffer.line(fromCenterOffset, -size*0.5, fromCenterOffset,-size*0.5+0.1);
+    UI.buffer.line(fromCenterOffset,  size*0.5, fromCenterOffset, size*0.5-0.1);
+    UI.buffer.line(fromCenterOffset, -0.1, fromCenterOffset, 0.1);
     UI.buffer.noStroke();
+    UI.buffer.pop();
+    // UI.buffer.strokeWeight(4);
+    // UI.buffer.stroke(UI.palette.constrastBg.toHexWithSetAlpha(0.5));
+    // UI.buffer.ellipse(x, y, size*0.2, size);
+    // UI.buffer.strokeWeight(2);
+    // UI.buffer.stroke(UI.palette.fg.toHexWithSetAlpha(0.7));
+    // UI.buffer.ellipse(x, y, (size*0.2)+2, size+2);
+    // UI.buffer.noStroke();
   }
 
   static drawColorAxis(thickness, xStart, yStart, xEnd, yEnd, startColor, endColor, radius, specialType) {
@@ -3037,7 +3060,7 @@ class UI {
 
       const visualSize = brushToVisualize.finalPxSizeWithPressure(openPainting.averagePressure) * Interaction.viewTransform.scale;
 
-      UI.drawSizeOverlay(posX, ankerY, visualSize);
+      // UI.drawSizeOverlay(posX, ankerY, visualSize);
       UI.drawCrosshair(posX, ankerY, visualSize);
     }
   }
