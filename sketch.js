@@ -228,7 +228,7 @@ class Brushstroke {
   }
 
   get bounds() {
-    const margin = this.settings.pxSize*0.5;
+    const margin = this.settings.sizeInPixels()*0.5;
     const xmin = this.points.reduce((a, b) => Math.min(a, b.x),  Infinity) - margin;
     const xmax = this.points.reduce((a, b) => Math.max(a, b.x), -Infinity) + margin;
     const ymin = this.points.reduce((a, b) => Math.min(a, b.y),  Infinity) - margin;
@@ -317,7 +317,7 @@ class Brushstroke {
     // barrel rotation should have an effect instead, which is not yet supported and I couldn't use myself...
     function angleAtV(v) {
       const a = createVector(v.x, v.y).heading();
-      return map(a + Math.PI/2, -Math.PI, Math.PI, 0, Math.PI*2) % (Math.PI*2);
+      return (a + Math.PI/2).mod(Math.PI * 2); //map(a + Math.PI/2, -Math.PI, Math.PI, 0, Math.PI*2) % (Math.PI*2);
     }
 
     // 0 to 2PI clockwise from the right
@@ -448,11 +448,8 @@ class Brushstroke {
 
       const drawThisStrip = (this.settings.texture !== "Rake" || i % 3 == 0 || i == strips-1)
 
-      // draw in specific direction so that changing the number of strips looks centered
+      // draw in specific order so that changing the number of strips looks centered
       const idTowardsCenter = (i < strips/2) ? i * 2 : (strips - i) * 2 - 1;
-      // transform 012345... to 024531
-      // transfrom 01234... to 02431
-      // transform 0123... to 0231
 
       if (drawThisStrip) {
         const lowerSide = i/strips - 0.5; 
@@ -529,10 +526,6 @@ class Brushstroke {
       x + xOff + HSLColor.symmetricalNoise(x*4 + xOff*2) * randomFactor, 
       y + yOff + HSLColor.symmetricalNoise(y*4 + yOff*2) * randomFactor
     );
-    // buffer.vertex(
-    //   x + xOff + HSLColor.symmetricalNoise(x*4 + xOff*2) * randomFactor, 
-    //   y + yOff + HSLColor.symmetricalNoise(y*4 + yOff*2) * randomFactor
-    // );
   }
 }
 
@@ -1155,7 +1148,8 @@ class Interaction {
       return; 
     }
 
-    if (key !== "e") {
+    // TODO: Modifier keys should be in an array in the class, easier to check.
+    if (key !== "e" && key !== "Shift") {
       Interaction.stopEditing();
     }
 
@@ -3176,40 +3170,47 @@ class UI {
     UI.buffer.noStroke();
   }
 
-  static screenToViewTransform() {
-    // WIP. consider that this could be done by actually changing the coords, not using scale.
-    // then these UI elements would stay crisp and lines equally sized on screen.
-    UI.buffer.translate(Interaction.viewTransform.centerPos().x, Interaction.viewTransform.centerPos().y);
-    UI.buffer.scale(Interaction.viewTransform.scale)
-    UI.buffer.rotate(Interaction.viewTransform.rotation)
-    UI.buffer.translate(-openPainting.width/2, -openPainting.height/2);
+  static screenToViewTransform(x, y) {
+    x -= openPainting.width / 2;
+    y -= openPainting.height / 2;
+
+    ({x, y} = rotatePoint(x, y, Interaction.viewTransform.rotation));
+
+    x *= Interaction.viewTransform.scale;
+    y *= Interaction.viewTransform.scale;
+
+    x += Interaction.viewTransform.centerPos().x;
+    y += Interaction.viewTransform.centerPos().y;
+
+    return {x, y};
   }
 
   static drawBounds(bounds) {
     if (bounds.width === 0 || bounds.height === 0) return;
 
-    const topLeft = {x: bounds.x, y: bounds.y};
-    const botRight = {x: bounds.x + bounds.width, y: bounds.y + bounds.height};
-
-    UI.buffer.push();
-    UI.screenToViewTransform();
-    //if (label) UI.drawTooltipBelow((topLeft.x+botRight.x)/2, botRight.y, label);
+    const topLeft  = UI.screenToViewTransform(bounds.x               , bounds.y);
+    const topRight = UI.screenToViewTransform(bounds.x + bounds.width, bounds.y);
+    const botRight = UI.screenToViewTransform(bounds.x + bounds.width, bounds.y + bounds.height);
+    const botLeft  = UI.screenToViewTransform(bounds.x               , bounds.y + bounds.height);
+    
     UI.buffer.stroke(UI.palette.constrastBg.hex);
-    UI.buffer.strokeWeight(3);
-    UI.buffer.line(topLeft.x, topLeft.y, botRight.x, topLeft.y);
-    UI.buffer.line(topLeft.x, topLeft.y, topLeft.x, botRight.y);
-    UI.buffer.line(topLeft.x, botRight.y, botRight.x, botRight.y);
-    UI.buffer.line(botRight.x, topLeft.y, botRight.x, botRight.y);
+    UI.buffer.strokeWeight(5);
+    UI.buffer.line(topLeft.x, topLeft.y, topRight.x, topRight.y);
+    UI.buffer.line(topLeft.x, topLeft.y, botLeft.x, botLeft.y);
+    UI.buffer.line(botRight.x, botRight.y, topRight.x, topRight.y);
+    UI.buffer.line(botRight.x, botRight.y, botLeft.x, botLeft.y);
+
     UI.buffer.stroke(UI.palette.fg.hex);
-    UI.buffer.strokeWeight(1);
-    UI.buffer.line(topLeft.x, topLeft.y, botRight.x, topLeft.y);
-    UI.buffer.line(topLeft.x, topLeft.y, topLeft.x, botRight.y);
-    UI.buffer.line(topLeft.x, botRight.y, botRight.x, botRight.y);
-    UI.buffer.line(botRight.x, topLeft.y, botRight.x, botRight.y);
+    UI.buffer.strokeWeight(2);
+    UI.buffer.line(topLeft.x, topLeft.y, topRight.x, topRight.y);
+    UI.buffer.line(topLeft.x, topLeft.y, botLeft.x, botLeft.y);
+    UI.buffer.line(botRight.x, botRight.y, topRight.x, topRight.y);
+    UI.buffer.line(botRight.x, botRight.y, botLeft.x, botLeft.y);
+
     UI.buffer.strokeWeight(6);
     UI.buffer.noStroke();
 
-    UI.buffer.pop();
+    UI.drawTooltipBelow((botLeft.x+botRight.x)/2, (botLeft.y+botRight.y)/2 + 6, Math.round(bounds.width) + " x " + Math.round(bounds.height));
   }
 }
 
@@ -3229,4 +3230,7 @@ const xorshift = (seed) => {
   seed ^= (seed >>> 35);
   seed ^= (seed << 4);
   return seed;
+}
+Number.prototype.mod = function(n) {
+  return ((this%n)+n)%n;
 }
