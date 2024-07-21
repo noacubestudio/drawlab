@@ -24,16 +24,17 @@ function setup() {
   UI.buffer = createGraphics(width, height);
   Interaction.adjustCanvasSize(windowWidth, windowHeight);
 
-  // event listeners on the entire canvas element
+  // react to events on the fullscreen canvas
   const canvasElement = document.getElementById("myCanvas");
-  canvasElement.addEventListener("pointerdown", Interaction.pointerStart);
-  canvasElement.addEventListener("pointerup", Interaction.pointerEnd);
+  canvasElement.addEventListener("pointerdown",   Interaction.pointerStart);
+  canvasElement.addEventListener("pointerup",     Interaction.pointerEnd);
   canvasElement.addEventListener("pointercancel", Interaction.pointerCancel);
-  canvasElement.addEventListener("pointermove", Interaction.pointerMove);
-  canvasElement.addEventListener("wheel", Interaction.wheelScrolled);
-  canvasElement.addEventListener("pointerout", (event) => {
-    Interaction.pointerCancel(event);
-  });
+  canvasElement.addEventListener("pointermove",   Interaction.pointerMove);
+  canvasElement.addEventListener("wheel",         Interaction.wheelScrolled);
+  canvasElement.addEventListener("pointerout",    Interaction.pointerCancel);
+
+  // fix for apple pencil scribble
+  canvasElement.addEventListener("touchmove", (event) => {event.preventDefault();}, false);
 
   // event listeners on the document
   document.addEventListener("visibilitychange", () => {
@@ -47,7 +48,7 @@ function setup() {
 
   // initialize new painting
   Interaction.resetViewTransform();
-  const INITIAL_CANVAS_COLOR = new HSLColor(0.6, 0.1, 0.15);
+  const INITIAL_CANVAS_COLOR = new HSLColor(0.2, 0.25, 0.5);
   const smaller_window_side = Math.min(width, height);
   const INITIAL_CANVAS_DIMENSIONS = { // start with square canvas for now
     x: Math.round(smaller_window_side*0.9),
@@ -65,7 +66,7 @@ function setup() {
 function draw() {
   // behind everything
   background(openPainting.canvasColor.behind().hex);
-
+  
   // correctly center and rotate
   push();
   translate(Interaction.viewTransform.centerPos().x, Interaction.viewTransform.centerPos().y);
@@ -73,19 +74,29 @@ function draw() {
   // WIP: should also take into account current cropping amount here and make the interactions offset to match.
   translate(-Interaction.viewTransform.scale * openPainting.width/2, -Interaction.viewTransform.scale * openPainting.height/2);
 
-
-  // draw the painting buffers
   const scaledSize = {
     x: Math.round(Interaction.viewTransform.scale * openPainting.width),
     y: Math.round(Interaction.viewTransform.scale * openPainting.height)
   };
 
+  // gradient shadow behind painting
+  const gradient = drawingContext.createRadialGradient(
+    scaledSize.x * openPainting.cropWidthMultiplier/2, scaledSize.y * openPainting.cropHeightMultiplier/2, 0,
+    scaledSize.x * openPainting.cropWidthMultiplier/2, scaledSize.y * openPainting.cropHeightMultiplier/2, Math.min(scaledSize.x, scaledSize.y) * Math.min(openPainting.cropHeightMultiplier, openPainting.cropWidthMultiplier) * 1.5/2
+  );
+  gradient.addColorStop(0, color(0, 0, 0, 100));
+  gradient.addColorStop(1, 'transparent');
+  drawingContext.fillStyle = gradient;
+  noStroke();
+  ellipse(scaledSize.x * openPainting.cropWidthMultiplier * 1/2 , scaledSize.y * openPainting.cropHeightMultiplier * 1/2, 
+    scaledSize.x * openPainting.cropWidthMultiplier * 1.5, scaledSize.y * openPainting.cropHeightMultiplier * 1.5);
+
+  // draw the painting buffers
+
   // in rounded rectangle area
   drawingContext.save();
   fill(openPainting.canvasColor.hex);
-  strokeWeight(2)
-  stroke(new HSLColor(0,0,0,0.5).hex);
-  rect(0, 0, scaledSize.x * openPainting.cropWidthMultiplier, scaledSize.y * openPainting.cropHeightMultiplier, UI.ELEMENT_RADIUS/2);
+  rect(0, 0, scaledSize.x * openPainting.cropWidthMultiplier, scaledSize.y * openPainting.cropHeightMultiplier, UI.ELEMENT_RADIUS);
   drawingContext.clip();
 
   openPainting.updateCombinedBuffer();
@@ -115,32 +126,57 @@ class BrushSettings {
    * @param {string} tool The name of the tool.
    * @param {string} texture The name of the texture.
    */
-  constructor(color, size, colorVar, tool, texture) {
+  constructor(color, size, colorVar, tool, texture, exactSize) {
     this.color = color.copy();
     this.size = size;
     this.colorVar = colorVar;
     this.tool = tool;
     this.texture = texture;
+    this.exactSize = exactSize ?? null;
   }
 
   copy() {
-    return new BrushSettings(this.color, this.size, this.colorVar, this.tool, this.texture);
+    return new BrushSettings(
+      this.color, this.size, this.colorVar, this.tool, this.texture, this.exactSize
+    );
   }
 
   /**
-   * Get the actual size in pixels from the abstract 0-1 size value. Not linear.
+   * Not linear. Pressure is optional.
+   * @param {number} pressure The pressure value, in the range [0-1].
+   * @returns {number} The size in pixels.
    */
-  get pxSize() {
-    const pxSize = map(easeInCirc(this.size), 0, 1, 4, 600);
-    return pxSize;
+  sizeInPixels(pressure, alignedness) {
+
+    let size;
+    if (this.exactSize === null) {
+      size = map(easeInCirc(this.size), 0, 1, 4, 600);
+    } else {
+      size = this.exactSize;
+    }
+
+    // modify based on tool
+    size *= (this.texture === "Round" ? 0.7 : 1);
+
+    // if size not exactly set, take into account dynamics
+    if (this.exactSize === null) {
+      if (pressure !== undefined) {
+        size *= map(pressure, 0, 1, 0.1, 2.0, true);
+      }
+      if (alignedness !== undefined) {
+        size *= map(alignedness, 0, 1, 1 * 1.3, 1 / 1.3, true);
+      }
+    }
+    return size;
   }
 
-  finalPxSizeWithPressure(pressure) {
-    const size = this.pxSize * (this.texture === "Round" ? 0.7 : 1);
-    if (pressure === undefined) return size;
-    return size * map(pressure, 0, 1, 0.1, 2.0, true);
-    // TODO: consider logarithmic pressure scaling
-    // return Math.log(pressure + 1) * size * 10;
+  /**
+   * @param {number} pxSize The size in pixels.
+   */
+  setExactSize(pxSize) {
+    this.size = null;
+    this.exactSize = pxSize;
+    //if (this.texture === "Round") this.exactSize /= 0.7;
   }
 
   getColorWithVar(seed) {
@@ -236,7 +272,6 @@ class Brushstroke {
           point.pressure *= 0.5; // start lower
         }
       }
-
       this.points.push(new BrushPoint(point.x,  point.y,  point.azimuth, point.pressure, point.timeStamp));
     }
   }
@@ -278,9 +313,55 @@ class Brushstroke {
    */
   drawPart(start, end, beforePoint) {
 
-    
+    // for now, ignore .azimuth besides for slightly changing the width of strokes.
+    // barrel rotation should have an effect instead, which is not yet supported and I couldn't use myself...
+    function angleAtV(v) {
+      const a = createVector(v.x, v.y).heading();
+      return map(a + Math.PI/2, -Math.PI, Math.PI, 0, Math.PI*2) % (Math.PI*2);
+    }
 
-    // this.buffer.stroke(this.settings.getColorWithVar(this.brushstrokeSeed).hex);
+    // 0 to 2PI clockwise from the right
+    const endAngle = angleAtV({x: end.x-start.x, y: end.y-start.y});
+    const startAngle = (beforePoint !== undefined) ? angleAtV({x: start.x-beforePoint.x, y: start.y-beforePoint.y}) : endAngle;
+    const averageAngle = getAverageAngle(startAngle, endAngle);
+
+    // 0 to 2PI clockwise from the left
+    const averageAzimuth = (start.azimuth !== undefined) ? getAverageAngle(start.azimuth, end.azimuth) : undefined;
+
+      end.pressure ??= start.pressure;
+      end.pressure ??= (openPainting.averagePressure ?? 0.5);
+    start.pressure ??= (openPainting.averagePressure ?? 0.5);
+    const avgPressure = (start.pressure + end.pressure) / 2;
+
+    // calculate width of the bruststroke
+    const avgBrushWidth = this.settings.sizeInPixels(openPainting.averagePressure) ?? this.settings.sizeInPixels();
+    function widthAtPoint(t, pressure, strokeAngle, azimuthAngle) {
+      let alignedness = undefined;
+      if (azimuthAngle !== undefined && strokeAngle !== undefined) {
+        // calculate how aligned the stroke is with the azimuth
+        alignedness = Math.abs((azimuthAngle % Math.PI*2) - (strokeAngle % Math.PI*2)) / (Math.PI*2);
+        alignedness = Math.min(alignedness, 1 - alignedness) * 2;
+      }
+      return t.settings.sizeInPixels(pressure, alignedness);
+    }
+
+
+    // // normalize
+    // let alignedness = Math.abs((averageAzimuth % Math.PI*2) - (averageAngle % Math.PI*2)) / (Math.PI*2);
+    // alignedness = Math.min(alignedness, 1 - alignedness);
+    // //differenceInAngle = 1 - Math.abs(Math.abs(differenceInAngle * 4 - 2) - 1);
+
+    // // differenceInAngle = Math.abs(averageAzimuth - averageAngle) / (Math.PI);
+    // // //differenceInAngle = Math.abs(differenceInAngle * -2 - 1)Math.min(differenceInAngle * 2, 1 - differenceInAngle * 2);
+    // // differenceInAngle = -Math.abs(-2 * differenceInAngle + 2) + 2;
+
+    // // transform space from 0-1 to 0-1-0
+    // //differenceInAngle = Math.abs(differenceInAngle * 2 - 1);
+    
+    // //this.buffer.stroke(map(startAngle, 0, Math.PI * 2, 0, 255), 0, map(start.azimuth, 0, Math.PI * 2, 0, 255));
+    // //this.buffer.stroke((((start.azimuth + Math.PI) % (Math.PI * 2)) / (Math.PI*2)) * 255);
+    // //this.buffer.stroke((differenceInAngle / (Math.PI*2)) * 255);
+    // this.buffer.strokeWeight(differenceInAngle * 10);
     // this.buffer.push();
 
     // this.buffer.line(start.x, start.y, end.x, end.y);
@@ -290,7 +371,7 @@ class Brushstroke {
     
     // if (start.pressure === 0) {
     //   this.buffer.line(-25, 0, +25, 0);
-    //   this.buffer.stroke(new HSLColor(0, 1, 0.5, 0).hex);
+    //   //this.buffer.stroke(new HSLColor(0, 1, 0.5, 0).hex);
     //   this.buffer.pop();
     // } else {
     //   let p = Math.log(start.pressure + 1) * 100
@@ -298,13 +379,9 @@ class Brushstroke {
     //   this.buffer.line(-s, 0, +s, 0);
     //   this.buffer.pop();
     // }
-    
     // return;
 
 
-
-
-    const brushSize = this.settings.pxSize * (this.settings.texture === "Round" ? 0.7 : 1);
 
     // if (beforePoint === undefined) {
     //   //draw a circle at start point
@@ -314,7 +391,7 @@ class Brushstroke {
 
     //   this.buffer.noStroke();
     //   this.buffer.fill(this.settings.color.hex);
-    //   const startSize = this.settings.finalPxSizeWithPressure(start.pressure) ?? brushSize;
+    //   const startSize = this.settings.sizeInPixels(start.pressure) ?? brushSize;
     //   this.buffer.ellipse(0, 0, startSize);
 
     //   const varSegments = 48;
@@ -327,52 +404,25 @@ class Brushstroke {
 
     //   this.buffer.pop();
     // }
-
-
-
-    // for now, ignore .azimuth besides for slightly changing the width of strokes.
-    // barrel rotation should have an effect instead, which is not yet supported and I couldn't use myself...
-    const endAngle = p5.Vector.angleBetween(createVector(0, -1), createVector(end.x-start.x, end.y-start.y));
-    const startAngle = (beforePoint !== undefined) 
-      ? p5.Vector.angleBetween(createVector(0, -1), createVector(start.x-beforePoint.x, start.y-beforePoint.y))
-      : endAngle;
-    const averageAngle = getAverageAngle(startAngle, endAngle);
-
-    const averageAzimuth = (start.azimuthAngle !== undefined) ? getAverageAngle(start.azimuthAngle, end.azimuthAngle) : undefined;
-
-      //if (start.pressure === 0.5) start.pressure = 0
-      end.pressure ??= start.pressure;
-      end.pressure ??= (openPainting.averagePressure ?? 0.5);
-    start.pressure ??= (openPainting.averagePressure ?? 0.5);
-    const avgPressure = (start.pressure + end.pressure) / 2;
-
-    const avgBrushSize = this.settings.finalPxSizeWithPressure(openPainting.averagePressure) ?? brushSize;
-
-    function widthAtPoint(pressure, strokeAngle, azimuthAngle) {
-      const alignedness = (azimuthAngle !== undefined) ? map(Math.abs(azimuthAngle - strokeAngle), 0, Math.PI * 2, 1, 0) : 1; // currently useless??
-      return brushSize * map(pressure, 0, 1, 0.1, 2.0, true) * alignedness;
-    }
     
-    this.buffer.noStroke();
-
     // randomness matches increasing variation
-    const rf = 3 * this.settings.colorVar * this.settings.colorVar; 
-    
-    const strips = Math.floor(map(avgBrushSize, 10, 300, 10, 200) * (this.settings.texture === "Round" ? 0.7 : 1));
+    const randFactor = 3 * this.settings.colorVar * this.settings.colorVar; 
+    const strips = Math.floor(map(avgBrushWidth, 10, 300, 10, 200) * (this.settings.texture === "Round" ? 0.7 : 1));
 
     // draw background shape
+    this.buffer.noStroke();
     if (this.settings.texture !== "Rake") {
       const lowSideLerpPart = HSLColor.symmetricalNoise(0 + end.seed) * 0.5 + 0.5;
       const highSideLerpPart = HSLColor.symmetricalNoise(strips-1 + end.seed) * 0.5 + 0.5;
       const lowSideMiddlePos = {x: lerp(start.x, end.x, lowSideLerpPart), y: lerp(start.y, end.y, lowSideLerpPart)};
       const highSideMiddlePos = {x: lerp(start.x, end.x, highSideLerpPart), y: lerp(start.y, end.y, highSideLerpPart)};
   
-      const startEdgeVectorLower  = p5.Vector.fromAngle(  startAngle, -0.5*widthAtPoint(start.pressure,   startAngle, start.azimuthAngle));
-      const startEdgeVectorHigher = p5.Vector.fromAngle(  startAngle,  0.5*widthAtPoint(start.pressure,   startAngle, start.azimuthAngle));
-      const endEdgeVectorLower    = p5.Vector.fromAngle(    endAngle, -0.5*widthAtPoint(  end.pressure,     endAngle,   end.azimuthAngle));
-      const endEdgeVectorHigher   = p5.Vector.fromAngle(    endAngle,  0.5*widthAtPoint(  end.pressure,     endAngle,   end.azimuthAngle));
-      const midEdgeVectorLower    = p5.Vector.fromAngle(averageAngle, -0.5*widthAtPoint(   avgPressure, averageAngle,     averageAzimuth));
-      const midEdgeVectorHigher   = p5.Vector.fromAngle(averageAngle,  0.5*widthAtPoint(   avgPressure, averageAngle,     averageAzimuth));
+      const startEdgeVectorLower  = p5.Vector.fromAngle(  startAngle, -0.5*widthAtPoint(this, start.pressure,   startAngle, start.azimuth));
+      const startEdgeVectorHigher = p5.Vector.fromAngle(  startAngle,  0.5*widthAtPoint(this, start.pressure,   startAngle, start.azimuth));
+      const endEdgeVectorLower    = p5.Vector.fromAngle(    endAngle, -0.5*widthAtPoint(this,   end.pressure,     endAngle,   end.azimuth));
+      const endEdgeVectorHigher   = p5.Vector.fromAngle(    endAngle,  0.5*widthAtPoint(this,   end.pressure,     endAngle,   end.azimuth));
+      const midEdgeVectorLower    = p5.Vector.fromAngle(averageAngle, -0.5*widthAtPoint(this,    avgPressure, averageAngle, averageAzimuth));
+      const midEdgeVectorHigher   = p5.Vector.fromAngle(averageAngle,  0.5*widthAtPoint(this,    avgPressure, averageAngle, averageAzimuth));
   
       this.buffer.fill(this.settings.color.hex);
       this.buffer.strokeWeight(1);
@@ -412,12 +462,12 @@ class Brushstroke {
         const middleX = lerp(start.x, end.x, lerpPart);
         const middleY = lerp(start.y, end.y, lerpPart);
 
-        const startEdgeVectorLower  = p5.Vector.fromAngle(  startAngle,  lowerSide*widthAtPoint(start.pressure,   startAngle, start.azimuthAngle));
-        const startEdgeVectorHigher = p5.Vector.fromAngle(  startAngle, higherSide*widthAtPoint(start.pressure,   startAngle, start.azimuthAngle));
-        const endEdgeVectorLower    = p5.Vector.fromAngle(    endAngle,  lowerSide*widthAtPoint(  end.pressure,     endAngle,   end.azimuthAngle));
-        const endEdgeVectorHigher   = p5.Vector.fromAngle(    endAngle, higherSide*widthAtPoint(  end.pressure,     endAngle,   end.azimuthAngle));
-        const midEdgeVectorLower    = p5.Vector.fromAngle(averageAngle,  lowerSide*widthAtPoint(   avgPressure, averageAngle,     averageAzimuth));
-        const midEdgeVectorHigher   = p5.Vector.fromAngle(averageAngle, higherSide*widthAtPoint(   avgPressure, averageAngle,     averageAzimuth));
+        const startEdgeVectorLower  = p5.Vector.fromAngle(  startAngle,  lowerSide*widthAtPoint(this, start.pressure,   startAngle, start.azimuth));
+        const startEdgeVectorHigher = p5.Vector.fromAngle(  startAngle, higherSide*widthAtPoint(this, start.pressure,   startAngle, start.azimuth));
+        const endEdgeVectorLower    = p5.Vector.fromAngle(    endAngle,  lowerSide*widthAtPoint(this,   end.pressure,     endAngle,   end.azimuth));
+        const endEdgeVectorHigher   = p5.Vector.fromAngle(    endAngle, higherSide*widthAtPoint(this,   end.pressure,     endAngle,   end.azimuth));
+        const midEdgeVectorLower    = p5.Vector.fromAngle(averageAngle,  lowerSide*widthAtPoint(this,    avgPressure, averageAngle, averageAzimuth));
+        const midEdgeVectorHigher   = p5.Vector.fromAngle(averageAngle, higherSide*widthAtPoint(this,    avgPressure, averageAngle, averageAzimuth));
 
 
         const brushCol = this.settings.getColorWithVar(idTowardsCenter + start.seed)
@@ -426,7 +476,7 @@ class Brushstroke {
 
         if (this.settings.texture === "Round") {
           this.buffer.stroke(brushCol.hex);
-          this.buffer.strokeWeight(2 * brushSize / strips);
+          this.buffer.strokeWeight(2 * avgBrushWidth / strips);
           this.buffer.line(
             start.x + startEdgeVectorLower.x, start.y + startEdgeVectorLower.y, 
             middleX + midEdgeVectorLower.x, middleY + midEdgeVectorLower.y
@@ -441,8 +491,8 @@ class Brushstroke {
           this.buffer.beginShape();
           this.randomizedVertex(this.buffer, sX, startEdgeVectorLower.x ,    sY, startEdgeVectorLower.y ,    0);
           this.randomizedVertex(this.buffer, sX, startEdgeVectorHigher.x,    sY, startEdgeVectorHigher.y,    0);
-          this.randomizedVertex(this.buffer, middleX, midEdgeVectorHigher.x, middleY, midEdgeVectorHigher.y, rf);
-          this.randomizedVertex(this.buffer, middleX, midEdgeVectorLower.x,  middleY, midEdgeVectorLower.y,  rf);
+          this.randomizedVertex(this.buffer, middleX, midEdgeVectorHigher.x, middleY, midEdgeVectorHigher.y, randFactor);
+          this.randomizedVertex(this.buffer, middleX, midEdgeVectorLower.x,  middleY, midEdgeVectorLower.y,  randFactor);
           this.buffer.endShape();
         }
         const brushCol2 = this.settings.getColorWithVar(idTowardsCenter + end.seed)
@@ -451,7 +501,7 @@ class Brushstroke {
 
         if (this.settings.texture === "Round") {
           this.buffer.stroke(brushCol2.hex);
-          this.buffer.strokeWeight(2 * brushSize / strips);
+          this.buffer.strokeWeight(2 * avgBrushWidth / strips);
           this.buffer.line(
             middleX + midEdgeVectorLower.x, middleY + midEdgeVectorLower.y, 
             end.x + endEdgeVectorLower.x, end.y + endEdgeVectorLower.y
@@ -464,18 +514,14 @@ class Brushstroke {
           this.buffer.fill(brushCol2.hex);
           //this.buffer.stroke(brushCol2.hex);
           this.buffer.beginShape();
-          this.randomizedVertex(this.buffer, middleX, midEdgeVectorLower.x , middleY, midEdgeVectorLower.y , rf);
-          this.randomizedVertex(this.buffer, middleX, midEdgeVectorHigher.x, middleY, midEdgeVectorHigher.y, rf);
+          this.randomizedVertex(this.buffer, middleX, midEdgeVectorLower.x , middleY, midEdgeVectorLower.y , randFactor);
+          this.randomizedVertex(this.buffer, middleX, midEdgeVectorHigher.x, middleY, midEdgeVectorHigher.y, randFactor);
           this.randomizedVertex(this.buffer, eX  , endEdgeVectorHigher.x, eY  , endEdgeVectorHigher.y, 0);
           this.randomizedVertex(this.buffer, eX  , endEdgeVectorLower.x , eY  , endEdgeVectorLower.y , 0);
           this.buffer.endShape();
         }
       }
     }
-  }
-
-  drawStrip(start, end, beforePoint, i, strips) {
-    
   }
 
   randomizedVertex(buffer, x, xOff, y, yOff, randomFactor) {
@@ -942,9 +988,14 @@ class Interaction {
   }
 
   static resetViewTransform() {
+    // take into account the painting format
+    const cropOffset = {
+      x: (openPainting) ? openPainting.width * (1-openPainting.cropWidthMultiplier)/2 : 0,
+      y: (openPainting) ? openPainting.height * (1-openPainting.cropHeightMultiplier)/2 : 0
+    }
     Interaction.viewTransform.scale = 1;
-    Interaction.viewTransform.panX = 0;
-    Interaction.viewTransform.panY = 10; // start slightly lower than centered
+    Interaction.viewTransform.panX = cropOffset.x;
+    Interaction.viewTransform.panY = cropOffset.y; // start slightly lower than centered
     Interaction.viewTransform.rotation = 0;
   }
 
@@ -1075,7 +1126,11 @@ class Interaction {
       Interaction.currentUI = Interaction.UI_STATES.nothing_open;
       Interaction.changeCursorToHover();
       Interaction.resetCurrentSequence();
-    }
+    } 
+    // else if (key === "z") {
+    //   // print current brush in all forms
+    //   console.log(openPainting.currentBrush);
+    // }
   }
 
   static resetCurrentSequence() {
@@ -1142,7 +1197,6 @@ class Interaction {
 
   static nextCanvasFormat() {
     Interaction.stopEditing();
-    Interaction.resetViewTransform();
     if (openPainting.cropWidthMultiplier === openPainting.cropHeightMultiplier) {
       // was square
       openPainting.cropWidthMultiplier  = 3/4;
@@ -1156,6 +1210,7 @@ class Interaction {
       openPainting.cropWidthMultiplier  = 1;
       openPainting.cropHeightMultiplier = 1;
     }
+    Interaction.resetViewTransform();
   }
 
   static undoAction() {
@@ -1286,11 +1341,11 @@ class Interaction {
       }
     }
 
-    if ((x < 100 || x > width-100) && Interaction.currentUI === Interaction.UI_STATES.clover_open) {
-      const buttonY = y - UI.BUTTON_WIDTH * 2; // how far down these buttons start
+    if ((x < UI.BUTTON_WIDE || x > width-UI.BUTTON_WIDE) && Interaction.currentUI === Interaction.UI_STATES.clover_open) {
+      const buttonY = y - UI.BUTTON_WIDTH; // how far down these buttons start
       const buttonIndex = Math.floor(buttonY / UI.BUTTON_HEIGHT);
 
-      if (x<100) {
+      if (x<UI.BUTTON_WIDE) {
         // left side
         if (buttonIndex === 0) {
           return Interaction.TYPES.button.tool0;
@@ -1366,7 +1421,7 @@ class Interaction {
         Interaction.currentType = Interaction.TYPES.painting.zoom;
         Interaction.currentSequence.push(new_interaction);
       } else if (Interaction.currentType === Interaction.TYPES.painting.zoom) {
-        // third finger resets al transforms.
+        // third finger resets all transforms.
         Interaction.resetViewTransform();
         Interaction.currentSequence = [];
       }
@@ -2056,7 +2111,10 @@ class HSLColor {
   }
 
   #toRGBArray() {
-    return okhsl_to_srgb(this.hue, this.saturation, this.lightness); // from conversion helpers file
+    const rgbArray = okhsl_to_srgb(this.hue, this.saturation, this.lightness); // from conversion helpers file
+    // make sure none are below 0
+    // TODO: why does this even happen? Should investigate and remove this fix if not needed anymore.
+    return rgbArray.map((value) => Math.max(0, value));
   }
 
   #alphaToHex(a = this.a) {
@@ -2105,7 +2163,7 @@ class HSLColor {
    * Create a copy of the current color that is darker and limited in saturation.
    */
   behind() {
-    return new HSLColor(this.h, Math.min(this.s, 0.5), this.l * 0.7, this.a);
+    return new HSLColor(this.h, Math.min(this.s, 0.1), this.l * 0.8, this.a);
   }
 
   brighter() {
@@ -2177,6 +2235,7 @@ class UI {
   static ELEMENT_RADIUS = 16;
 
   static BUTTON_WIDTH = 70;
+  static BUTTON_WIDE = 120;
   static BUTTON_HEIGHT = 50;
 
   // sliders can be dragged over a 200 pixel range that corresponds to 0-1, but are a bit wider
@@ -2228,8 +2287,9 @@ class UI {
     UI.palette.constrastBg = UI.palette.fg.copy()
       .setLightness(lerp(openPainting.canvasColor.lightness, openPainting.canvasColor.lightness > 0.5 ? 1 : 0, 0.7)); 
     UI.palette.onBrush = openPainting.currentBrush.color.copy()
-      .setLightness(lerp(openPainting.currentBrush.color.lightness, (openPainting.currentBrush.color.lightness>0.5) ? 0:1, 0.7))
-      .setSaturation(openPainting.currentBrush.color.saturation * 0.5);
+      .setLightness(lerp(openPainting.currentBrush.color.lightness, (openPainting.currentBrush.color.lightness>0.5) ? 0 : 1, 0.5))
+      .setSaturation(openPainting.currentBrush.color.saturation * 0.2)
+      .setHue(UI.palette.bg.hue);
     UI.palette.warning = new HSLColor(0.1, 0.8, (UI.palette.fg.lightness > 0.5) ? 0.7 : 0.4);
     
     // MENUS
@@ -2238,13 +2298,13 @@ class UI {
       // tool buttons on left
       PRESET_TOOLS.forEach((preset, index) => {
         const x = 0;
-        const y = UI.BUTTON_HEIGHT * index + 2 * UI.BUTTON_WIDTH; // lower by two button widths
+        const y = UI.BUTTON_HEIGHT * index + UI.BUTTON_WIDTH; // lower by button width
         UI.displayTool(preset.tool, preset.texture, x, y, preset.menuName);
       });
 
       // menu on right
-      UI.drawRightButton("fill all", UI.BUTTON_HEIGHT * 0 + 2*UI.BUTTON_WIDTH, Interaction.TYPES.button.fill, UI.palette.warning);
-      UI.drawRightButton("change crop", UI.BUTTON_HEIGHT * 1 + 2*UI.BUTTON_WIDTH, Interaction.TYPES.button.fill, UI.palette.fg);
+      UI.drawRightButton("fill all",    UI.BUTTON_HEIGHT * 0 + UI.BUTTON_WIDTH, Interaction.TYPES.button.fill, UI.palette.warning);
+      UI.drawRightButton("change crop", UI.BUTTON_HEIGHT * 1 + UI.BUTTON_WIDTH, Interaction.TYPES.button.fill, UI.palette.fg);
     }
   
     // top menu buttons
@@ -2357,7 +2417,7 @@ class UI {
 
     } else if (currentElement === Interaction.TYPES.knob.size) {
 
-      UI.drawTooltipBelow(sliderStart - UI.KNOB_SIZE/2, UI.KNOB_SIZE, Math.round(openPainting.brushSettingsToAdjust.pxSize) + "px");
+      UI.drawTooltipBelow(sliderStart - UI.KNOB_SIZE/2, UI.KNOB_SIZE, Math.round(openPainting.brushSettingsToAdjust.sizeInPixels()) + "px");
 
     }
     
@@ -2541,29 +2601,33 @@ class UI {
     UI.buffer.push();
     UI.buffer.translate(x, y);
 
+    
     UI.buffer.fill(UI.palette.constrastBg.toHexWithSetAlpha(isSelected ? 0.2 : 1));
-    UI.buffer.rect(0, UI.ELEMENT_MARGIN, 100, UI.BUTTON_HEIGHT-UI.ELEMENT_MARGIN*2, 0, UI.ELEMENT_RADIUS, UI.ELEMENT_RADIUS, 0);
+    UI.buffer.rect(UI.ELEMENT_MARGIN, UI.ELEMENT_MARGIN, UI.BUTTON_WIDE - UI.ELEMENT_MARGIN, UI.BUTTON_HEIGHT-UI.ELEMENT_MARGIN*2, UI.ELEMENT_RADIUS, UI.ELEMENT_RADIUS);
+    UI.buffer.drawingContext.clip();
 
     // draw example
     // wip, not sure why the angle 86 even makes sense.
-    const start = new BrushPoint(-20, 30, 86, undefined);
-    const end = new BrushPoint(80, 30, 86, undefined);
+    const start = new BrushPoint( UI.BUTTON_WIDE*0.2, UI.BUTTON_HEIGHT * 0.2, 86, undefined);
+    const end   = new BrushPoint( UI.BUTTON_WIDE*0.8, UI.BUTTON_HEIGHT * 0.8, 86, undefined);
     
     new Brushstroke(UI.buffer, settings).drawPart(start, end);
 
     UI.buffer.noStroke();
     UI.buffer.fill(UI.palette.constrastBg.toHexWithSetAlpha(isSelected ? 0.8 : 0.3));
-    UI.buffer.rect(0, UI.ELEMENT_MARGIN, 100, UI.BUTTON_HEIGHT-UI.ELEMENT_MARGIN*2, 0, UI.ELEMENT_RADIUS, UI.ELEMENT_RADIUS, 0);
+    UI.buffer.rect(UI.ELEMENT_MARGIN, UI.ELEMENT_MARGIN, UI.BUTTON_WIDE - UI.ELEMENT_MARGIN, UI.BUTTON_HEIGHT-UI.ELEMENT_MARGIN*2, UI.ELEMENT_RADIUS, UI.ELEMENT_RADIUS);
+    
 
     UI.buffer.textAlign(CENTER);
     UI.buffer.fill(isSelected ? UI.palette.fgDisabled.hex : UI.palette.fg.hex);
-    UI.buffer.text(menuName, 40, 30-4);
+    UI.buffer.text(menuName, UI.BUTTON_WIDE/2, UI.BUTTON_HEIGHT/2-2);
     UI.buffer.textFont(FONT_MEDIUM);
     
   
     UI.buffer.pop();
 
     UI.buffer.textAlign(LEFT);
+    UI.buffer.drawingContext.restore();
   }
 
   static drawRightButton(text, y, type, textColor) {
@@ -2571,13 +2635,13 @@ class UI {
     const bgColor = UI.palette.constrastBg;
     UI.buffer.fill(isHover ? bgColor.brighter().toHexWithSetAlpha(0.5) : bgColor.toHexWithSetAlpha(0.5));
     UI.buffer.rect(
-      width - 100, y+UI.ELEMENT_MARGIN, 
-      100, UI.BUTTON_HEIGHT-UI.ELEMENT_MARGIN*2, 
-      UI.ELEMENT_RADIUS, 0, 0, UI.ELEMENT_RADIUS
+      width - UI.BUTTON_WIDE + UI.ELEMENT_MARGIN, y+UI.ELEMENT_MARGIN, 
+      UI.BUTTON_WIDE - UI.ELEMENT_MARGIN*2, UI.BUTTON_HEIGHT-UI.ELEMENT_MARGIN*2, 
+      UI.ELEMENT_RADIUS
     );
     UI.buffer.fill(textColor.hex);
     UI.buffer.textAlign(CENTER);
-    UI.buffer.text(text, width - 100, y, 100, UI.BUTTON_HEIGHT - 8);
+    UI.buffer.text(text, width - UI.BUTTON_WIDE, y, UI.BUTTON_WIDE, UI.BUTTON_HEIGHT - 8);
     UI.buffer.textAlign(LEFT);
   }
 
@@ -2617,30 +2681,29 @@ class UI {
   }
 
   static drawVariedColorCircle(brush, size, x, y) {
+
+    UI.buffer.fill(brush.color.hex);
+    UI.buffer.ellipse(x, y, size);
+
+    // TODO: still gets scaled with pressure somehow.
+    const scaledBrush = brush.copy();
+    scaledBrush.setExactSize(size * 0.5); // half, so that it fills the space exactly since the brushstroke is centered.
+    UI.drawJitterDonut(scaledBrush, size * 0.5, x, y)
+  }
+
+  static drawJitterDonut(brush, radius, x, y) {
     UI.buffer.push();
     UI.buffer.translate(x, y);
     const intensityAngle = brush.colorVar * Math.PI * 2;
     if (intensityAngle !== undefined) UI.buffer.rotate(intensityAngle);
-
-    UI.buffer.fill(brush.color.hex);
-    UI.buffer.ellipse(0, 0, size);
-
-    const varSegments = 48;
-    for (let i = 0; i < varSegments; i++) {
-      const start = (TWO_PI / varSegments) * i;
-      const stop = start + TWO_PI / varSegments; 
-      UI.buffer.fill(brush.getColorWithVar(i).hex);
-      UI.buffer.arc(0, 0, size, size, start, stop);
+    const donut = new Brushstroke(UI.buffer, brush);
+    const cornerCount = 12;
+    for (let i = 0; i <= cornerCount; i++) {
+      const angle = TWO_PI / cornerCount * i;
+      const rotatedPoint = new BrushPoint(radius * Math.cos(angle) * 0.5, radius * Math.sin(angle) * 0.5);
+      donut.addPoint(rotatedPoint);
     }
-
-    // if (size > 50) {
-    //   //UI.buffer.rotate(Math.PI * 2 * -0.4);
-    //   UI.buffer.noFill();
-    //   UI.buffer.stroke(UI.palette.onBrush.toHexWithSetAlpha(0.6));
-    //   UI.buffer.strokeWeight(size/4);
-    //   UI.buffer.arc(0, 0, size*0.8, size*0.8, -intensityAngle-Math.PI*0.5, -Math.PI*0.5);
-    // }
-
+    donut.drawWhole();
     UI.buffer.pop();
   }
 
@@ -2648,25 +2711,29 @@ class UI {
 
     UI.buffer.drawingContext.save();
 
-    UI.buffer.fill(UI.palette.bg.toHexWithSetAlpha(0.5));
+    UI.buffer.fill(UI.palette.onBrush.hex);
     UI.buffer.rect(x + UI.ELEMENT_MARGIN, y + UI.ELEMENT_MARGIN, UI.KNOB_SIZE - UI.ELEMENT_MARGIN*2, UI.KNOB_SIZE - UI.ELEMENT_MARGIN*2, UI.ELEMENT_RADIUS);
     
     UI.buffer.drawingContext.clip();
 
     // draw snapshot for easier reference of color
-      // darken when changing size
-      const changingSize = [
-        Interaction.TYPES.knob.size,
-        Interaction.TYPES.gizmo.size
-      ];
-      if (changingSize.includes(Interaction.currentType) || (Interaction.currentType === null && Interaction.elementTypeAtPointer === Interaction.TYPES.knob.size)) {
-        UI.buffer.tint(255, 100);
-      } 
-    // draw snapshot at correct scale, twice as large as knob.
-    const snapshotSize = UI.KNOB_SIZE * Interaction.viewTransform.scale * 2;
-    const centerOffset = (snapshotSize - UI.KNOB_SIZE) / 2;
-    UI.buffer.image(openPainting.snapshotBuffer, x - centerOffset, y - centerOffset, snapshotSize, snapshotSize);
-    UI.buffer.tint(255, 255);
+    // darken when changing size
+    const isChangingSize = (
+      [Interaction.TYPES.knob.size, Interaction.TYPES.gizmo.size].includes(Interaction.currentType)
+      || (Interaction.currentType === null && Interaction.elementTypeAtPointer === Interaction.TYPES.knob.size)
+    );
+    if (!isChangingSize) { 
+      // draw snapshot at correct scale, twice as large as knob.
+      const snapshotSize = UI.KNOB_SIZE * Interaction.viewTransform.scale * 2;
+      const centerOffset = (snapshotSize - UI.KNOB_SIZE) / 2;
+      UI.buffer.drawingContext.save();
+      UI.buffer.rect(x - centerOffset, y - centerOffset, snapshotSize, snapshotSize, UI.ELEMENT_RADIUS * (snapshotSize / UI.KNOB_SIZE));
+      UI.buffer.drawingContext.clip();
+      UI.buffer.image(openPainting.snapshotBuffer, x - centerOffset, y - centerOffset, snapshotSize, snapshotSize);
+      UI.buffer.drawingContext.restore();
+    }
+
+    //UI.buffer.tint(255, 255);
 
     // draw brushstroke
     UI.drawSizeIndicator(x + UI.KNOB_SIZE / 2, y + UI.KNOB_SIZE / 2, pressure);
@@ -2681,8 +2748,9 @@ class UI {
     UI.buffer.noStroke();
 
     // show average pressure with overlay
-    const indicatorSize = openPainting.brushSettingsToAdjust.finalPxSizeWithPressure(openPainting.averagePressure) * Interaction.viewTransform.scale;
-    UI.drawSizeOverlay(x + UI.KNOB_SIZE / 2, y + UI.KNOB_SIZE / 2, indicatorSize);
+    const indicatorSize = openPainting.brushSettingsToAdjust.sizeInPixels(openPainting.averagePressure) * Interaction.viewTransform.scale;
+    UI.drawSizeOverlay(x + UI.KNOB_SIZE / 2, y + UI.KNOB_SIZE / 2, indicatorSize, isChangingSize);
+    
   }
 
   static drawSizeIndicator(x, y, pressure) {
@@ -2692,31 +2760,42 @@ class UI {
     UI.buffer.rotate(Math.PI * 0.25);
 
     // draw example
-    // not sure why the angle 86 even makes sense.
-    const start = new BrushPoint(-(UI.KNOB_SIZE*0.125)/Interaction.viewTransform.scale, 0, 86, pressure);
-    const end = new BrushPoint((UI.KNOB_SIZE*0.6)/Interaction.viewTransform.scale, 0, 86, pressure);
+    // angle 86 is a bit arbitrary, but looked good. currently no effect.
+    const start = new BrushPoint(-(UI.KNOB_SIZE*0.125)/Interaction.viewTransform.scale, 0, undefined, pressure);
+    const end = new BrushPoint((UI.KNOB_SIZE*0.6)/Interaction.viewTransform.scale, 0, undefined, pressure);
     const settings = openPainting.brushSettingsToAdjust; //.copy();
     new Brushstroke(UI.buffer, settings).drawPart(start, end);
     
     UI.buffer.pop();
   }
 
-  static drawSizeOverlay(x, y, size) {
+  static drawSizeOverlay(x, y, size, editingEnabled) {
     UI.buffer.push();
     UI.buffer.translate(x, y);
     UI.buffer.rotate(Math.PI * 0.25);
     const fromCenterOffset = -UI.KNOB_SIZE * 0.125;
     UI.buffer.noFill();
-    UI.buffer.strokeWeight(6);
-    UI.buffer.stroke(new HSLColor(0,0,0,0.4).hex);
-    UI.buffer.line(fromCenterOffset, -size*0.5, fromCenterOffset, size*0.5);
-    UI.buffer.strokeWeight(2);
-    UI.buffer.stroke(new HSLColor(0,0,1,0.4).hex);
-    UI.buffer.line(fromCenterOffset, -size*0.5, fromCenterOffset, size*0.5);
-    UI.buffer.stroke(new HSLColor(0,0,1,0.8).hex);
-    UI.buffer.line(fromCenterOffset, -size*0.5, fromCenterOffset,-size*0.5+0.1);
-    UI.buffer.line(fromCenterOffset,  size*0.5, fromCenterOffset, size*0.5-0.1);
-    UI.buffer.line(fromCenterOffset, -0.1, fromCenterOffset, 0.1);
+    
+    if (editingEnabled) {
+      UI.buffer.strokeWeight(6);
+      UI.buffer.stroke(new HSLColor(0,0,0,0.4).hex);
+      UI.buffer.line(fromCenterOffset, -size*0.5, fromCenterOffset, size*0.5);
+      UI.buffer.strokeWeight(2);
+      UI.buffer.stroke(new HSLColor(0,0,1,0.4).hex);
+      UI.buffer.line(fromCenterOffset, -size*0.5, fromCenterOffset, size*0.5);
+
+      UI.buffer.stroke(new HSLColor(0,0,1,0.8).hex);
+      UI.buffer.line(fromCenterOffset, -size*0.5, fromCenterOffset,-size*0.5+0.1);
+      UI.buffer.line(fromCenterOffset,  size*0.5, fromCenterOffset, size*0.5-0.1);
+      UI.buffer.line(fromCenterOffset, -0.1, fromCenterOffset, 0.1);
+    } else {
+      UI.buffer.strokeWeight(4);
+      UI.buffer.stroke(new HSLColor(0,0,0,0.5).hex);
+      UI.buffer.line(fromCenterOffset, -size*0.5, fromCenterOffset, size*0.5);
+      UI.buffer.strokeWeight(2);
+      UI.buffer.stroke(new HSLColor(0,0,1,0.5).hex);
+      UI.buffer.line(fromCenterOffset, -size*0.5, fromCenterOffset,size*0.5);
+    }
     UI.buffer.noStroke();
     UI.buffer.pop();
     // UI.buffer.strokeWeight(4);
@@ -2752,16 +2831,14 @@ class UI {
     let lastX = xStart;
     let lastY = yStart;
     for (let i = 1; i < segments + 1; i++) {
-      const toX = lerp(xStart, xEnd, i / segments);
-      const toY = lerp(yStart, yEnd, i / segments);
       let lerpedColor = (specialType === "double") ? doubleLerpedColor(colorLerpAmt(i)) : HSLColor.lerpColorInHSL(startColor, endColor, colorLerpAmt(i));
       if (specialType === "variation") lerpedColor = lerpedColor.varyComponents(i, (i - 0.5) / segments);
       
       UI.buffer.stroke(lerpedColor.hex);
-      UI.buffer.line(lastX, lastY, toX, toY);
+      UI.buffer.line(lastX, lastY, xEnd, yEnd);
   
-      lastX = toX;
-      lastY = toY;
+      lastX = lerp(xStart, xEnd, i / segments);
+      lastY = lerp(yStart, yEnd, i / segments);
     }
     UI.buffer.strokeCap(ROUND);
   }
@@ -2943,7 +3020,7 @@ class UI {
         }
 
         if (type === Interaction.TYPES.cloverButton.hueAndVar) {
-
+          UI.buffer.stroke('pink'); // WTFFF why is this needed?
           UI.buffer.stroke(UI.palette.fg.toHexWithSetAlpha(0.2));
           UI.buffer.strokeWeight(8);
           UI.buffer.line(posX, posY - size/3, posX, posY + size/3);
@@ -3002,7 +3079,7 @@ class UI {
       UI.buffer.translate(ankerX, ankerY);
 
       UI.buffer.fill("black")
-      UI.buffer.ellipse(0, 0, constrain(brushToVisualize.pxSize, 8, UI.GIZMO_SIZE/3)+2)
+      UI.buffer.ellipse(0, 0, constrain(brushToVisualize.sizeInPixels(), 8, UI.GIZMO_SIZE/3)+2)
 
       // var
       UI.buffer.stroke("black");
@@ -3023,7 +3100,6 @@ class UI {
       UI.buffer.pop();
 
       // Show color at reference position
-      //const currentColorSize = constrain(brushToVisualize.pxSize, 8, gadgetRadius/3);
       UI.drawVariedColorCircle(brushToVisualize, 40, ankerX, ankerY);
 
     } else if (Interaction.currentUI === Interaction.UI_STATES.satAndLum_open) {
@@ -3033,7 +3109,7 @@ class UI {
       UI.buffer.translate(ankerX, ankerY);
 
       UI.buffer.fill("black")
-      UI.buffer.ellipse(0, 0, constrain(brushToVisualize.pxSize, 8, UI.GIZMO_SIZE/3)+2)
+      UI.buffer.ellipse(0, 0, constrain(brushToVisualize.sizeInPixels(), 8, UI.GIZMO_SIZE/3)+2)
 
       const startColorLum = brushToVisualize.color.copy().setLightness(1);
       const endColorLum   = brushToVisualize.color.copy().setLightness(0);
@@ -3069,7 +3145,7 @@ class UI {
       UI.buffer.line(posX, lineTranslateY - UI.GIZMO_SIZE,posX, lineTranslateY + UI.GIZMO_SIZE);
       UI.buffer.noStroke();
 
-      const visualSize = brushToVisualize.finalPxSizeWithPressure(openPainting.averagePressure) * Interaction.viewTransform.scale;
+      const visualSize = brushToVisualize.sizeInPixels(openPainting.averagePressure) * Interaction.viewTransform.scale;
 
       // UI.drawSizeOverlay(posX, ankerY, visualSize);
       UI.drawCrosshair(posX, ankerY, visualSize);
@@ -3140,7 +3216,8 @@ class UI {
 
 // math utils
 const pointsToAngle = (x1, y1, x2, y2) => Math.atan2(y2 - y1, x2 - x1);
-const getAverageAngle = (first, second) => Math.atan2(Math.sin(first)+Math.sin(second), Math.cos(first)+Math.cos(second));
+const getAverageAngle = (first, second) => Math.abs(first - second) < Math.PI ? (first + second) / 2 : (first + second + Math.PI * 2) / 2;
+//const getAverageAngle = (first, second) => Math.atan2(Math.sin(first)+Math.sin(second), Math.cos(first)+Math.cos(second));
 const rotatePoint = (x, y, angle) => ({
   x: x * Math.cos(angle) - y * Math.sin(angle),
   y: x * Math.sin(angle) + y * Math.cos(angle)
