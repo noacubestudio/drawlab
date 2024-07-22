@@ -5,8 +5,9 @@ let dev_mode = false;
 
 const PRESET_TOOLS = [
   {tool: "Brush Tool", texture: "Regular", menuName: "Default"},
-  {tool: "Brush Tool", texture: "Rake",    menuName: "Rake" },
+  {tool: "Brush Tool", texture: "Rake",    menuName: "Rake"},
   {tool: "Brush Tool", texture: "Round",   menuName: "Round"},
+  {tool: "Lasso Tool", texture: "Regular", menuName: "Lasso"},
 ];
 let FONT_REGULAR; let FONT_ITALIC; let FONT_MEDIUM;
 function preload() {
@@ -133,6 +134,9 @@ class BrushSettings {
     this.tool = tool;
     this.texture = texture;
     this.exactSize = exactSize ?? null;
+
+    // computed
+    this.marginFactor = (this.tool === "Brush Tool") ? 0.5 : 0;
   }
 
   copy() {
@@ -228,7 +232,7 @@ class Brushstroke {
   }
 
   get bounds() {
-    const margin = this.settings.sizeInPixels()*0.5;
+    const margin = this.settings.sizeInPixels()*this.settings.marginFactor;
     const xmin = this.points.reduce((a, b) => Math.min(a, b.x),  Infinity) - margin;
     const xmax = this.points.reduce((a, b) => Math.max(a, b.x), -Infinity) + margin;
     const ymin = this.points.reduce((a, b) => Math.min(a, b.y),  Infinity) - margin;
@@ -289,18 +293,51 @@ class Brushstroke {
   }
 
   drawWhole() {
-    if(this.points.length < 2) {
+    if (this.points.length < 2) {
       //console.log("can't draw stroke, too short:", strokeData.length, strokeData)
       return;
     }
-    // wip, ignores tool for now
+    // depends on tool
+    if (this.settings.tool === "Brush Tool") {
+      this.points.forEach((endPoint, index) => {
+        const startPoint = this.points[index - 1];
+        const beforePoint = (index > 1) ? this.points[index - 2] : undefined;
+        if (startPoint !== undefined && endPoint !== undefined) {
+          this.drawBrushPart(startPoint, endPoint, beforePoint);
+        }
+      });
+    } else if (this.settings.tool === "Lasso Tool") {
+      this.drawLasso();
+    }
+  }
+
+  drawLasso() {
+    // lasso base
+    this.buffer.noStroke();
+    this.buffer.fill(this.settings.color.hex);
+    this.buffer.beginShape();
+    this.points.forEach((point) => this.buffer.vertex(point.x, point.y));
+    this.buffer.endShape();
+
+    // clip
+    this.buffer.drawingContext.save();
+    this.buffer.drawingContext.clip();
     this.points.forEach((endPoint, index) => {
       const startPoint = this.points[index - 1];
-      const beforePoint = (index > 1) ? this.points[index - 2] : undefined;
-      if (startPoint !== undefined && endPoint !== undefined) {
-        this.drawPart(startPoint, endPoint, beforePoint);
+      const basePoint = this.points[0];
+      if (startPoint !== undefined && basePoint !== startPoint) {
+        const brushCol = this.settings.getColorWithVar(index + basePoint.seed)
+          .varyComponents(index + this.brushstrokeSeed, 
+          0.1 + this.settings.colorVar * 0.3);
+        this.buffer.fill(brushCol.hex);
+        this.buffer.beginShape();
+        this.buffer.vertex(basePoint.x, basePoint.y);
+        this.buffer.vertex(startPoint.x, startPoint.y);
+        this.buffer.vertex(endPoint.x, endPoint.y);
+        this.buffer.endShape();
       }
     });
+    this.buffer.drawingContext.restore();
   }
 
   // WIP, currently ignores tool
@@ -311,7 +348,7 @@ class Brushstroke {
    * @param {BrushPoint} beforePoint Data from the previous stroke segment.
    * @returns 
    */
-  drawPart(start, end, beforePoint) {
+  drawBrushPart(start, end, beforePoint) {
 
     // for now, ignore .azimuth besides for slightly changing the width of strokes.
     // barrel rotation should have an effect instead, which is not yet supported and I couldn't use myself...
@@ -769,6 +806,13 @@ class Painting {
       return;
     }
 
+    // special tools, wip.
+    if (this.latestStroke.settings.tool === "Lasso Tool") {
+      this.latestStroke.buffer.clear();
+      this.latestStroke.drawWhole();
+      return;
+    }
+
     // draw to the stroke buffer immediately
     // wip, some tools would be drawn in interface buffer instead and
     // only added fully when the pen is lifted.
@@ -777,7 +821,7 @@ class Painting {
     const newPoint  = this.latestStroke.points[this.latestStroke.points.length-1];
     const beforePoint = (this.latestStroke.points.length > 2) ? this.latestStroke.points[this.latestStroke.points.length-3] : undefined;
 
-    this.latestStroke.drawPart(lastPoint, newPoint, beforePoint);
+    this.latestStroke.drawBrushPart(lastPoint, newPoint, beforePoint);
   }
 
   getPointRGB(point) {
@@ -867,11 +911,14 @@ class Interaction {
     button: {
       undo: 'undoButton',
       edit: 'editButton',
+      clip: 'clipButton',
+      erase: 'eraseButton',
       clear: 'clearButton',
       save: 'saveButton',
       tool0: '0',
       tool1: '1',
       tool2: '2',
+      tool3: '3',
       help: 'helpButton',
       fill: 'fillButton',
       format: 'formatButton'
@@ -1247,9 +1294,10 @@ class Interaction {
   }
 
   static pickToolAction(index) {
-    const modifyBrush = openPainting.brushSettingsToAdjust;
+    let modifyBrush = openPainting.brushSettingsToAdjust;
     modifyBrush.tool = PRESET_TOOLS[index].tool;
     modifyBrush.texture = PRESET_TOOLS[index].texture;
+    // TODO: currently, the margin setting is not adjusted when editing an existing stroke. why?
 
     if (Interaction.editingLastStroke) {
       openPainting.redrawLatestStroke();
@@ -1303,11 +1351,11 @@ class Interaction {
 
     } else if (x > width - UI.BUTTON_WIDTH && y < UI.BUTTON_HEIGHT) {
       // rightmost button
-      return Interaction.TYPES.button.save;
+      return Interaction.TYPES.button.erase;
 
     } else if (x > width - UI.BUTTON_WIDTH*2 && y < UI.BUTTON_HEIGHT) {
       // second to last
-      return Interaction.TYPES.button.clear;
+      return Interaction.TYPES.button.clip;
 
     } else {
 
@@ -1347,13 +1395,19 @@ class Interaction {
           return Interaction.TYPES.button.tool1;
         } else if (buttonIndex === 2) {
           return Interaction.TYPES.button.tool2;
+        } else if (buttonIndex === 3) {
+          return Interaction.TYPES.button.tool3;
         }
       } else {
         // right side
         if (buttonIndex === 0) {
-          return Interaction.TYPES.button.fill;
+          return Interaction.TYPES.button.save;
         } else if (buttonIndex === 1) {
           return Interaction.TYPES.button.format;
+        } else if (buttonIndex === 2) {
+          return Interaction.TYPES.button.fill;
+        } else if (buttonIndex === 3) {
+          return Interaction.TYPES.button.clear;
         } 
       }
       
@@ -1848,6 +1902,10 @@ class Interaction {
         Interaction.undoAction();
       } else if (Interaction.currentType === Interaction.TYPES.button.edit) {
         Interaction.editAction();
+      } else if (Interaction.currentType === Interaction.TYPES.button.clip) {
+        Interaction.clipCompositionMode();
+      } else if (Interaction.currentType === Interaction.TYPES.button.erase) {
+        Interaction.eraseCompositionMode();
       } else if (Interaction.currentType === Interaction.TYPES.button.clear) {
         Interaction.clearAction();
       } else if (Interaction.currentType === Interaction.TYPES.button.save) {
@@ -1862,6 +1920,9 @@ class Interaction {
         Interaction.elementTypeAtPointer = null;
       } else if (Interaction.currentType === Interaction.TYPES.button.tool2) {
         Interaction.pickToolAction(2);
+        Interaction.elementTypeAtPointer = null;
+      } else if (Interaction.currentType === Interaction.TYPES.button.tool3) {
+        Interaction.pickToolAction(3);
         Interaction.elementTypeAtPointer = null;
       } else if (Interaction.currentType === Interaction.TYPES.button.fill) {
         Interaction.fillAction();
@@ -2287,6 +2348,9 @@ class UI {
     UI.palette.warning = new HSLColor(0.1, 0.8, (UI.palette.fg.lightness > 0.5) ? 0.7 : 0.4);
     
     // MENUS
+    const noEditableStrokes = (openPainting.editableStrokesCount === 0);
+    const noStrokes = (openPainting.totalStrokesCount === 0);
+
     // when clover open
     if (Interaction.currentUI === Interaction.UI_STATES.clover_open) {
       // tool buttons on left
@@ -2297,20 +2361,22 @@ class UI {
       });
 
       // menu on right
-      UI.drawRightButton("fill all",    UI.BUTTON_HEIGHT * 0 + UI.BUTTON_WIDTH, Interaction.TYPES.button.fill, UI.palette.warning);
-      UI.drawRightButton("change crop", UI.BUTTON_HEIGHT * 1 + UI.BUTTON_WIDTH, Interaction.TYPES.button.fill, UI.palette.fg);
+      UI.drawRightButton("save png",  UI.BUTTON_HEIGHT * 0 + UI.BUTTON_WIDTH, Interaction.TYPES.button.save,   noStrokes ? UI.palette.fgDisabled : UI.palette.fg);
+      UI.drawRightButton("< crop >",  UI.BUTTON_HEIGHT * 1 + UI.BUTTON_WIDTH, Interaction.TYPES.button.format, UI.palette.fg);
+      UI.drawRightButton("fill all",  UI.BUTTON_HEIGHT * 2 + UI.BUTTON_WIDTH, Interaction.TYPES.button.fill,   UI.palette.warning);
+      UI.drawRightButton("clear all", UI.BUTTON_HEIGHT * 3 + UI.BUTTON_WIDTH, Interaction.TYPES.button.clear,  noStrokes ? UI.palette.fgDisabled : UI.palette.warning);
     }
   
     // top menu buttons
     UI.buffer.textAlign(CENTER);
     UI.buffer.textFont(FONT_MEDIUM);
   
-    const noEditableStrokes = (openPainting.editableStrokesCount === 0);
-    const noStrokes = (openPainting.totalStrokesCount === 0);
     UI.drawButton("undo" ,       UI.BUTTON_WIDTH*0, 0, Interaction.TYPES.button.undo , noEditableStrokes ? UI.palette.fgDisabled : UI.palette.fg);
     UI.drawButton("edit" ,       UI.BUTTON_WIDTH*1, 0, Interaction.TYPES.button.edit , noEditableStrokes ? UI.palette.fgDisabled : UI.palette.fg);
-    UI.drawButton("clear", width-UI.BUTTON_WIDTH*2, 0, Interaction.TYPES.button.clear, noStrokes ? UI.palette.fgDisabled : UI.palette.warning);
-    UI.drawButton("save" , width-UI.BUTTON_WIDTH*1, 0, Interaction.TYPES.button.save , noStrokes ? UI.palette.fgDisabled : UI.palette.fg);
+    UI.drawButton("clip" , width-UI.BUTTON_WIDTH*2, 0, Interaction.TYPES.button.clip , noEditableStrokes ? UI.palette.fgDisabled : UI.palette.fg);
+    UI.drawButton("erase", width-UI.BUTTON_WIDTH*1, 0, Interaction.TYPES.button.erase, noEditableStrokes ? UI.palette.fgDisabled : UI.palette.fg);
+    // UI.drawButton("clear", width-UI.BUTTON_WIDTH*2, 0, Interaction.TYPES.button.clear, noStrokes ? UI.palette.fgDisabled : UI.palette.warning);
+    // UI.drawButton("save" , width-UI.BUTTON_WIDTH*1, 0, Interaction.TYPES.button.save , noStrokes ? UI.palette.fgDisabled : UI.palette.fg);
 
     if (width > UI.MOBILE_WIDTH_BREAKPOINT) {
       UI.drawButton("help" , width-UI.BUTTON_WIDTH, height-UI.BUTTON_HEIGHT, Interaction.TYPES.button.help, UI.showingHelp ? UI.palette.fgDisabled : UI.palette.fg);
@@ -2320,119 +2386,9 @@ class UI {
     UI.buffer.textFont(FONT_MEDIUM);
   
     // draw the sliders and knobs at the top
-    const sliderStart = width/2 - UI.SLIDER_WIDTH * 0.5;
-
-    // MIDDLE SECTION
-    UI.buffer.push();
-    if (!UI.topAlignSliderSection) UI.buffer.translate(0, UI.BUTTON_HEIGHT);
-
-    // palette
-    // if (![Interaction.UI_STATES.nothing_open, Interaction.UI_STATES.size_open].includes(Interaction.currentUI)) {
-
-    //   const uniqueColors = [];
-    //   const seenColors = new Set();
-
-    //   for (const item of [...openPainting.previousBrushes, openPainting.currentBrush]) {
-    //     const key = `${item.color.hue}-${item.color.saturation}-${item.color.lightness}`;
-    
-    //     if (!seenColors.has(key)) {
-    //       seenColors.add(key);
-    //       uniqueColors.push(item);
-    //     }
-    //   }
-
-    //   UI.drawPalette(uniqueColors, width/2, UI.SLIDER_HEIGHT * 3 + 10, 30, 10);
-    // }
-
-
-    // bg
-    //UI.buffer.fill(UI.palette.constrastBg.hex);
-    //UI.buffer.rect(sliderStart-60, 0,  UI.SLIDER_WIDTH + 120, UI.BUTTON_HEIGHT, UI.ELEMENT_RADIUS + UI.ELEMENT_MARGIN);
-
-    // show current pressure
-    let pressureForSizeIndicator = undefined;
-    if (Interaction.currentSequence.length > 0 && Interaction.isAlreadyDown) {
-      const last_interaction = Interaction.currentSequence[Interaction.currentSequence.length-1];
-      if (last_interaction.pressure !== undefined) {
-        pressureForSizeIndicator = last_interaction.pressure;
-      }
-    } else if (openPainting.averagePressure !== undefined) {
-      pressureForSizeIndicator = openPainting.averagePressure;
+    if (width > UI.MOBILE_WIDTH_BREAKPOINT || Interaction.currentUI !== Interaction.UI_STATES.clover_open) {
+      UI.drawColorSettings();
     }
-
-    //size knob
-    UI.drawSizeKnob(sliderStart - UI.KNOB_SIZE, 0, pressureForSizeIndicator);
-
-    // sliders
-    const relevantElements = [...Object.values(Interaction.TYPES.knob),...Object.values(Interaction.TYPES.slider)];
-    // for displaying the hover for whichever slider is currently interacted with. If none, show regular hover state.
-    const currentElement = relevantElements.includes(Interaction.currentType) ? Interaction.currentType : Interaction.elementTypeAtPointer;
-    
-    // draw the sliders themselves first
-    let baseColor = openPainting.brushSettingsToAdjust.color;
-    const rotatedBaseHue = (baseColor.hue+openPainting.hueRotation) % 1;
-    const correctlyFlippedSaturation = (openPainting.hueRotation === 0) ? (1 + baseColor.saturation)/2 : (1 - baseColor.saturation)/2;
-    const showVarOnSliders = (currentElement === Interaction.TYPES.knob.jitter);
-
-    UI.drawGradientSlider(sliderStart, 0                       , UI.SLIDER_WIDTH, UI.SLIDER_HEIGHT, 
-      baseColor.copy().setLightness(0), baseColor.copy().setLightness(1), baseColor.lightness, showVarOnSliders);
-    UI.drawGradientSlider(sliderStart, 0 + UI.SLIDER_HEIGHT    , UI.SLIDER_WIDTH, UI.SLIDER_HEIGHT, 
-      baseColor.copy().setSaturation(0), baseColor.copy().setSaturation(1), correctlyFlippedSaturation, showVarOnSliders, "double");
-    UI.drawGradientSlider(sliderStart, 0 + UI.SLIDER_HEIGHT * 2, UI.SLIDER_WIDTH, UI.SLIDER_HEIGHT, 
-      baseColor.copy().setHue(0+openPainting.hueRotation), baseColor.copy().setHue(1+openPainting.hueRotation), rotatedBaseHue, showVarOnSliders, "wrap");
-
-    // show tooltip
-    const tooltipXinSlider = (percent) => map(percent, 0, 1, UI.SLIDER_RANGE_MARGIN, UI.SLIDER_WIDTH-UI.SLIDER_RANGE_MARGIN);
-
-    if (currentElement === Interaction.TYPES.slider.lightness) {
-
-      const x = sliderStart + tooltipXinSlider(baseColor.lightness);
-      const text = "L " + Math.floor(baseColor.lightness * 100) + "%";
-      UI.drawTooltipBelow(x, UI.SLIDER_HEIGHT, text);
-
-    } else if (currentElement === Interaction.TYPES.slider.saturation) {
-
-      const horizontalOfSlider = (openPainting.hueRotation === 0) ? (1 + baseColor.saturation)/2 : (1 - baseColor.saturation)/2;
-      const x = sliderStart + tooltipXinSlider(horizontalOfSlider);
-      const text = "S " + ((openPainting.hueRotation === 0) ? "" : "-") +  Math.floor(baseColor.saturation * 100) + "%";
-      UI.drawTooltipBelow(x, UI.SLIDER_HEIGHT * 2, text);
-
-
-    } if (currentElement === Interaction.TYPES.slider.hue) {
-
-      const horizontalOfSlider = (baseColor.hue+openPainting.hueRotation) % 1;
-      const x = sliderStart + tooltipXinSlider(horizontalOfSlider);
-      const text = "H " + Math.floor(baseColor.hue * 360) + "°";
-      UI.drawTooltipBelow(x, UI.SLIDER_HEIGHT * 3, text);
-
-    } else if (currentElement === Interaction.TYPES.knob.jitter) {
-
-      UI.drawTooltipBelow(sliderStart + UI.SLIDER_WIDTH + UI.KNOB_SIZE/2, UI.KNOB_SIZE, Math.round(openPainting.brushSettingsToAdjust.colorVar * 100) + "%");
-
-    } else if (currentElement === Interaction.TYPES.knob.size) {
-
-      UI.drawTooltipBelow(sliderStart - UI.KNOB_SIZE/2, UI.KNOB_SIZE, Math.round(openPainting.brushSettingsToAdjust.sizeInPixels()) + "px");
-
-    }
-    
-    // draw the variation knob
-    UI.buffer.drawingContext.save();
-    UI.buffer.fill(UI.palette.constrastBg.toHexWithSetAlpha(0.5));
-    UI.buffer.rect(sliderStart + UI.SLIDER_WIDTH*1 + UI.ELEMENT_MARGIN, UI.ELEMENT_MARGIN, UI.KNOB_SIZE - UI.ELEMENT_MARGIN*2, UI.KNOB_SIZE - UI.ELEMENT_MARGIN*2, UI.ELEMENT_RADIUS);
-    UI.buffer.drawingContext.clip();
-    UI.drawVariedColorCircle(openPainting.brushSettingsToAdjust, UI.KNOB_SIZE + 20, sliderStart + UI.SLIDER_WIDTH*1 + UI.KNOB_SIZE / 2, UI.KNOB_SIZE / 2);
-    UI.buffer.drawingContext.restore();
-    // outline
-    UI.buffer.noFill();
-    UI.buffer.strokeWeight(1);
-    UI.buffer.stroke(UI.palette.fg.toHexWithSetAlpha(0.2));
-    UI.buffer.rect(sliderStart + UI.SLIDER_WIDTH*1 + UI.ELEMENT_MARGIN, UI.ELEMENT_MARGIN, UI.KNOB_SIZE - UI.ELEMENT_MARGIN*2, UI.KNOB_SIZE - UI.ELEMENT_MARGIN*2, UI.ELEMENT_RADIUS);
-    UI.buffer.noStroke();
-
-    // center section DONE
-    UI.buffer.pop();
-  
-    UI.buffer.textAlign(LEFT);
 
     // help window
     if (UI.showingHelp) {
@@ -2562,8 +2518,129 @@ class UI {
     }
   }
 
+  static drawColorSettings() {
+
+    const sliderStart = width/2 - UI.SLIDER_WIDTH * 0.5;
+    
+    UI.buffer.push();
+    if (!UI.topAlignSliderSection) UI.buffer.translate(0, UI.BUTTON_HEIGHT);
+
+    // palette
+    // if (![Interaction.UI_STATES.nothing_open, Interaction.UI_STATES.size_open].includes(Interaction.currentUI)) {
+
+    //   const uniqueColors = [];
+    //   const seenColors = new Set();
+
+    //   for (const item of [...openPainting.previousBrushes, openPainting.currentBrush]) {
+    //     const key = `${item.color.hue}-${item.color.saturation}-${item.color.lightness}`;
+    
+    //     if (!seenColors.has(key)) {
+    //       seenColors.add(key);
+    //       uniqueColors.push(item);
+    //     }
+    //   }
+
+    //   UI.drawPalette(uniqueColors, width/2, UI.SLIDER_HEIGHT * 3 + 10, 30, 10);
+    // }
+
+
+    // bg
+    //UI.buffer.fill(UI.palette.constrastBg.hex);
+    //UI.buffer.rect(sliderStart-60, 0,  UI.SLIDER_WIDTH + 120, UI.BUTTON_HEIGHT, UI.ELEMENT_RADIUS + UI.ELEMENT_MARGIN);
+
+    // show current pressure
+    let pressureForSizeIndicator = undefined;
+    if (Interaction.currentSequence.length > 0 && Interaction.isAlreadyDown) {
+      const last_interaction = Interaction.currentSequence[Interaction.currentSequence.length-1];
+      if (last_interaction.pressure !== undefined) {
+        pressureForSizeIndicator = last_interaction.pressure;
+      }
+    } else if (openPainting.averagePressure !== undefined) {
+      pressureForSizeIndicator = openPainting.averagePressure;
+    }
+
+    //size knob
+    UI.drawSizeKnob(sliderStart - UI.KNOB_SIZE, 0, pressureForSizeIndicator);
+
+    // sliders
+    const relevantElements = [...Object.values(Interaction.TYPES.knob),...Object.values(Interaction.TYPES.slider)];
+    // for displaying the hover for whichever slider is currently interacted with. If none, show regular hover state.
+    const currentElement = relevantElements.includes(Interaction.currentType) ? Interaction.currentType : Interaction.elementTypeAtPointer;
+    
+    // draw the sliders themselves first
+    let baseColor = openPainting.brushSettingsToAdjust.color;
+    const rotatedBaseHue = (baseColor.hue+openPainting.hueRotation) % 1;
+    const correctlyFlippedSaturation = (openPainting.hueRotation === 0) ? (1 + baseColor.saturation)/2 : (1 - baseColor.saturation)/2;
+    const showVarOnSliders = (currentElement === Interaction.TYPES.knob.jitter);
+
+    UI.drawGradientSlider(sliderStart, 0                       , UI.SLIDER_WIDTH, UI.SLIDER_HEIGHT, 
+      baseColor.copy().setLightness(0), baseColor.copy().setLightness(1), baseColor.lightness, showVarOnSliders);
+    UI.drawGradientSlider(sliderStart, 0 + UI.SLIDER_HEIGHT    , UI.SLIDER_WIDTH, UI.SLIDER_HEIGHT, 
+      baseColor.copy().setSaturation(0), baseColor.copy().setSaturation(1), correctlyFlippedSaturation, showVarOnSliders, "double");
+    UI.drawGradientSlider(sliderStart, 0 + UI.SLIDER_HEIGHT * 2, UI.SLIDER_WIDTH, UI.SLIDER_HEIGHT, 
+      baseColor.copy().setHue(0+openPainting.hueRotation), baseColor.copy().setHue(1+openPainting.hueRotation), rotatedBaseHue, showVarOnSliders, "wrap");
+
+    // show tooltip
+    const tooltipXinSlider = (percent) => map(percent, 0, 1, UI.SLIDER_RANGE_MARGIN, UI.SLIDER_WIDTH-UI.SLIDER_RANGE_MARGIN);
+
+    if (currentElement === Interaction.TYPES.slider.lightness) {
+
+      const x = sliderStart + tooltipXinSlider(baseColor.lightness);
+      const text = "L " + Math.floor(baseColor.lightness * 100) + "%";
+      UI.drawTooltipBelow(x, UI.SLIDER_HEIGHT, text);
+
+    } else if (currentElement === Interaction.TYPES.slider.saturation) {
+
+      const horizontalOfSlider = (openPainting.hueRotation === 0) ? (1 + baseColor.saturation)/2 : (1 - baseColor.saturation)/2;
+      const x = sliderStart + tooltipXinSlider(horizontalOfSlider);
+      const text = "S " + ((openPainting.hueRotation === 0) ? "" : "-") +  Math.floor(baseColor.saturation * 100) + "%";
+      UI.drawTooltipBelow(x, UI.SLIDER_HEIGHT * 2, text);
+
+
+    } if (currentElement === Interaction.TYPES.slider.hue) {
+
+      const horizontalOfSlider = (baseColor.hue+openPainting.hueRotation) % 1;
+      const x = sliderStart + tooltipXinSlider(horizontalOfSlider);
+      const text = "H " + Math.floor(baseColor.hue * 360) + "°";
+      UI.drawTooltipBelow(x, UI.SLIDER_HEIGHT * 3, text);
+
+    } else if (currentElement === Interaction.TYPES.knob.jitter) {
+
+      UI.drawTooltipBelow(sliderStart + UI.SLIDER_WIDTH + UI.KNOB_SIZE/2, UI.KNOB_SIZE, Math.round(openPainting.brushSettingsToAdjust.colorVar * 100) + "%");
+
+    } else if (currentElement === Interaction.TYPES.knob.size) {
+
+      UI.drawTooltipBelow(sliderStart - UI.KNOB_SIZE/2, UI.KNOB_SIZE, Math.round(openPainting.brushSettingsToAdjust.sizeInPixels()) + "px");
+
+    }
+    
+    // draw the variation knob
+    UI.buffer.drawingContext.save();
+    UI.buffer.fill(UI.palette.constrastBg.toHexWithSetAlpha(0.5));
+    UI.buffer.rect(sliderStart + UI.SLIDER_WIDTH*1 + UI.ELEMENT_MARGIN, UI.ELEMENT_MARGIN, UI.KNOB_SIZE - UI.ELEMENT_MARGIN*2, UI.KNOB_SIZE - UI.ELEMENT_MARGIN*2, UI.ELEMENT_RADIUS);
+    UI.buffer.drawingContext.clip();
+    UI.drawVariedColorCircle(openPainting.brushSettingsToAdjust, UI.KNOB_SIZE + 20, sliderStart + UI.SLIDER_WIDTH*1 + UI.KNOB_SIZE / 2, UI.KNOB_SIZE / 2, 8);
+    UI.buffer.drawingContext.restore();
+    // outline
+    UI.buffer.noFill();
+    UI.buffer.strokeWeight(1);
+    UI.buffer.stroke(UI.palette.fg.toHexWithSetAlpha(0.2));
+    UI.buffer.rect(sliderStart + UI.SLIDER_WIDTH*1 + UI.ELEMENT_MARGIN, UI.ELEMENT_MARGIN, UI.KNOB_SIZE - UI.ELEMENT_MARGIN*2, UI.KNOB_SIZE - UI.ELEMENT_MARGIN*2, UI.ELEMENT_RADIUS);
+    UI.buffer.noStroke();
+
+    // center section DONE
+    UI.buffer.pop();
+    UI.buffer.textAlign(LEFT);
+  }
+
 
   static drawHoverDisplay() {
+
+    // special tools, wip.
+    if (openPainting.currentBrush.tool === "Lasso Tool") {
+      return;
+    }
+
     const startInteraction = Interaction.currentSequence[Interaction.currentSequence.length-2];
     const endInteraction = Interaction.currentSequence[Interaction.currentSequence.length-1];
 
@@ -2580,7 +2657,7 @@ class UI {
     const start = new BrushPoint(-deltaPosition.x, -deltaPosition.y, startInteraction.angle);
     const end = new BrushPoint(0, 0, endInteraction.angle);
 
-    new Brushstroke(UI.buffer, openPainting.currentBrush.copy()).drawPart(start, end);
+    new Brushstroke(UI.buffer, openPainting.currentBrush.copy()).drawBrushPart(start, end);
     UI.buffer.pop();
   }
 
@@ -2595,17 +2672,21 @@ class UI {
     UI.buffer.push();
     UI.buffer.translate(x, y);
 
-    
     UI.buffer.fill(UI.palette.constrastBg.toHexWithSetAlpha(isSelected ? 0.2 : 1));
-    UI.buffer.rect(UI.ELEMENT_MARGIN, UI.ELEMENT_MARGIN, UI.BUTTON_WIDE - UI.ELEMENT_MARGIN, UI.BUTTON_HEIGHT-UI.ELEMENT_MARGIN*2, UI.ELEMENT_RADIUS, UI.ELEMENT_RADIUS);
+    UI.buffer.rect(UI.ELEMENT_MARGIN * (isSelected ? 6 : 1), UI.ELEMENT_MARGIN, 
+      UI.BUTTON_WIDE - UI.ELEMENT_MARGIN * (isSelected ? 6 : 1) * 2, UI.BUTTON_HEIGHT-UI.ELEMENT_MARGIN*2, UI.ELEMENT_RADIUS);
     UI.buffer.drawingContext.clip();
 
     // draw example
-    // wip, not sure why the angle 86 even makes sense.
-    const start = new BrushPoint( UI.BUTTON_WIDE*0.2, UI.BUTTON_HEIGHT * 0.2, 86, undefined);
-    const end   = new BrushPoint( UI.BUTTON_WIDE*0.8, UI.BUTTON_HEIGHT * 0.8, 86, undefined);
-    
-    new Brushstroke(UI.buffer, settings).drawPart(start, end);
+    if (menuBrushTool === "Brush Tool") {
+      // wip, not sure why the angle 86 even makes sense.
+      const start = new BrushPoint( UI.BUTTON_WIDE*0.2, UI.BUTTON_HEIGHT * 0.2, 86, undefined);
+      const end   = new BrushPoint( UI.BUTTON_WIDE*0.8, UI.BUTTON_HEIGHT * 0.8, 86, undefined);
+      
+      new Brushstroke(UI.buffer, settings).drawBrushPart(start, end);
+    } else if (menuBrushTool === "Lasso Tool") {
+      UI.drawJitterDonut(settings, UI.BUTTON_HEIGHT * 1.5, UI.BUTTON_WIDE/2, UI.BUTTON_HEIGHT/2, 24);
+    }
 
     UI.buffer.noStroke();
     UI.buffer.fill(UI.palette.constrastBg.toHexWithSetAlpha(isSelected ? 0.8 : 0.3));
@@ -2613,7 +2694,7 @@ class UI {
     
 
     UI.buffer.textAlign(CENTER);
-    UI.buffer.fill(isSelected ? UI.palette.fgDisabled.hex : UI.palette.fg.hex);
+    UI.buffer.fill(isSelected ? UI.palette.fg.toHexWithSetAlpha(0.8) : UI.palette.fg.hex);
     UI.buffer.text(menuName, UI.BUTTON_WIDE/2, UI.BUTTON_HEIGHT/2-2);
     UI.buffer.textFont(FONT_MEDIUM);
     
@@ -2674,25 +2755,24 @@ class UI {
     UI.buffer.drawingContext.restore();
   }
 
-  static drawVariedColorCircle(brush, size, x, y) {
+  static drawVariedColorCircle(brush, size, x, y, cornerCount = 12) {
 
     UI.buffer.fill(brush.color.hex);
     UI.buffer.ellipse(x, y, size);
 
-    // TODO: still gets scaled with pressure somehow.
+    // actual brush size is half so that it fills the space exactly since the brushstroke is centered.
     const scaledBrush = brush.copy();
-    scaledBrush.setExactSize(size * 0.5); // half, so that it fills the space exactly since the brushstroke is centered.
-    UI.drawJitterDonut(scaledBrush, size * 0.5, x, y)
+    scaledBrush.setExactSize(size * 0.5); 
+    UI.drawJitterDonut(scaledBrush, size * (1-scaledBrush.marginFactor), x, y, cornerCount);
   }
 
-  static drawJitterDonut(brush, radius, x, y) {
+  static drawJitterDonut(brush, radius, x, y, cornerCount) {
     UI.buffer.push();
     UI.buffer.translate(x, y);
     const intensityAngle = brush.colorVar * Math.PI * 2;
     if (intensityAngle !== undefined) UI.buffer.rotate(intensityAngle);
     const donut = new Brushstroke(UI.buffer, brush);
-    const cornerCount = 12;
-    for (let i = 0; i <= cornerCount; i++) {
+    for (let i = 0; i <= cornerCount + 1; i++) {
       const angle = TWO_PI / cornerCount * i;
       const rotatedPoint = new BrushPoint(radius * Math.cos(angle) * 0.5, radius * Math.sin(angle) * 0.5);
       donut.addPoint(rotatedPoint);
@@ -2702,6 +2782,10 @@ class UI {
   }
 
   static drawSizeKnob(x, y, pressure) {
+
+    if (openPainting.currentBrush.tool === "Lasso Tool") {
+      return;
+    }
 
     UI.buffer.drawingContext.save();
 
@@ -2727,10 +2811,10 @@ class UI {
       UI.buffer.drawingContext.restore();
     }
 
-    //UI.buffer.tint(255, 255);
-
-    // draw brushstroke
-    UI.drawSizeIndicator(x + UI.KNOB_SIZE / 2, y + UI.KNOB_SIZE / 2, pressure);
+    if (openPainting.currentBrush.tool === "Brush Tool") {
+      // draw brushstroke
+      UI.drawSizeIndicator(x + UI.KNOB_SIZE / 2, y + UI.KNOB_SIZE / 2, pressure);
+    }
 
     UI.buffer.drawingContext.restore();
 
@@ -2742,9 +2826,10 @@ class UI {
     UI.buffer.noStroke();
 
     // show average pressure with overlay
-    const indicatorSize = openPainting.brushSettingsToAdjust.sizeInPixels(openPainting.averagePressure) * Interaction.viewTransform.scale;
-    UI.drawSizeOverlay(x + UI.KNOB_SIZE / 2, y + UI.KNOB_SIZE / 2, indicatorSize, isChangingSize);
-    
+    if (openPainting.currentBrush.tool === "Brush Tool") {
+      const indicatorSize = openPainting.brushSettingsToAdjust.sizeInPixels(openPainting.averagePressure) * Interaction.viewTransform.scale;
+      UI.drawSizeOverlay(x + UI.KNOB_SIZE / 2, y + UI.KNOB_SIZE / 2, indicatorSize, isChangingSize);
+    }
   }
 
   static drawSizeIndicator(x, y, pressure) {
@@ -2758,7 +2843,7 @@ class UI {
     const start = new BrushPoint(-(UI.KNOB_SIZE*0.125)/Interaction.viewTransform.scale, 0, undefined, pressure);
     const end = new BrushPoint((UI.KNOB_SIZE*0.6)/Interaction.viewTransform.scale, 0, undefined, pressure);
     const settings = openPainting.brushSettingsToAdjust; //.copy();
-    new Brushstroke(UI.buffer, settings).drawPart(start, end);
+    new Brushstroke(UI.buffer, settings).drawBrushPart(start, end);
     
     UI.buffer.pop();
   }
@@ -2951,7 +3036,8 @@ class UI {
 
       // when actually eyedropping
       if (Interaction.currentType === Interaction.TYPES.painting.eyedropper) {
-        UI.drawVariedColorCircle(openPainting.currentBrush, size, position.x, position.y - size*1.2);
+        const brushSize = constrain(openPainting.currentBrush.sizeInPixels(), size, size*3);
+        UI.drawVariedColorCircle(openPainting.currentBrush, brushSize, position.x, position.y - size*1 - brushSize*0.5);
       }
       
       UI.drawCrosshair(position.x, position.y, size * 0.5);
