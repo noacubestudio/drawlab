@@ -1364,7 +1364,7 @@ class Interaction {
       const sliderSectionStart = (UI.topAlignSliderSection ? 0 : UI.BUTTON_HEIGHT);
 
       if (xInMiddleSection > 0 && xInMiddleSection < UI.KNOB_SIZE && 
-        y > sliderSectionStart && y < UI.KNOB_SIZE + sliderSectionStart) {
+        y > sliderSectionStart && y < UI.SLIDER_HEIGHT * 3 + sliderSectionStart) {
         return Interaction.TYPES.knob.size;
       } 
       if (xInMiddleSection > 60 && xInMiddleSection < (60 + UI.SLIDER_WIDTH) && 
@@ -1378,7 +1378,7 @@ class Interaction {
           }
         } 
       if (xInMiddleSection > (UI.KNOB_SIZE + UI.SLIDER_WIDTH) && xInMiddleSection < (UI.KNOB_SIZE*2 + UI.SLIDER_WIDTH) && 
-        y > sliderSectionStart && y < UI.KNOB_SIZE + sliderSectionStart) {
+        y > sliderSectionStart && y < UI.SLIDER_HEIGHT * 3 + sliderSectionStart) {
           return Interaction.TYPES.knob.jitter;
       }
     }
@@ -1946,6 +1946,7 @@ class Interaction {
       Interaction.resetCurrentSequence();
       Interaction.changeCursorToHover();
       Interaction.stopEditing();
+      Interaction.fillAction() //wip
       
       // TODO: reset hover info only if the pointer does not actually support hover.
       // The same goes for the knob and button types.
@@ -2216,8 +2217,11 @@ class HSLColor {
   }
   /**
    * Create a copy of the current color that is darker and limited in saturation.
+   * Used for the background color of the interface.
+   * If the canvas is very dark, it should be slightly lighter instead.
    */
   behind() {
+    if (this.l < 0.1) return new HSLColor(this.h, this.s, this.l + 0.1, this.a);
     return new HSLColor(this.h, Math.min(this.s, 0.1), this.l * 0.8, this.a);
   }
 
@@ -2271,6 +2275,10 @@ class HSLColor {
     return this.l;
   }
 
+  get alpha() {
+    return this.a;
+  }
+
   toHexWithSetAlpha(a) {
     const rgbArray = this.#toRGBArray();
     const rgbHexString = rgb_to_hex(rgbArray[0], rgbArray[1], rgbArray[2]); // from conversion helpers file
@@ -2318,12 +2326,14 @@ class UI {
   static showingHelp = false;
   static buffer = undefined; // from createGraphics in setup()
   static palette = {
-    bg: undefined,
-    fg: undefined,
-    fgDisabled: undefined,
-    constrastBg: undefined,
+    pageBg: undefined,
+    text: undefined,
+    textInactive: undefined,
+    buttonBg: undefined,
+    buttonBgHover: undefined,
+    intenseBg: undefined,
     onBrush: undefined,
-    warning: undefined
+    textCaution: undefined
   };
 
   static redrawInterface() {
@@ -2335,21 +2345,34 @@ class UI {
     UI.buffer.noStroke();
   
     // Interface Colors
-    UI.palette.bg = openPainting.canvasColor.behind();
-    UI.palette.fg = UI.palette.bg.copy()
-      .setLightness(lerp(openPainting.canvasColor.lightness, (openPainting.canvasColor.lightness>0.5) ? 0 : 1, 0.8)); 
-    UI.palette.fgDisabled = UI.palette.fg.copy().setAlpha(0.4);
-    UI.palette.constrastBg = UI.palette.fg.copy()
-      .setLightness(lerp(openPainting.canvasColor.lightness, openPainting.canvasColor.lightness > 0.5 ? 1 : 0, 0.7)); 
+
+    // Background color is based on the canvas color, but slightly darker. Lighter if the canvas is very dark.
+    UI.palette.pageBg = openPainting.canvasColor.behind();
+    // Used for buttons and outlines
+    UI.palette.buttonBg = UI.palette.pageBg.copy()
+      .setLightness(lerp(UI.palette.pageBg.lightness, UI.palette.pageBg.lightness > 0.2 ? 0 : 0.5, 0.3)); 
+    if (UI.palette.pageBg.lightness > 0.6) UI.palette.buttonBg.setLightness(UI.palette.pageBg.lightness - 0.4);
+    UI.palette.intenseBg = UI.palette.pageBg.copy()
+      .setLightness(lerp(UI.palette.pageBg.lightness, UI.palette.pageBg.lightness > 0.2 ? 0 : 0.5, 0.8)); 
+    UI.palette.buttonBgHover = UI.palette.buttonBg.copy().setAlpha(0.5);
+
+    // Used for text
+    UI.palette.text = UI.palette.buttonBg.copy()
+      .setSaturation(openPainting.canvasColor.saturation * 0.5)
+      .setLightness(Math.min(1, 0.7 + UI.palette.buttonBg.lightness * 0.7)); 
+    UI.palette.textInactive = UI.palette.text.copy().setAlpha(0.4);
+    UI.palette.textCaution = new HSLColor(0.1, 0.8, (UI.palette.text.lightness > 0.5) ? 0.7 : 0.4);
+    
+    // Used on top of the brush color in the UI
     UI.palette.onBrush = openPainting.currentBrush.color.copy()
       .setLightness(lerp(openPainting.currentBrush.color.lightness, (openPainting.currentBrush.color.lightness>0.5) ? 0 : 1, 0.5))
       .setSaturation(openPainting.currentBrush.color.saturation * 0.2)
-      .setHue(UI.palette.bg.hue);
-    UI.palette.warning = new HSLColor(0.1, 0.8, (UI.palette.fg.lightness > 0.5) ? 0.7 : 0.4);
+      .setHue(UI.palette.pageBg.hue);
+    
     
     // MENUS
-    const noEditableStrokes = (openPainting.editableStrokesCount === 0);
-    const noStrokes = (openPainting.totalStrokesCount === 0);
+    const strokesEditable = (openPainting.editableStrokesCount > 0);
+    const strokesPresent = (openPainting.totalStrokesCount > 0);
 
     // when clover open
     if (Interaction.currentUI === Interaction.UI_STATES.clover_open) {
@@ -2361,25 +2384,23 @@ class UI {
       });
 
       // menu on right
-      UI.drawRightButton("save png",  UI.BUTTON_HEIGHT * 0 + UI.BUTTON_WIDTH, Interaction.TYPES.button.save,   noStrokes ? UI.palette.fgDisabled : UI.palette.fg);
-      UI.drawRightButton("< crop >",  UI.BUTTON_HEIGHT * 1 + UI.BUTTON_WIDTH, Interaction.TYPES.button.format, UI.palette.fg);
-      UI.drawRightButton("fill all",  UI.BUTTON_HEIGHT * 2 + UI.BUTTON_WIDTH, Interaction.TYPES.button.fill,   UI.palette.warning);
-      UI.drawRightButton("clear all", UI.BUTTON_HEIGHT * 3 + UI.BUTTON_WIDTH, Interaction.TYPES.button.clear,  noStrokes ? UI.palette.fgDisabled : UI.palette.warning);
+      UI.drawRightButton("save png",  UI.BUTTON_HEIGHT * 0 + UI.BUTTON_WIDTH, Interaction.TYPES.button.save, strokesPresent);
+      UI.drawRightButton("< crop >",  UI.BUTTON_HEIGHT * 1 + UI.BUTTON_WIDTH, Interaction.TYPES.button.format);
+      UI.drawRightButton("fill all",  UI.BUTTON_HEIGHT * 2 + UI.BUTTON_WIDTH, Interaction.TYPES.button.fill, true, true);
+      UI.drawRightButton("clear all", UI.BUTTON_HEIGHT * 3 + UI.BUTTON_WIDTH, Interaction.TYPES.button.clear, strokesPresent, true);
     }
   
     // top menu buttons
     UI.buffer.textAlign(CENTER);
     UI.buffer.textFont(FONT_MEDIUM);
   
-    UI.drawButton("undo" ,       UI.BUTTON_WIDTH*0, 0, Interaction.TYPES.button.undo , noEditableStrokes ? UI.palette.fgDisabled : UI.palette.fg);
-    UI.drawButton("edit" ,       UI.BUTTON_WIDTH*1, 0, Interaction.TYPES.button.edit , noEditableStrokes ? UI.palette.fgDisabled : UI.palette.fg);
-    UI.drawButton("clip" , width-UI.BUTTON_WIDTH*2, 0, Interaction.TYPES.button.clip , noEditableStrokes ? UI.palette.fgDisabled : UI.palette.fg);
-    UI.drawButton("erase", width-UI.BUTTON_WIDTH*1, 0, Interaction.TYPES.button.erase, noEditableStrokes ? UI.palette.fgDisabled : UI.palette.fg);
-    // UI.drawButton("clear", width-UI.BUTTON_WIDTH*2, 0, Interaction.TYPES.button.clear, noStrokes ? UI.palette.fgDisabled : UI.palette.warning);
-    // UI.drawButton("save" , width-UI.BUTTON_WIDTH*1, 0, Interaction.TYPES.button.save , noStrokes ? UI.palette.fgDisabled : UI.palette.fg);
+    UI.drawButton("undo" ,       UI.BUTTON_WIDTH*0, 0, Interaction.TYPES.button.undo , strokesEditable);
+    UI.drawButton("edit" ,       UI.BUTTON_WIDTH*1, 0, Interaction.TYPES.button.edit , strokesEditable, Interaction.editingLastStroke);
+    UI.drawButton("clip" , width-UI.BUTTON_WIDTH*2, 0, Interaction.TYPES.button.clip , strokesEditable, Interaction.currentCompositionMode === "source-atop");
+    UI.drawButton("erase", width-UI.BUTTON_WIDTH*1, 0, Interaction.TYPES.button.erase, strokesEditable, Interaction.currentCompositionMode === "destination-out");
 
     if (width > UI.MOBILE_WIDTH_BREAKPOINT) {
-      UI.drawButton("help" , width-UI.BUTTON_WIDTH, height-UI.BUTTON_HEIGHT, Interaction.TYPES.button.help, UI.showingHelp ? UI.palette.fgDisabled : UI.palette.fg);
+      UI.drawButton("help" , width-UI.BUTTON_WIDTH, height-UI.BUTTON_HEIGHT, Interaction.TYPES.button.help, UI.showingHelp ? UI.palette.textInactive : UI.palette.text);
     }
     
     UI.buffer.textAlign(LEFT);
@@ -2392,9 +2413,7 @@ class UI {
 
     // help window
     if (UI.showingHelp) {
-      UI.buffer.fill(UI.palette.bg.hex);
-      UI.buffer.stroke(UI.palette.constrastBg.hex);
-      UI.buffer.strokeWeight(1);
+      UI.buffer.fill(UI.palette.buttonBg.hex);
       const helpShortcuts = {
         "H ": "Toggle shortcuts help",
         "1 ": "Lightness and Saturation",
@@ -2421,7 +2440,7 @@ class UI {
         helpWindowHeight + 8, 
         UI.ELEMENT_RADIUS
       );
-      UI.buffer.fill(UI.palette.fg.hex);
+      UI.buffer.fill(UI.palette.text.hex);
       UI.buffer.noStroke();
       Object.keys(helpShortcuts).forEach((keyString, index) => {
         UI.buffer.text(keyString, width - helpWindowWidth, 4 + height - UI.BUTTON_HEIGHT - helpWindowHeight + index * 30);
@@ -2434,17 +2453,17 @@ class UI {
     // draw rectangle around stroke being edited
     if (Interaction.editingLastStroke) {
       UI.drawBounds(openPainting.latestStroke.bounds);
-      bubbleLabels.push({text: "Editing last", color: UI.palette.fg});
+      bubbleLabels.push({text: "Editing last", color: UI.palette.text});
     }
 
     if (Interaction.currentCompositionMode !== "source-over") {
       let label = Interaction.currentCompositionMode;
-      let color = UI.palette.fg;
+      let color = UI.palette.text;
       if (label === "source-atop") {
         label = "Drawing inside stroke";
       } else if (label === "destination-out") {
         label = "Erasing inside stroke";
-        color = UI.palette.warning;
+        color = UI.palette.textCaution;
       }
       //UI.drawBounds(openPainting.latestParentStroke.bounds);
       bubbleLabels.push({text: label, color})
@@ -2461,7 +2480,7 @@ class UI {
     // DEV STUFF, normally not visible
     if (dev_mode) {
       UI.buffer.strokeWeight(2);
-      UI.buffer.fill(UI.palette.fg.hex)
+      UI.buffer.fill(UI.palette.text.hex)
       UI.buffer.textAlign(LEFT);
       UI.buffer.text('ui: '         + (Interaction.currentUI ?? 'none'),              20,  80);
       UI.buffer.text('gesture: '    + (Interaction.currentType ?? 'none'),            20, 100);
@@ -2473,10 +2492,10 @@ class UI {
 
       UI.buffer.text(openPainting.usedEditableStrokes.length, 20, 220);
       openPainting.editableStrokes.forEach((stroke, index) => {
-        if (index === openPainting.editableStrokesCount) UI.buffer.fill(UI.palette.fg.toHexWithSetAlpha(0.5))
+        if (index === openPainting.editableStrokesCount) UI.buffer.fill(UI.palette.text.toHexWithSetAlpha(0.5))
         UI.buffer.text(stroke.compositeOperation, 20, 240 + index * 20);
       });
-      UI.buffer.fill(UI.palette.fg.hex)
+      UI.buffer.fill(UI.palette.text.hex)
 
       UI.buffer.text('scaleX: '+ Math.round(Interaction.viewTransform.scale * openPainting.width),  300, 80);
       UI.buffer.text('scaleY: '+ Math.round(Interaction.viewTransform.scale * openPainting.height), 300,100);
@@ -2545,8 +2564,8 @@ class UI {
 
 
     // bg
-    //UI.buffer.fill(UI.palette.constrastBg.hex);
-    //UI.buffer.rect(sliderStart-60, 0,  UI.SLIDER_WIDTH + 120, UI.BUTTON_HEIGHT, UI.ELEMENT_RADIUS + UI.ELEMENT_MARGIN);
+    UI.buffer.fill(UI.palette.buttonBg.hex);
+    UI.buffer.rect(sliderStart - UI.KNOB_SIZE, 0, UI.SLIDER_WIDTH + UI.KNOB_SIZE * 2, UI.SLIDER_HEIGHT * 3 + UI.ELEMENT_MARGIN, UI.ELEMENT_RADIUS + UI.ELEMENT_MARGIN);
 
     // show current pressure
     let pressureForSizeIndicator = undefined;
@@ -2596,27 +2615,32 @@ class UI {
       const text = "S " + ((openPainting.hueRotation === 0) ? "" : "-") +  Math.floor(baseColor.saturation * 100) + "%";
       UI.drawTooltipBelow(x, UI.SLIDER_HEIGHT * 2, text);
 
-
-    } if (currentElement === Interaction.TYPES.slider.hue) {
+    } else if (currentElement === Interaction.TYPES.slider.hue) {
 
       const horizontalOfSlider = (baseColor.hue+openPainting.hueRotation) % 1;
       const x = sliderStart + tooltipXinSlider(horizontalOfSlider);
       const text = "H " + Math.floor(baseColor.hue * 360) + "°";
       UI.drawTooltipBelow(x, UI.SLIDER_HEIGHT * 3, text);
 
-    } else if (currentElement === Interaction.TYPES.knob.jitter) {
+    } 
+    // else if (currentElement === Interaction.TYPES.knob.jitter) {
 
-      UI.drawTooltipBelow(sliderStart + UI.SLIDER_WIDTH + UI.KNOB_SIZE/2, UI.KNOB_SIZE, Math.round(openPainting.brushSettingsToAdjust.colorVar * 100) + "%");
+    //   UI.drawTooltipBelow(sliderStart + UI.SLIDER_WIDTH + UI.KNOB_SIZE/2, UI.KNOB_SIZE, Math.round(openPainting.brushSettingsToAdjust.colorVar * 100) + "%");
 
-    } else if (currentElement === Interaction.TYPES.knob.size) {
+    // } else if (currentElement === Interaction.TYPES.knob.size) {
 
-      UI.drawTooltipBelow(sliderStart - UI.KNOB_SIZE/2, UI.KNOB_SIZE, Math.round(openPainting.brushSettingsToAdjust.sizeInPixels()) + "px");
+    //   UI.drawTooltipBelow(sliderStart - UI.KNOB_SIZE/2, UI.KNOB_SIZE, Math.round(openPainting.brushSettingsToAdjust.sizeInPixels()) + "px");
 
-    }
+    // }
+
+    const isChangingSize = (currentElement === Interaction.TYPES.knob.size);
+    const isChangingJitter = (currentElement === Interaction.TYPES.knob.jitter);
+    UI.drawTooltipBelow(sliderStart + UI.SLIDER_WIDTH + UI.KNOB_SIZE/2, UI.KNOB_SIZE, Math.round(openPainting.brushSettingsToAdjust.colorVar * 100) + "%", isChangingJitter);
+    UI.drawTooltipBelow(sliderStart - UI.KNOB_SIZE/2, UI.KNOB_SIZE, Math.round(openPainting.brushSettingsToAdjust.sizeInPixels()) + "px", isChangingSize);
     
     // draw the variation knob
     UI.buffer.drawingContext.save();
-    UI.buffer.fill(UI.palette.constrastBg.toHexWithSetAlpha(0.5));
+    UI.buffer.fill(UI.palette.buttonBg.hex);
     UI.buffer.rect(sliderStart + UI.SLIDER_WIDTH*1 + UI.ELEMENT_MARGIN, UI.ELEMENT_MARGIN, UI.KNOB_SIZE - UI.ELEMENT_MARGIN*2, UI.KNOB_SIZE - UI.ELEMENT_MARGIN*2, UI.ELEMENT_RADIUS);
     UI.buffer.drawingContext.clip();
     UI.drawVariedColorCircle(openPainting.brushSettingsToAdjust, UI.KNOB_SIZE + 20, sliderStart + UI.SLIDER_WIDTH*1 + UI.KNOB_SIZE / 2, UI.KNOB_SIZE / 2, 8);
@@ -2624,7 +2648,7 @@ class UI {
     // outline
     UI.buffer.noFill();
     UI.buffer.strokeWeight(1);
-    UI.buffer.stroke(UI.palette.fg.toHexWithSetAlpha(0.2));
+    UI.buffer.stroke(UI.palette.buttonBg.hex);
     UI.buffer.rect(sliderStart + UI.SLIDER_WIDTH*1 + UI.ELEMENT_MARGIN, UI.ELEMENT_MARGIN, UI.KNOB_SIZE - UI.ELEMENT_MARGIN*2, UI.KNOB_SIZE - UI.ELEMENT_MARGIN*2, UI.ELEMENT_RADIUS);
     UI.buffer.noStroke();
 
@@ -2672,9 +2696,9 @@ class UI {
     UI.buffer.push();
     UI.buffer.translate(x, y);
 
-    UI.buffer.fill(UI.palette.constrastBg.toHexWithSetAlpha(isSelected ? 0.2 : 1));
-    UI.buffer.rect(UI.ELEMENT_MARGIN * (isSelected ? 6 : 1), UI.ELEMENT_MARGIN, 
-      UI.BUTTON_WIDE - UI.ELEMENT_MARGIN * (isSelected ? 6 : 1) * 2, UI.BUTTON_HEIGHT-UI.ELEMENT_MARGIN*2, UI.ELEMENT_RADIUS);
+    UI.buffer.fill(isSelected ? UI.palette.buttonBgHover.hex : UI.palette.buttonBg.hex);
+    UI.buffer.rect(UI.ELEMENT_MARGIN, UI.ELEMENT_MARGIN, 
+      UI.BUTTON_WIDE - UI.ELEMENT_MARGIN * 2, UI.BUTTON_HEIGHT - UI.ELEMENT_MARGIN * 2, UI.ELEMENT_RADIUS);
     UI.buffer.drawingContext.clip();
 
     // draw example
@@ -2688,13 +2712,21 @@ class UI {
       UI.drawJitterDonut(settings, UI.BUTTON_HEIGHT * 1.5, UI.BUTTON_WIDE/2, UI.BUTTON_HEIGHT/2, 24);
     }
 
-    UI.buffer.noStroke();
-    UI.buffer.fill(UI.palette.constrastBg.toHexWithSetAlpha(isSelected ? 0.8 : 0.3));
-    UI.buffer.rect(UI.ELEMENT_MARGIN, UI.ELEMENT_MARGIN, UI.BUTTON_WIDE - UI.ELEMENT_MARGIN, UI.BUTTON_HEIGHT-UI.ELEMENT_MARGIN*2, UI.ELEMENT_RADIUS, UI.ELEMENT_RADIUS);
+    if (isSelected) {
+      UI.buffer.stroke(UI.palette.text.hex);
+      UI.buffer.strokeWeight(2);
+    } else {
+      UI.buffer.noStroke();
+    }
     
-
+    const selInvertedAlpha = 1 - UI.palette.buttonBgHover.alpha;
+    UI.buffer.fill(isSelected ? UI.palette.pageBg.toHexWithSetAlpha(selInvertedAlpha) : UI.palette.buttonBgHover.hex);
+    UI.buffer.rect(UI.ELEMENT_MARGIN, UI.ELEMENT_MARGIN, 
+      UI.BUTTON_WIDE - UI.ELEMENT_MARGIN * 2, UI.BUTTON_HEIGHT - UI.ELEMENT_MARGIN * 2, UI.ELEMENT_RADIUS);
+    
+    UI.buffer.noStroke();
     UI.buffer.textAlign(CENTER);
-    UI.buffer.fill(isSelected ? UI.palette.fg.toHexWithSetAlpha(0.8) : UI.palette.fg.hex);
+    UI.buffer.fill(UI.palette.text.hex);
     UI.buffer.text(menuName, UI.BUTTON_WIDE/2, UI.BUTTON_HEIGHT/2-2);
     UI.buffer.textFont(FONT_MEDIUM);
     
@@ -2705,31 +2737,39 @@ class UI {
     UI.buffer.drawingContext.restore();
   }
 
-  static drawRightButton(text, y, type, textColor) {
+  static drawRightButton(text, y, type, isActive = true, isCaution = false) {
     const isHover = (type === Interaction.elementTypeAtPointer);
-    const bgColor = UI.palette.constrastBg;
-    UI.buffer.fill(isHover ? bgColor.brighter().toHexWithSetAlpha(0.5) : bgColor.toHexWithSetAlpha(0.5));
+    UI.buffer.fill((isHover || !isActive) ? UI.palette.buttonBgHover.hex : UI.palette.buttonBg.hex);
     UI.buffer.rect(
       width - UI.BUTTON_WIDE + UI.ELEMENT_MARGIN, y+UI.ELEMENT_MARGIN, 
       UI.BUTTON_WIDE - UI.ELEMENT_MARGIN*2, UI.BUTTON_HEIGHT-UI.ELEMENT_MARGIN*2, 
       UI.ELEMENT_RADIUS
     );
-    UI.buffer.fill(textColor.hex);
+    const baseColor = isCaution ? UI.palette.textCaution : UI.palette.text;
+    UI.buffer.fill(isActive ? baseColor.hex : UI.palette.textInactive.hex);
     UI.buffer.textAlign(CENTER);
     UI.buffer.text(text, width - UI.BUTTON_WIDE, y, UI.BUTTON_WIDE, UI.BUTTON_HEIGHT - 8);
     UI.buffer.textAlign(LEFT);
   }
 
-  static drawButton(text, x, y, type, textColor) {
+  static drawButton(text, x, y, type, isActive = true, isSelected = false, isCaution = false) {
     const isHover = (type === Interaction.elementTypeAtPointer);
-    const bgColor = UI.palette.constrastBg;
-    UI.buffer.fill(isHover ? bgColor.brighter().toHexWithSetAlpha(0.5) : bgColor.toHexWithSetAlpha(0.5));
+    const margin = isSelected ? UI.ELEMENT_MARGIN + 1 : UI.ELEMENT_MARGIN;
+    UI.buffer.fill((isHover || !isActive) ? UI.palette.buttonBgHover.hex : UI.palette.buttonBg.hex);
+    if (isSelected) {
+      UI.buffer.stroke(UI.palette.text.hex);
+      UI.buffer.strokeWeight(1);
+    } else {
+      UI.buffer.noStroke();
+    }
     UI.buffer.rect(
-      x+UI.ELEMENT_MARGIN, y+UI.ELEMENT_MARGIN, 
-      UI.BUTTON_WIDTH-UI.ELEMENT_MARGIN*2, UI.BUTTON_HEIGHT-UI.ELEMENT_MARGIN*2, 
+      x+margin, y+margin, 
+      UI.BUTTON_WIDTH-margin*2, UI.BUTTON_HEIGHT-margin*2, 
       UI.ELEMENT_RADIUS,
     );
-    UI.buffer.fill(textColor.hex);
+    UI.buffer.noStroke();
+    const baseColor = isCaution ? UI.palette.textCaution : UI.palette.text;
+    UI.buffer.fill(isActive ? baseColor.hex : UI.palette.textInactive.hex);
     UI.buffer.text(text, x, y, UI.BUTTON_WIDTH, UI.BUTTON_HEIGHT - 8);
   }
 
@@ -2821,7 +2861,7 @@ class UI {
     // outline
     UI.buffer.noFill();
     UI.buffer.strokeWeight(1);
-    UI.buffer.stroke(UI.palette.fg.toHexWithSetAlpha(0.2));
+    UI.buffer.stroke(UI.palette.buttonBg.hex);
     UI.buffer.rect(x + UI.ELEMENT_MARGIN, y + UI.ELEMENT_MARGIN, UI.KNOB_SIZE - UI.ELEMENT_MARGIN*2, UI.KNOB_SIZE - UI.ELEMENT_MARGIN*2, UI.ELEMENT_RADIUS);
     UI.buffer.noStroke();
 
@@ -2936,7 +2976,7 @@ class UI {
     if (sliderPercent !== 1) sliderPercent = sliderPercent % 1;
 
     UI.buffer.drawingContext.save();
-    UI.buffer.fill(UI.palette.constrastBg.toHexWithSetAlpha(0.5));
+    UI.buffer.fill(UI.palette.buttonBg.toHexWithSetAlpha(0.5));
     UI.buffer.rect(x, y, width, height, UI.ELEMENT_RADIUS);
     UI.buffer.drawingContext.clip();
       
@@ -2992,22 +3032,22 @@ class UI {
 
     UI.buffer.drawingContext.restore();
 
-    UI.buffer.strokeWeight(1);
-    UI.buffer.stroke(UI.palette.fg.toHexWithSetAlpha(0.2));
-    UI.buffer.rect(x, y, width, height, UI.ELEMENT_RADIUS);
+    // UI.buffer.strokeWeight(1);
+    // UI.buffer.stroke(UI.palette.text.toHexWithSetAlpha(0.2));
+    // UI.buffer.rect(x, y, width, height, UI.ELEMENT_RADIUS);
     UI.buffer.noStroke();
   }
 
-  static drawTooltipBelow(x, y, text) {
+  static drawTooltipBelow(x, y, text, active = true) {
     UI.buffer.textAlign(CENTER);
     const textPos = {
       x: x,
       y: y + 8
     }
     let bbox = FONT_MEDIUM.textBounds(text, textPos.x, textPos.y);
-    UI.buffer.fill(UI.palette.constrastBg.toHexWithSetAlpha(0.5));
+    UI.buffer.fill(UI.palette.buttonBg.toHexWithSetAlpha(0.5));
     UI.buffer.rect(bbox.x - bbox.w/2 - 13, bbox.y + bbox.h/2 - 4, bbox.w+26, bbox.h+12, UI.ELEMENT_RADIUS);
-    UI.buffer.fill(UI.palette.fg.hex);
+    UI.buffer.fill(active ? UI.palette.text.hex : UI.palette.textInactive.hex);
     UI.buffer.text(text, textPos.x, textPos.y);
   }
 
@@ -3019,7 +3059,7 @@ class UI {
       bbox.h += 20;
       UI.buffer.fill(labelObj.color.hex);
       UI.buffer.rect(bbox.x - bbox.w/2 -4, bbox.y - bbox.h/2 + 8, bbox.w+8, bbox.h+8, UI.ELEMENT_RADIUS);
-      UI.buffer.fill(UI.palette.constrastBg.hex);
+      UI.buffer.fill(UI.palette.buttonBg.hex);
       UI.buffer.text(labelObj.text, width/2, height-(1+index) * 40);
     });
   }
@@ -3063,11 +3103,11 @@ class UI {
       const outerSize = 140;
 
       UI.buffer.drawingContext.save();
-      UI.buffer.fill(UI.palette.constrastBg.hex);
+      UI.buffer.fill(UI.palette.intenseBg.hex);
       UI.buffer.ellipse(basePosition.x, basePosition.y, outerSize, outerSize);
       UI.buffer.drawingContext.clip();
       UI.buffer.strokeWeight(1);
-      UI.buffer.stroke(UI.palette.fg.toHexWithSetAlpha(0.2));
+      UI.buffer.stroke(UI.palette.text.toHexWithSetAlpha(0.2));
       UI.buffer.line(basePosition.x - outerSize/2, basePosition.y - outerSize/2, basePosition.x + outerSize/2, basePosition.y + outerSize/2);
       UI.buffer.line(basePosition.x - outerSize/2, basePosition.y + outerSize/2, basePosition.x + outerSize/2, basePosition.y - outerSize/2);
       UI.buffer.noStroke();
@@ -3094,19 +3134,19 @@ class UI {
 
         // hover/ active
         if (type === Interaction.elementTypeAtPointer) {
-          UI.buffer.fill(UI.palette.constrastBg.brighter().hex);
+          UI.buffer.fill(UI.palette.buttonBg.hex);
           const startAngle = 0.25 * Math.PI - (xDir * 0.5 * Math.PI) + (Math.min(0, yDir) * Math.PI);
           UI.buffer.arc(basePosition.x, basePosition.y, outerSize, outerSize, startAngle, startAngle + 0.5 * Math.PI);
         }
 
         if (type === Interaction.TYPES.cloverButton.hueAndVar) {
           UI.buffer.stroke('pink'); // WTFFF why is this needed?
-          UI.buffer.stroke(UI.palette.fg.toHexWithSetAlpha(0.2));
+          UI.buffer.stroke(UI.palette.text.toHexWithSetAlpha(0.2));
           UI.buffer.strokeWeight(8);
           UI.buffer.line(posX, posY - size/3, posX, posY + size/3);
           UI.drawColorAxis(6, posX, posY + size/3, posX, posY - size/3, brushToVisualize.color, brushToVisualize.color, size, "variation");
 
-          UI.buffer.stroke(UI.palette.fg.toHexWithSetAlpha(0.2));
+          UI.buffer.stroke(UI.palette.text.toHexWithSetAlpha(0.2));
           UI.buffer.strokeWeight(8);
           UI.buffer.line(posX - size/3, posY, posX + size/3, posY);
           const startColorHue = brushToVisualize.color.copy().setHue(brushToVisualize.color.hue - 0.5); 
@@ -3115,14 +3155,14 @@ class UI {
 
         } else if (type === Interaction.TYPES.cloverButton.satAndLum) {
 
-          UI.buffer.stroke(UI.palette.fg.toHexWithSetAlpha(0.2));
+          UI.buffer.stroke(UI.palette.text.toHexWithSetAlpha(0.2));
           UI.buffer.strokeWeight(8);
           UI.buffer.line(posX, posY - size/3, posX, posY + size/3);
           const startColorSat = brushToVisualize.color.copy().setSaturation(0);
           const endColorSat   = brushToVisualize.color.copy().setSaturation(1);
           UI.drawColorAxis(6, posX - size/3, posY, posX + size/3, posY, startColorSat, endColorSat, size, "double");
           
-          UI.buffer.stroke(UI.palette.fg.toHexWithSetAlpha(0.2));
+          UI.buffer.stroke(UI.palette.text.toHexWithSetAlpha(0.2));
           UI.buffer.strokeWeight(8);
           UI.buffer.line(posX - size/3, posY, posX + size/3, posY);
           const startColorLum = brushToVisualize.color.copy().setLightness(1);
@@ -3132,14 +3172,14 @@ class UI {
         } else if (type === Interaction.TYPES.cloverButton.size) {
 
           UI.buffer.noStroke();
-          UI.buffer.fill(UI.palette.fg.toHexWithSetAlpha(0.7));
+          UI.buffer.fill(UI.palette.text.toHexWithSetAlpha(0.7));
           UI.buffer.ellipse(posX, posY - (size/3) * 0.8, size/6, size/6);
           UI.buffer.ellipse(posX, posY + (size/3) * 0.8, size/9, size/9);
 
         } else if (type === Interaction.TYPES.cloverButton.eyedropper) {
           
           UI.buffer.strokeWeight(4);
-          UI.buffer.stroke(UI.palette.fg.toHexWithSetAlpha(0.7));
+          UI.buffer.stroke(UI.palette.text.toHexWithSetAlpha(0.7));
           UI.buffer.line(posX, posY - size/3, posX, posY - (size/3) * 0.6);
           UI.buffer.line(posX, posY + size/3, posX, posY + (size/3) * 0.6);
           UI.buffer.line(posX - size/3, posY, posX - (size/3) * 0.6, posY);
@@ -3217,11 +3257,11 @@ class UI {
       const lineAddY = UI.GIZMO_SIZE * 2 * brushToVisualize.size;
       const lineTranslateY = posY + lineAddY;
 
-      UI.buffer.stroke(UI.palette.constrastBg.toHexWithSetAlpha(0.3));
+      UI.buffer.stroke(UI.palette.buttonBg.toHexWithSetAlpha(0.3));
       UI.buffer.strokeWeight(12);
       UI.buffer.line(posX, lineTranslateY - UI.GIZMO_SIZE,posX, lineTranslateY + UI.GIZMO_SIZE);
       UI.buffer.strokeWeight(10);
-      UI.buffer.stroke(UI.palette.fg.toHexWithSetAlpha(0.3));
+      UI.buffer.stroke(UI.palette.text.toHexWithSetAlpha(0.3));
       UI.buffer.line(posX, lineTranslateY - UI.GIZMO_SIZE,posX, lineTranslateY + UI.GIZMO_SIZE);
       UI.buffer.noStroke();
 
@@ -3237,7 +3277,7 @@ class UI {
 
     //shadow ver
     UI.buffer.strokeWeight(4);
-    UI.buffer.stroke(UI.palette.constrastBg.hex);
+    UI.buffer.stroke(UI.palette.buttonBg.hex);
     UI.buffer.line(x, y - size*0.5, x, y - size*0.5 - expand_size);
     UI.buffer.line(x, y + size*0.5, x, y + size*0.5 + expand_size);
     UI.buffer.line(x - size*0.5, y, x - size*0.5 - expand_size, y);
@@ -3245,7 +3285,7 @@ class UI {
 
     // draw the crosshair
     UI.buffer.strokeWeight(2);
-    UI.buffer.stroke(UI.palette.fg.hex);
+    UI.buffer.stroke(UI.palette.text.hex);
     UI.buffer.line(x, y - size*0.5, x, y - size*0.5 - expand_size);
     UI.buffer.line(x, y + size*0.5, x, y + size*0.5 + expand_size);
     UI.buffer.line(x - size*0.5, y, x - size*0.5 - expand_size, y);
@@ -3279,14 +3319,14 @@ class UI {
     const botRight = UI.screenToViewTransform(bounds.x + bounds.width, bounds.y + bounds.height);
     const botLeft  = UI.screenToViewTransform(bounds.x               , bounds.y + bounds.height);
     
-    UI.buffer.stroke(UI.palette.constrastBg.hex);
+    UI.buffer.stroke(UI.palette.buttonBg.hex);
     UI.buffer.strokeWeight(5);
     UI.buffer.line(topLeft.x, topLeft.y, topRight.x, topRight.y);
     UI.buffer.line(topLeft.x, topLeft.y, botLeft.x, botLeft.y);
     UI.buffer.line(botRight.x, botRight.y, topRight.x, topRight.y);
     UI.buffer.line(botRight.x, botRight.y, botLeft.x, botLeft.y);
 
-    UI.buffer.stroke(UI.palette.fg.hex);
+    UI.buffer.stroke(UI.palette.text.hex);
     UI.buffer.strokeWeight(2);
     UI.buffer.line(topLeft.x, topLeft.y, topRight.x, topRight.y);
     UI.buffer.line(topLeft.x, topLeft.y, botLeft.x, botLeft.y);
