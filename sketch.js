@@ -113,6 +113,7 @@ function draw() {
   pop();
 
   // draw the new UI to the buffer, then show on top of the screen
+  UI.recomputeInterfaceColors();
   UI.redrawInterface(); 
   image(UI.buffer, 0, 0);
 }
@@ -1314,7 +1315,7 @@ class Interaction {
   }
 
   static processSlider(new_interaction) {
-    const middle_width = UI.SLIDER_WIDTH + 120;
+    const middle_width = UI.SLIDER_WIDTH + UI.KNOB_SIZE * 2;
     const xInMiddleSection = new_interaction.x - width/2 + middle_width/2;
     const brushToAdjust = openPainting.brushSettingsToAdjust;
     const percentOfSlider = (sliderNumber) => map(xInMiddleSection - UI.KNOB_SIZE, UI.SLIDER_RANGE_MARGIN, UI.SLIDER_WIDTH-UI.SLIDER_RANGE_MARGIN, 0, 1);
@@ -1359,7 +1360,7 @@ class Interaction {
 
     } else {
 
-      const middle_width = UI.SLIDER_WIDTH + 120;
+      const middle_width = UI.SLIDER_WIDTH + UI.KNOB_SIZE*2;
       const xInMiddleSection = x - width/2 + middle_width/2;
       const sliderSectionStart = (UI.topAlignSliderSection ? 0 : UI.BUTTON_HEIGHT);
 
@@ -1367,7 +1368,7 @@ class Interaction {
         y > sliderSectionStart && y < UI.SLIDER_HEIGHT * 3 + sliderSectionStart) {
         return Interaction.TYPES.knob.size;
       } 
-      if (xInMiddleSection > 60 && xInMiddleSection < (60 + UI.SLIDER_WIDTH) && 
+      if (xInMiddleSection > UI.KNOB_SIZE && xInMiddleSection < (UI.KNOB_SIZE + UI.SLIDER_WIDTH) && 
         y > sliderSectionStart && y < UI.SLIDER_HEIGHT * 3 + sliderSectionStart) {
           if ( y < UI.SLIDER_HEIGHT + sliderSectionStart) {
             return Interaction.TYPES.slider.lightness;
@@ -1946,7 +1947,6 @@ class Interaction {
       Interaction.resetCurrentSequence();
       Interaction.changeCursorToHover();
       Interaction.stopEditing();
-      Interaction.fillAction() //wip
       
       // TODO: reset hover info only if the pointer does not actually support hover.
       // The same goes for the knob and button types.
@@ -2336,15 +2336,8 @@ class UI {
     textCaution: undefined
   };
 
-  static redrawInterface() {
-    // reset
-    UI.buffer.clear();
-    UI.buffer.textFont(FONT_MEDIUM);
-    UI.buffer.textAlign(LEFT, CENTER);
-    UI.buffer.textSize(16);
-    UI.buffer.noStroke();
-  
-    // Interface Colors
+  static recomputeInterfaceColors() {
+    // recompute colors from painting color
 
     // Background color is based on the canvas color, but slightly darker. Lighter if the canvas is very dark.
     UI.palette.pageBg = openPainting.canvasColor.behind();
@@ -2368,9 +2361,25 @@ class UI {
       .setLightness(lerp(openPainting.currentBrush.color.lightness, (openPainting.currentBrush.color.lightness>0.5) ? 0 : 1, 0.5))
       .setSaturation(openPainting.currentBrush.color.saturation * 0.2)
       .setHue(UI.palette.pageBg.hue);
-    
-    
-    // MENUS
+  }
+
+  static redrawInterface() {
+    // reset
+    UI.buffer.clear();
+    UI.buffer.textFont(FONT_MEDIUM);
+    UI.buffer.textAlign(LEFT, CENTER);
+    UI.buffer.textSize(16);
+    UI.buffer.noStroke();
+
+
+    // draw the right gadget
+    if (Interaction.currentUI !== Interaction.UI_STATES.nothing_open) {
+      UI.drawCurrentGizmo();
+    }
+
+
+    // draw buttons
+
     const strokesEditable = (openPainting.editableStrokesCount > 0);
     const strokesPresent = (openPainting.totalStrokesCount > 0);
 
@@ -2380,7 +2389,7 @@ class UI {
       PRESET_TOOLS.forEach((preset, index) => {
         const x = 0;
         const y = UI.BUTTON_HEIGHT * index + UI.BUTTON_WIDTH; // lower by button width
-        UI.displayTool(preset.tool, preset.texture, x, y, preset.menuName);
+        UI.drawToolButton(preset.tool, preset.texture, x, y, Interaction.TYPES.button["tool" + index],preset.menuName);
       });
 
       // menu on right
@@ -2453,29 +2462,25 @@ class UI {
     // draw rectangle around stroke being edited
     if (Interaction.editingLastStroke) {
       UI.drawBounds(openPainting.latestStroke.bounds);
-      bubbleLabels.push({text: "Editing last", color: UI.palette.text});
+      bubbleLabels.push({text: "Move/ Edit style", color: UI.palette.text});
     }
 
     if (Interaction.currentCompositionMode !== "source-over") {
       let label = Interaction.currentCompositionMode;
       let color = UI.palette.text;
       if (label === "source-atop") {
-        label = "Drawing inside stroke";
+        label = "Stencil on";
       } else if (label === "destination-out") {
-        label = "Erasing inside stroke";
+        label = "Erasing";
         color = UI.palette.textCaution;
       }
       //UI.drawBounds(openPainting.latestParentStroke.bounds);
-      bubbleLabels.push({text: label, color})
+      UI.drawTextUnderBounds(openPainting.latestParentStroke.bounds, label, color);
+      //bubbleLabels.push({text: label, color})
     }
 
     UI.buffer.noStroke();
     UI.drawStateBubbles(bubbleLabels);
-  
-    // draw the right gadget
-    if (Interaction.currentUI !== Interaction.UI_STATES.nothing_open) {
-      UI.drawCurrentGizmo();
-    }
     
     // DEV STUFF, normally not visible
     if (dev_mode) {
@@ -2685,8 +2690,8 @@ class UI {
     UI.buffer.pop();
   }
 
-  static displayTool(menuBrushTool, menuTexture, x, y, menuName) {
-    
+  static drawToolButton(menuBrushTool, menuTexture, x, y, type, menuName) {
+    const isHover = (type === Interaction.elementTypeAtPointer);
     const settings = openPainting.brushSettingsToAdjust.copy();
     settings.size = constrain(settings.size, 0.1, 0.3);
     settings.tool = menuBrushTool;
@@ -2696,7 +2701,7 @@ class UI {
     UI.buffer.push();
     UI.buffer.translate(x, y);
 
-    UI.buffer.fill(isSelected ? UI.palette.buttonBgHover.hex : UI.palette.buttonBg.hex);
+    UI.buffer.fill((isSelected || isHover) ? UI.palette.buttonBgHover.hex : UI.palette.buttonBg.hex);
     UI.buffer.rect(UI.ELEMENT_MARGIN, UI.ELEMENT_MARGIN, 
       UI.BUTTON_WIDE - UI.ELEMENT_MARGIN * 2, UI.BUTTON_HEIGHT - UI.ELEMENT_MARGIN * 2, UI.ELEMENT_RADIUS);
     UI.buffer.drawingContext.clip();
@@ -2720,7 +2725,7 @@ class UI {
     }
     
     const selInvertedAlpha = 1 - UI.palette.buttonBgHover.alpha;
-    UI.buffer.fill(isSelected ? UI.palette.pageBg.toHexWithSetAlpha(selInvertedAlpha) : UI.palette.buttonBgHover.hex);
+    UI.buffer.fill((isSelected || isHover) ? UI.palette.pageBg.toHexWithSetAlpha(selInvertedAlpha) : UI.palette.buttonBgHover.hex);
     UI.buffer.rect(UI.ELEMENT_MARGIN, UI.ELEMENT_MARGIN, 
       UI.BUTTON_WIDE - UI.ELEMENT_MARGIN * 2, UI.BUTTON_HEIGHT - UI.ELEMENT_MARGIN * 2, UI.ELEMENT_RADIUS);
     
@@ -2824,7 +2829,7 @@ class UI {
   static drawSizeKnob(x, y, pressure) {
 
     if (openPainting.currentBrush.tool === "Lasso Tool") {
-      return;
+      //wip
     }
 
     UI.buffer.drawingContext.save();
@@ -3045,8 +3050,10 @@ class UI {
       y: y + 8
     }
     let bbox = FONT_MEDIUM.textBounds(text, textPos.x, textPos.y);
+    bbox.w = bbox.w*1.3;
+    bbox.h += 8;
     UI.buffer.fill(UI.palette.buttonBg.toHexWithSetAlpha(0.5));
-    UI.buffer.rect(bbox.x - bbox.w/2 - 13, bbox.y + bbox.h/2 - 4, bbox.w+26, bbox.h+12, UI.ELEMENT_RADIUS);
+    UI.buffer.rect(bbox.x - bbox.w/2 - 13, bbox.y - bbox.h/2 + 8, bbox.w+26, bbox.h + 8, UI.ELEMENT_RADIUS);
     UI.buffer.fill(active ? UI.palette.text.hex : UI.palette.textInactive.hex);
     UI.buffer.text(text, textPos.x, textPos.y);
   }
@@ -3267,8 +3274,8 @@ class UI {
 
       const visualSize = brushToVisualize.sizeInPixels(openPainting.averagePressure) * Interaction.viewTransform.scale;
 
-      // UI.drawSizeOverlay(posX, ankerY, visualSize);
       UI.drawCrosshair(posX, ankerY, visualSize);
+      UI.drawVariedColorCircle(brushToVisualize, visualSize, posX, ankerY);
     }
   }
 
@@ -3336,7 +3343,25 @@ class UI {
     UI.buffer.strokeWeight(6);
     UI.buffer.noStroke();
 
-    UI.drawTooltipBelow((botLeft.x+botRight.x)/2, (botLeft.y+botRight.y)/2 + 6, Math.round(bounds.width) + " x " + Math.round(bounds.height));
+    //UI.drawTextUnderBounds(bounds, Math.round(bounds.width) + " x " + Math.round(bounds.height));
+  }
+
+  static drawTextUnderBounds(bounds, text) {
+
+    // const topLeft  = UI.screenToViewTransform(bounds.x               , bounds.y);
+    // const topRight = UI.screenToViewTransform(bounds.x + bounds.width, bounds.y);
+    const botRight = UI.screenToViewTransform(bounds.x + bounds.width, bounds.y + bounds.height);
+    const botLeft  = UI.screenToViewTransform(bounds.x               , bounds.y + bounds.height);
+
+    UI.drawTooltipBelow((botLeft.x+botRight.x)/2, (botLeft.y+botRight.y)/2 + 10, text);
+
+    // let bbox = FONT_MEDIUM.textBounds(labelObj.text, width/2, height-(1+index) * 40);
+    //   bbox.w = bbox.w*1.4 + 20;
+    //   bbox.h += 20;
+    //   UI.buffer.fill(labelObj.color.hex);
+    //   UI.buffer.rect(bbox.x - bbox.w/2 -4, bbox.y - bbox.h/2 + 8, bbox.w+8, bbox.h+8, UI.ELEMENT_RADIUS);
+    //   UI.buffer.fill(UI.palette.buttonBg.hex);
+    //   UI.buffer.text(labelObj.text, width/2, height-(1+index) * 40);
   }
 }
 
