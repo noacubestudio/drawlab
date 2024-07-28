@@ -4,10 +4,11 @@ let openPainting = undefined;
 let dev_mode = false;
 
 const PRESET_TOOLS = [
-  {tool: "Brush Tool", texture: "Regular", menuName: "Default"},
-  {tool: "Brush Tool", texture: "Rake",    menuName: "Rake"},
-  {tool: "Brush Tool", texture: "Round",   menuName: "Round"},
-  {tool: "Lasso Tool", texture: "Regular", menuName: "Lasso"},
+  {tool: "Brush Tool", texture: "Regular", menuName: "brush"},
+  {tool: "Brush Tool", texture: "Round",   menuName: "rounded"},
+  {tool: "Brush Tool", texture: "Rake",    menuName: "rake"},
+  {tool: "Lasso Tool", texture: "Regular", menuName: "lasso"},
+  {tool: "Line Tool",  texture: "Regular", menuName: "line"},
 ];
 let FONT_REGULAR; let FONT_ITALIC; let FONT_MEDIUM;
 function preload() {
@@ -36,6 +37,9 @@ function setup() {
 
   // fix for apple pencil scribble
   canvasElement.addEventListener("touchmove", (event) => {event.preventDefault();}, false);
+
+  // don't show context menu on drawing canvas
+  canvasElement.addEventListener("contextmenu", (event) => event.preventDefault());
 
   // event listeners on the document
   document.addEventListener("visibilitychange", () => {
@@ -137,7 +141,12 @@ class BrushSettings {
     this.exactSize = exactSize ?? null;
 
     // computed
-    this.marginFactor = (this.tool === "Brush Tool") ? 0.5 : 0;
+    const marginFactors = {
+      "Brush Tool": 0.5,
+      "Lasso Tool": 0.0,
+      "Line Tool": 0.5,
+    }
+    this.marginFactor = marginFactors[this.tool];
   }
 
   copy() {
@@ -309,6 +318,10 @@ class Brushstroke {
       });
     } else if (this.settings.tool === "Lasso Tool") {
       this.drawLasso();
+    } else if (this.settings.tool === "Line Tool") {
+      const firstPoint = this.points[0];
+      const lastPoint = this.points[this.points.length - 1];
+      this.drawBrushPart(firstPoint, lastPoint);
     }
   }
 
@@ -677,8 +690,11 @@ class Painting {
       } 
       
       if (drawToCombinedBuffer) {
+        // draw whole stack of a parent stroke and its children now
         if (nextStroke === undefined && Interaction.currentCompositionMode !== "source-over") {
           // softly blinking shadow on stroke that is being erased/ drawn in
+          // redefine stroke to be the parent stroke to get the correct color
+          const stroke = this.latestParentStroke;
           const contrastingLightness = (stroke.settings.color.lightness > 0.5 ? 0.5 : 2) * stroke.settings.color.lightness;
           this.combinedBuffer.drawingContext.shadowColor = stroke.settings.color.copy().setLightness(contrastingLightness).hex;
           this.combinedBuffer.drawingContext.shadowBlur = 10 + (sin(millis()/100)/2 + 0.5) * 20;
@@ -774,7 +790,53 @@ class Painting {
     }
     const exportBuffer = createGraphics(exportCrop.x, exportCrop.y);
     exportBuffer.image(this.combinedBuffer, 0, 0);
-    saveCanvas(exportBuffer, "drawlab-canvas_" + timestamp, "png");
+    saveCanvas(exportBuffer, "drawlab" + timestamp, "png");
+  }
+
+  upload() {
+    const fileInput = document.createElement("input");
+    fileInput.type = "file";
+    fileInput.accept = "image/*";
+    fileInput.click();
+
+    fileInput.onchange = (event) => {
+      const file = event.target.files[0];
+      if (file && file.type.startsWith('image/')) {
+
+        loadImage(URL.createObjectURL(file), (img) => {
+          this.clearWithColor(this.canvasColor);
+
+          // fit image to dimensions
+          const imgRatio = img.width / img.height;
+          const canvasRatio = this.width / this.height;
+          const scale = (imgRatio > canvasRatio) ? this.width / img.width : this.height / img.height;
+
+          //console.log(img)
+
+          // draw image to buffer
+          this.lowestBuffer.image(img, 0, 0, img.width * scale, img.height * scale);
+        
+          // reset snapshot
+          this.updateCombinedBuffer();
+          this.updateSnapshotBuffer({x: width/2, y: height/2});
+
+          // change crop and recenter
+          this.cropWidthMultiplier = (img.width < img.height) ? (img.width / img.height) : 1;
+          this.cropHeightMultiplier = (img.height < img.width) ? (img.height / img.width) : 1;
+          Interaction.resetViewTransform();
+        }, (error) => {
+          alert("Error loading image: " + error);
+        });
+
+      } else {
+        console.error("Invalid file type");
+      }
+    }
+
+    // Optionally remove the file input element after use
+    fileInput.addEventListener('change', () => {
+      fileInput.remove();
+    });
   }
 
   moveLatestStroke(x, y) {
@@ -808,7 +870,7 @@ class Painting {
     }
 
     // special tools, wip.
-    if (this.latestStroke.settings.tool === "Lasso Tool") {
+    if (["Lasso Tool", "Line Tool"].includes(this.latestStroke.settings.tool)) {
       this.latestStroke.buffer.clear();
       this.latestStroke.drawWhole();
       return;
@@ -916,10 +978,12 @@ class Interaction {
       erase: 'eraseButton',
       clear: 'clearButton',
       save: 'saveButton',
+      load: 'loadButton',
       tool0: '0',
       tool1: '1',
       tool2: '2',
       tool3: '3',
+      tool4: '4',
       help: 'helpButton',
       fill: 'fillButton',
       format: 'formatButton'
@@ -1221,6 +1285,12 @@ class Interaction {
     openPainting.download();
   }
 
+  static loadAction() {
+    Interaction.stopEditing();
+    // load png and set as background
+    openPainting.upload();
+  }
+
   static toggleHelp() {
     UI.showingHelp = !UI.showingHelp;
   }
@@ -1390,26 +1460,23 @@ class Interaction {
 
       if (x<UI.BUTTON_WIDE) {
         // left side
-        if (buttonIndex === 0) {
-          return Interaction.TYPES.button.tool0;
-        } else if (buttonIndex === 1) {
-          return Interaction.TYPES.button.tool1;
-        } else if (buttonIndex === 2) {
-          return Interaction.TYPES.button.tool2;
-        } else if (buttonIndex === 3) {
-          return Interaction.TYPES.button.tool3;
+        // generate instead from PRESET_TOOLS
+        const orderedTypes = Array.from({length: PRESET_TOOLS.length}, (_, i) => Interaction.TYPES.button["tool"+i]);
+        if (buttonIndex < orderedTypes.length) {
+          return orderedTypes[buttonIndex];
         }
       } else {
         // right side
-        if (buttonIndex === 0) {
-          return Interaction.TYPES.button.save;
-        } else if (buttonIndex === 1) {
-          return Interaction.TYPES.button.format;
-        } else if (buttonIndex === 2) {
-          return Interaction.TYPES.button.fill;
-        } else if (buttonIndex === 3) {
-          return Interaction.TYPES.button.clear;
-        } 
+        const orderedTypes = [
+          Interaction.TYPES.button.save, 
+          Interaction.TYPES.button.load, 
+          Interaction.TYPES.button.format, 
+          Interaction.TYPES.button.fill, 
+          Interaction.TYPES.button.clear
+        ];
+        if (buttonIndex < orderedTypes.length) {
+          return orderedTypes[buttonIndex];
+        }
       }
       
     }
@@ -1465,12 +1532,15 @@ class Interaction {
     event.preventDefault();
     const new_interaction = Interaction.fromEvent(event);
 
+    // additional finger pressed during touch gesture
     if (!event.isPrimary && event.pointerType === "touch") {
       if (Interaction.currentType === Interaction.TYPES.painting.initStroke) {
+        // if not drawing yet, start zooming
         Interaction.currentType = Interaction.TYPES.painting.zoom;
         Interaction.currentSequence.push(new_interaction);
+
       } else if (Interaction.currentType === Interaction.TYPES.painting.zoom) {
-        // third finger resets all transforms.
+        // third finger immediately resets all transforms
         Interaction.resetViewTransform();
         Interaction.currentSequence = [];
       }
@@ -1898,6 +1968,18 @@ class Interaction {
 
       // ended on button
       Interaction.currentUI = Interaction.UI_STATES.nothing_open;
+
+      const toolButtons = Array.from(
+        {length: PRESET_TOOLS.length}, 
+        (_, i) => Interaction.TYPES.button["tool"+i]);
+      for (let i = 0; i < toolButtons.length; i++) {
+        if (Interaction.currentType === toolButtons[i]) {
+          Interaction.pickToolAction(i);
+          Interaction.elementTypeAtPointer = null;
+          Interaction.resetCurrentSequence();
+          return;
+        }
+      }
       
       if (Interaction.currentType === Interaction.TYPES.button.undo) {
         Interaction.undoAction();
@@ -1911,20 +1993,11 @@ class Interaction {
         Interaction.clearAction();
       } else if (Interaction.currentType === Interaction.TYPES.button.save) {
         Interaction.saveAction();
+      } else if (Interaction.currentType === Interaction.TYPES.button.load) {
+        Interaction.loadAction();
+        //alert("loading is disabled for the time being.");
       } else if (Interaction.currentType === Interaction.TYPES.button.help) {
         Interaction.toggleHelp();
-      } else if (Interaction.currentType === Interaction.TYPES.button.tool0) {
-        Interaction.pickToolAction(0);
-        Interaction.elementTypeAtPointer = null;
-      } else if (Interaction.currentType === Interaction.TYPES.button.tool1) {
-        Interaction.pickToolAction(1);
-        Interaction.elementTypeAtPointer = null;
-      } else if (Interaction.currentType === Interaction.TYPES.button.tool2) {
-        Interaction.pickToolAction(2);
-        Interaction.elementTypeAtPointer = null;
-      } else if (Interaction.currentType === Interaction.TYPES.button.tool3) {
-        Interaction.pickToolAction(3);
-        Interaction.elementTypeAtPointer = null;
       } else if (Interaction.currentType === Interaction.TYPES.button.fill) {
         Interaction.fillAction();
         Interaction.elementTypeAtPointer = null;
@@ -2049,7 +2122,8 @@ class Interaction {
         undefined,
         undefined,
         event.timeStamp,
-        event.pointerId
+        event.pointerId,
+        event.buttons
       );
     }
     // this is a pen, probably. if angles aren't directly provided, calculate from tilt.
@@ -2060,7 +2134,8 @@ class Interaction {
       event.altitudeAngle,
       event.pressure,
       event.timeStamp,
-      event.pointerId
+      event.pointerId,
+      event.buttons
     );
   }
 
@@ -2090,7 +2165,7 @@ class Interaction {
     return Math.hypot(dx, dy);
   }
 
-  constructor(x, y, azimuth, altitude, pressure, timeStamp, id) {
+  constructor(x, y, azimuth, altitude, pressure, timeStamp, id, buttons) {
     this.x = x;
     this.y = y;
     this.azimuth = azimuth;
@@ -2098,6 +2173,7 @@ class Interaction {
     this.pressure = pressure;
     this.timeStamp = timeStamp;
     this.id = id;
+    this.buttons = buttons;
   }
 
   copy() {
@@ -2107,7 +2183,8 @@ class Interaction {
       this.azimuth,
       this.altitude,
       this.pressure,
-      this.timeStamp
+      this.timeStamp,
+      this.buttons
     );
   }
 
@@ -2394,9 +2471,10 @@ class UI {
 
       // menu on right
       UI.drawRightButton("save png",  UI.BUTTON_HEIGHT * 0 + UI.BUTTON_WIDTH, Interaction.TYPES.button.save, strokesPresent);
-      UI.drawRightButton("< crop >",  UI.BUTTON_HEIGHT * 1 + UI.BUTTON_WIDTH, Interaction.TYPES.button.format);
-      UI.drawRightButton("fill all",  UI.BUTTON_HEIGHT * 2 + UI.BUTTON_WIDTH, Interaction.TYPES.button.fill, true, true);
-      UI.drawRightButton("clear all", UI.BUTTON_HEIGHT * 3 + UI.BUTTON_WIDTH, Interaction.TYPES.button.clear, strokesPresent, true);
+      UI.drawRightButton("load png",  UI.BUTTON_HEIGHT * 1 + UI.BUTTON_WIDTH, Interaction.TYPES.button.load);
+      UI.drawRightButton("< crop >",  UI.BUTTON_HEIGHT * 2 + UI.BUTTON_WIDTH, Interaction.TYPES.button.format);
+      UI.drawRightButton("fill all",  UI.BUTTON_HEIGHT * 3 + UI.BUTTON_WIDTH, Interaction.TYPES.button.fill, true, true);
+      UI.drawRightButton("clear all", UI.BUTTON_HEIGHT * 4 + UI.BUTTON_WIDTH, Interaction.TYPES.button.clear, strokesPresent, true);
     }
   
     // top menu buttons
@@ -2493,7 +2571,7 @@ class UI {
       UI.buffer.text('on ui: '      + (Interaction.elementTypeAtPointer ?? 'none'),   20, 140);
       UI.buffer.text('zoom: '       + (Interaction.viewTransform.scale ?? 'none'),    20, 160);
       UI.buffer.text('rotation: '   + (Interaction.viewTransform.rotation ?? 'none'), 20, 180);
-      //UI.buffer.text('fps: '        + Math.round(frameRate()) + ", " + frameCount,    20, 180);
+      UI.buffer.text('fps: '        + Math.round(frameRate()) + ", " + frameCount,    20, 200);
 
       UI.buffer.text(openPainting.usedEditableStrokes.length, 20, 220);
       openPainting.editableStrokes.forEach((stroke, index) => {
@@ -2707,7 +2785,7 @@ class UI {
     UI.buffer.drawingContext.clip();
 
     // draw example
-    if (menuBrushTool === "Brush Tool") {
+    if (menuBrushTool === "Brush Tool" || menuBrushTool === "Line Tool") {
       // wip, not sure why the angle 86 even makes sense.
       const start = new BrushPoint( UI.BUTTON_WIDE*0.2, UI.BUTTON_HEIGHT * 0.2, 86, undefined);
       const end   = new BrushPoint( UI.BUTTON_WIDE*0.8, UI.BUTTON_HEIGHT * 0.8, 86, undefined);
@@ -2856,7 +2934,7 @@ class UI {
       UI.buffer.drawingContext.restore();
     }
 
-    if (openPainting.currentBrush.tool === "Brush Tool") {
+    if (openPainting.currentBrush.tool === "Brush Tool" || openPainting.currentBrush.tool === "Line Tool") {
       // draw brushstroke
       UI.drawSizeIndicator(x + UI.KNOB_SIZE / 2, y + UI.KNOB_SIZE / 2, pressure);
     }
@@ -2871,7 +2949,7 @@ class UI {
     UI.buffer.noStroke();
 
     // show average pressure with overlay
-    if (openPainting.currentBrush.tool === "Brush Tool") {
+    if (openPainting.currentBrush.tool === "Brush Tool" || openPainting.currentBrush.tool === "Line Tool") {
       const indicatorSize = openPainting.brushSettingsToAdjust.sizeInPixels(openPainting.averagePressure) * Interaction.viewTransform.scale;
       UI.drawSizeOverlay(x + UI.KNOB_SIZE / 2, y + UI.KNOB_SIZE / 2, indicatorSize, isChangingSize);
     }
